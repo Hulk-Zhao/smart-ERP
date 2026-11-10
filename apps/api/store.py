@@ -77,7 +77,11 @@ class TicketRecord:
 
 
 class TicketRepository:
-    """按租户保存工单投影；列表一律先按 scope 过滤，再做键集分页。"""
+    """按租户保存工单投影；读方法一律先绑租户，再按 scope 过滤与键集分页。
+
+    租户是查询条件而不是后置校验：``get`` 只在该租户的行里查，查不到即
+    ``None``（调用方统一转 404），因此不存在「先按 id 取到、再判断归属」的窗口。
+    """
 
     def __init__(self, tickets: Iterable[TicketRecord] = ()) -> None:
         self._rows: dict[UUID, TicketRecord] = {row.ticket_id: row for row in tickets}
@@ -88,19 +92,23 @@ class TicketRepository:
         self._rows[ticket.ticket_id] = ticket
         return ticket
 
-    def get(self, ticket_id: UUID) -> TicketRecord | None:
-        return self._rows.get(ticket_id)
+    def get(self, *, tenant_id: UUID, ticket_id: UUID) -> TicketRecord | None:
+        row = self._rows.get(ticket_id)
+        if row is None or row.tenant_id != tenant_id:
+            return None
+        return row
 
     def save(self, ticket: TicketRecord) -> None:
         ticket.updated_at = datetime.now(UTC)
         self._rows[ticket.ticket_id] = ticket
 
-    def all(self) -> tuple[TicketRecord, ...]:
-        return tuple(self._rows.values())
+    def all(self, *, tenant_id: UUID) -> tuple[TicketRecord, ...]:
+        return tuple(row for row in self._rows.values() if row.tenant_id == tenant_id)
 
     def list(
         self,
         *,
+        tenant_id: UUID,
         scope: Scope,
         state: str | None = None,
         scene_code: str | None = None,
@@ -110,7 +118,11 @@ class TicketRepository:
         cursor: str | None = None,
         limit: int = 20,
     ) -> tuple[list[TicketRecord], str | None]:
-        rows = [row for row in self._rows.values() if _in_scope(row, scope)]
+        rows = [
+            row
+            for row in self._rows.values()
+            if row.tenant_id == tenant_id and _in_scope(row, scope)
+        ]
         if state is not None:
             rows = [row for row in rows if row.state.value == state]
         if scene_code is not None:
@@ -173,8 +185,15 @@ class ReconBatchRepository:
         self._rows[batch.batch_id] = batch
         return batch
 
-    def get(self, batch_id: UUID) -> ReconBatchRecord | None:
-        return self._rows.get(batch_id)
+    def get(
+        self, batch_id: UUID, *, tenant_id: UUID | None = None
+    ) -> ReconBatchRecord | None:
+        """按批次号取；API 读写路径必须传 ``tenant_id``，省略仅用于内部/测试断言。"""
+
+        row = self._rows.get(batch_id)
+        if row is None or (tenant_id is not None and row.tenant_id != tenant_id):
+            return None
+        return row
 
 
 class ReconDatasetRegistry:
