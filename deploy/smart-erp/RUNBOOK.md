@@ -281,7 +281,7 @@ location = /metrics {
     deny all;          # 只接受 deny all（403）；不要写 return 404（见下方验收矩阵）
 }
 
-# 业务 API 反代到广州宿主回环地址；proxy_pass 结尾**必须带 "/"**（剥掉 /erp/api/ 前缀）。
+# 业务 API 反代到广州宿主回环地址；上游写字面量时，proxy_pass 结尾**必须带 "/"**（剥掉 /erp/api/ 前缀）。
 # 机制：uvicorn 把 root_path 拼到 scope["path"] 前，Starlette 路由匹配时再剥一次，
 # 净效果是应用只认无前缀路径；保留前缀会让所有 /erp/api/* 返回 404。
 # --root-path 只用于 docs/openapi 的 server 地址，不能既保留前缀又开 root-path。
@@ -294,6 +294,15 @@ location /erp/api/ {
     proxy_read_timeout 60s;
 }
 ```
+
+> **禁止写法（2026-11-11 真容器实测）**：不要为了「请求时解析上游」把地址抽成变量再带 URI，
+> 例如 `set $erp_api_upstream http://api:8010;` + `proxy_pass $erp_api_upstream/;`。
+> nginx 在 `proxy_pass` 使用变量时**不做 location 前缀替换**，URI 会按指令原样发送，
+> 该 location 下的所有请求都被压成这个 URI，全部 404（与后端是否开 `--root-path` 无关）。
+> 若确需保留变量，必须写成 `proxy_pass $erp_api_upstream;` +
+> `rewrite ^/erp/api/(.*)$ /$1 break;`。仓库内 `web-nginx.conf` 已改为字面量
+> `proxy_pass http://api:8010/;`；`tests/deploy` 有静态断言禁止「变量 + URI」，
+> 并有真容器用例直打 `/erp/api/healthz` 与 `/erp/api/openapi.json`（CI deploy-static 执行）。
 
 **指标验收口径（三行矩阵，按 1 → 2 → 3 顺序执行，缺一行都不算通过）：**
 
