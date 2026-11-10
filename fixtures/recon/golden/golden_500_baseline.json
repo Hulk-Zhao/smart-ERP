@@ -47,7 +47,7 @@
     "fixture": {
       "path": "fixtures/recon/golden/golden_500.json",
       "label_version": "1.0.0",
-      "sha256": "294072b2ccbe7558cc5128e95ea00771d41fd845991caab026e6d7d6ce8236a5",
+      "sha256": "a2dea53daa24a28340c542049bbaf05630f8644fd35952310ec30cce3520a00d",
       "supplier_lines": 500,
       "our_lines": 490,
       "batches": 14,

@@ -5,7 +5,7 @@
   "carve_version": "1.0.0",
   "label_version": "1.0.0",
   "source_fixture": "fixtures/recon/golden/golden_500.json",
-  "source_sha256": "294072b2ccbe7558cc5128e95ea00771d41fd845991caab026e6d7d6ce8236a5",
+  "source_sha256": "a2dea53daa24a28340c542049bbaf05630f8644fd35952310ec30cce3520a00d",
   "discipline": "调参期间未查看本文件；引擎冻结后第一次、且只跑一次。若必须按本批调参，则本批并入训练集并另切第 2 轮留出集，不得复用本轮指标。",
   "carve_rule": "按单据组确定性抽样：每批每 3 组取 1 组，按场景与降级条件补齐，拆单按我方行闭合，总量不足 80 行时按批次轮转补组；同一 ref 对应多行的批次（跨期同单号）整批纳入，missing_uom_conversion 保留全部我方行（降级条件在我方行上）。",
   "carve_history": [
