@@ -527,6 +527,8 @@ function metering(): MeteringStatementOut {
       '其他不计费行数 = 供应商侧未匹配/重复计费/不可解析 = 2',
       '计费桶 = billable 59 + auto_released 0 + dispute_hold 3 + other_unbillable 2 = 明细行数 64（逐行 billing_bucket 与计数同源）',
       '已确认错放行行数 = 无数据源（未接入，按 0 扣减）；客户原因不计费行数 = 无数据源（未接入，按 0 扣减）',
+      // 下面两行镜像自 apps/api/metering.py 的 calculation 原文：服务端把 billable_count 写作「有效对账行数」，是错的。
+      // API 修好文案后必须同步改这里，否则 mock（演示与截图来源）会与契约长期不一致。
       '有效对账行数 = 自动放行 59 − 已确认错放行 0 = 59（上界：确认数据接入后只会下调）',
       '本期金额 = 有效对账行数 59 × 单行单价 0.8000 = 47.2000 CNY',
       '累计金额 = 已计金额 120.0000 + 本期金额 47.2000 = 167.2000',

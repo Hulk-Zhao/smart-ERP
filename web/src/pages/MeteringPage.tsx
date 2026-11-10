@@ -59,6 +59,8 @@ const BUCKET_HINT: Record<BillingBucket, string> = {
   other_unbillable: '未匹配 / 重复计费 / 不可解析',
 };
 
+// auto_released「桶」已由契约流决定删除（按该桶过滤将返回 422），生成契约更新后需从 BUCKET_ORDER/BUCKET_LABEL 移除；
+// 但计数字段 auto_released_lines 保留（= 行级 auto 合计）。两者同名不同命，删桶时不要连带删计数。
 const BUCKET_ORDER: BillingBucket[] = ['billable', 'auto_released', 'dispute_hold', 'other_unbillable'];
 
 function CountCard({
@@ -375,6 +377,8 @@ export function MeteringPage() {
               value={String(data.expected_lines)}
               hint="接口 expected_lines（metrics.supplier_lines），含不计费行"
             />
+            {/* auto_released_lines 是计数字段（行级 auto 合计），与已删除的 auto_released 桶不是一回事：
+                字段值 ≠ 桶计数（桶恒 0，字段为 59）。删桶不等于删这个字段。 */}
             <Metric
               label="有效对账行数"
               value={String(data.auto_released_lines)}
@@ -392,6 +396,12 @@ export function MeteringPage() {
               hint={`接口本次返回 ${allLines.length} 行；与对账单不一致时见 data_gaps`}
             />
           </div>
+
+          {/* 两数本期相等必须当场解释，否则扣减上线后分开会被当成系统算错 */}
+          <p className="break-words text-[10px] leading-4 text-slate-600" data-testid="metering-valid-vs-billable">
+            有效对账行数 {data.auto_released_lines} 与计费行数 {data.billable_lines} 定义不同：
+            {'本期无扣减，故两者相等；发生扣减后计费行数将小于有效对账行数。'}
+          </p>
 
           <div className="text-[10px] text-slate-400">下面四张卡可点击下钻，数字按明细行的 billing_bucket 现算：</div>
           <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
@@ -504,8 +514,10 @@ export function MeteringPage() {
         </ol>
         {(data.calculation ?? []).length > 0 ? (
           <p className="mt-1 break-words text-[10px] leading-4 text-amber-700" data-testid="metering-calculation-gap">
-            服务端 calculation 文案把 billable_lines 写作「有效对账行数」，与商务口径不一致；前端不改写契约原文。
-            字段映射以上方「有效对账行数 = auto_released_lines、计费行数 = billable_lines」为准，该项待 API 流修文案。
+            服务端 calculation 文案把 billable_lines 写作「有效对账行数」，与商务口径不一致；前端不改写契约原文
+            （mock.ts 中同样是错的：那两行镜像自 apps/api/metering.py，演示与截图都取自它）。
+            字段映射以上方「有效对账行数 = auto_released_lines、计费行数 = billable_lines」为准。
+            删除条件：API 修好文案后，删除本标注、mock 中的镜像文案，以及断言本标注的用例。
           </p>
         ) : null}
       </section>
