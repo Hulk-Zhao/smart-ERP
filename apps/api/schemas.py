@@ -55,7 +55,7 @@ class ScopeIn(BaseModel):
         return tuple(self.system_ids)
 
 
-class Page(BaseModel, Generic[T]):  # noqa: UP046 - 运行环境 Python 3.11 不支持下述 PEP 695 语法
+class Page(BaseModel, Generic[T]):
     items: list[T]
     next_cursor: str | None = None
 
