@@ -53,6 +53,22 @@ sha256sum -c SHA256SUMS
 pg_restore -l smart_erp-*.dump | head -30   # 只列目录，不连库
 ```
 
+### 1.5 文件通道收件箱（inbox）不参与备份
+
+`deploy/smart-erp/docker-compose.yml` 给 connector-gw 挂了 `./inbox:/data/inbox:ro`（相对部署目录），
+对应宿主 `<部署目录>/inbox`。它和 `erp_objects` 卷是两回事，备份口径如下：
+
+- **不进备份**：inbox 里是供应商对账单/送货单等**瞬时输入**，导完就应归档或删除；
+  它也不在任何 named volume 里，`backup-smart-erp.sh` 只备 `smart_erp` 库与 `erp_objects` 卷，
+  **不要**为了让「备份更全」手工把 inbox 打进 tar——那会把未处理的原始单据复制到备份机上；
+- **恢复不清空**：restore 只动库与 `erp_objects` 卷，**不得** `rm -rf inbox`；恢复后待处理的文件仍在那里，
+  重复导入由业务幂等键去重，不靠删文件；
+- **目录权限**：`deploy-images.sh` 在上传前执行
+  `install -d -m 0750 -o 10001 -g 10001 <部署目录>/inbox`（10001 = 网关容器用户 app）。
+  权限给 0777 或把属主改成 root 都会让 connector-gw 读不到并**启动失败**（不静默降级）；
+- **取数方式**：演示时把 CSV 放进 `<部署目录>/inbox` 即可，网关以只读方式扫描；容器内只能读、不能写。
+  demo 档默认开启（`env/demo.env` 里 `ERP_FILE_INBOX=/data/inbox`）；full/prod 保持 `ERP_FILE_INBOX=` 空值 = 关闭。
+
 ## 2. 恢复
 
 ### 2.1 硬规则
