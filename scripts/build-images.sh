@@ -4,7 +4,8 @@
 # -----------------------------------------------------------------------------
 # 依据：01 §1A.2（构建策略）/ §1A.10（发布序列）；C12（镜像与发布契约）
 #   1. tag 必须是完整 40 位 git sha（ERP_IMAGE_TAG），禁止 latest 承担发布语义；
-#   2. 三个镜像打进**同一个** tar.gz，配 sha256sum.txt，一次 scp 传完；
+#   2. 四个镜像（app / connector-gw / web / doc）打进**同一个** tar.gz，
+#      配 sha256sum.txt，一次 scp 传完；doc 只在 full 档启动，但一次打包省得二次发版；
 #   3. 不建镜像仓库。
 #
 # 用法：
@@ -64,7 +65,7 @@ MISSING=()
 [[ -d "${REPO_ROOT}/apps" ]]                      || MISSING+=("apps/（S0：FastAPI 入口）")
 [[ -f "${REPO_ROOT}/web/package.json" ]]          || MISSING+=("web/package.json（S6：前端）")
 [[ -f "${REPO_ROOT}/web/package-lock.json" ]]     || MISSING+=("web/package-lock.json（S6：npm ci 需要）")
-for f in api.Dockerfile connector-gw.Dockerfile web.Dockerfile; do
+for f in api.Dockerfile connector-gw.Dockerfile docparse.Dockerfile web.Dockerfile; do
   [[ -f "${DOCKER_DIR}/${f}" ]] || MISSING+=("projects/smart-ERP/docker/${f}")
 done
 
@@ -95,12 +96,17 @@ build_one() {
 echo "== smart-ERP 镜像构建：tag=${TAG} platform=${PLATFORM} =="
 build_one app          api.Dockerfile
 build_one connector-gw connector-gw.Dockerfile
-build_one web          web.Dockerfile --build-arg "ERP_WEB_BASE=${WEB_BASE}"
+build_one doc          docparse.Dockerfile
+# 基础镜像允许按环境覆盖（内网/镜像站拉不到 nginx:1.27-alpine 时用它钉住可拉到的版本）
+build_one web          web.Dockerfile \
+  --build-arg "ERP_WEB_BASE=${WEB_BASE}" \
+  --build-arg "NGINX_IMAGE=${ERP_NGINX_IMAGE:-nginx:1.27-alpine}"
 
 # ---- 4. docker save + gzip + 校验文件 ------------------------------------
 IMAGE_LIST=(
   "smart-erp/app:${TAG}"
   "smart-erp/connector-gw:${TAG}"
+  "smart-erp/doc:${TAG}"
   "smart-erp/web:${TAG}"
 )
 TAR_NAME="erp-images-${TAG}.tar.gz"
