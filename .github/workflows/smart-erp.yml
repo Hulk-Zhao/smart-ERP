@@ -1,0 +1,134 @@
+name: smart-erp CI
+
+# 依据 docs/product/tech/02-并发开发路线.md §2.9 S8 与 §4.6：
+#   本流水线只做「静态校验 + lint + 单元测试」，**不含任何部署步骤**
+#   （镜像构建、docker save、scp、docker load、compose up 都在发布序列里人工/发布机执行）。
+#
+# 为什么没有镜像构建：2 核构建机之外再在 CI 里 build 一遍会产生「CI 绿但现场包不同」的
+# 双源问题；镜像由 scripts/build-images.sh 在发布机产出并计算 sha256。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/smart-erp/**"
+      - "projects/smart-ERP/**"
+      - "scripts/**"
+      - "tests/deploy/**"
+      - "apps/**"
+      - "db/migrations/**"
+      - "contracts/**"
+      - "pyproject.toml"
+      - ".github/workflows/smart-erp.yml"
+  pull_request:
+    paths:
+      - "deploy/smart-erp/**"
+      - "projects/smart-ERP/**"
+      - "scripts/**"
+      - "tests/deploy/**"
+      - "apps/**"
+      - "db/migrations/**"
+      - "contracts/**"
+      - "pyproject.toml"
+      - ".github/workflows/smart-erp.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: smart-erp-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. 部署面静态校验：compose 能解析、内存预算不超标、变量齐全、探针路径真实
+  # ---------------------------------------------------------------------------
+  deploy-static:
+    name: 部署面静态校验
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 安装测试依赖
+        run: python -m pip install --disable-pip-version-check pyyaml
+
+      - name: 离线静态校验（tests/deploy）
+        run: python -m unittest discover -s tests/deploy -t . -v
+
+      - name: compose 正向解析（demo 档）
+        run: |
+          docker compose \
+            --project-directory deploy/smart-erp \
+            --env-file tests/deploy/compose.env \
+            --file deploy/smart-erp/docker-compose.yml \
+            --profile demo config --quiet
+
+      - name: compose 负向校验（缺 ERP_IMAGE_TAG 必须失败）
+        run: |
+          set -euo pipefail
+          grep -v '^ERP_IMAGE_TAG=' tests/deploy/compose.env > /tmp/no-tag.env
+          if docker compose \
+               --project-directory deploy/smart-erp \
+               --env-file /tmp/no-tag.env \
+               --file deploy/smart-erp/docker-compose.yml \
+               config --quiet > /tmp/compose.out 2>/tmp/compose.err; then
+            echo "::error::缺 ERP_IMAGE_TAG 时 compose config 竟然通过，tag 强制失效"
+            exit 1
+          fi
+          grep -q "ERP_IMAGE_TAG" /tmp/compose.err /tmp/compose.out
+          echo "负向校验通过：缺 ERP_IMAGE_TAG 时被拒绝"
+
+  # ---------------------------------------------------------------------------
+  # 2. shell lint：发布脚本是本流的交付物，语法与常见坑必须机器把关
+  # ---------------------------------------------------------------------------
+  shell-lint:
+    name: 脚本 lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 语法检查
+        run: |
+          for f in scripts/*.sh; do bash -n "$f"; done
+
+      - name: shellcheck
+        run: shellcheck --severity=warning scripts/*.sh
+
+  # ---------------------------------------------------------------------------
+  # 3. Python lint + 单元测试（仓库全量，不只本流）
+  # ---------------------------------------------------------------------------
+  python-checks:
+    name: Python lint 与单元测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" ruff pyyaml
+
+      - name: ruff（apps / tests / db）
+        run: ruff check apps tests db
+
+      - name: pytest
+        run: python -m pytest tests -q
+
+      - name: 导入边界契约（C2）
+        run: lint-imports
