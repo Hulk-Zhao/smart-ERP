@@ -13,7 +13,7 @@ const CONTRACT = resolve(REPO_ROOT, 'contracts/api/product_api.openapi.v1.json')
 const GENERATED = resolve(WEB_ROOT, 'src/api/generated/contract.ts');
 
 describe('C16 契约 → TypeScript 生成链路', () => {
-  it('契约未变更时生成物零漂移（npm run check:api 同款校验）', () => {
+  it('契约未变更时生成物零漂移（npm run gen:api -- --check 同款校验）', () => {
     const output = execFileSync(process.execPath, ['scripts/gen-api-types.mjs', '--check'], {
       cwd: WEB_ROOT,
       encoding: 'utf8',

@@ -2,15 +2,19 @@
 
 React 18 + TypeScript + Vite 的 7 页工作台。数据来自真实后端 `/v1` 契约（C16），类型由契约生成；离线开发可显式打开 mock 开关。
 
+> **校验生成物只认这一条命令：`npm run gen:api -- --check`。`--` 不能省。**
+> 省掉 `--` 时 npm 会把 `--check` 吞掉，脚本按「无参数」执行，等于把生成文件重写一遍——看起来成功，实际是静默覆盖，之后的漂移再也报不出来。
+> `npm run check:api` 只是这条命令的别名（`"check:api": "npm run gen:api -- --check"`），不要新增第二条直连生成器的校验入口。
+
 ## 启动
 
 ```bash
 cd web
 npm install
 npm run dev        # http://localhost:5173，默认连真实后端
-npm run gen:api    # 从 C16 契约重新生成 TS 类型与路径表
-npm run check:api  # 校验生成物是否与契约漂移（build 前置）
-npm run build      # gen:api --check && tsc --noEmit && vite build
+npm run gen:api    # 从 C16 契约重新生成 TS 类型与路径表（会写盘）
+npm run gen:api -- --check   # 校验生成物是否与契约漂移（只读，build 前置）
+npm run build      # gen:api -- --check && tsc --noEmit && vite build
 npm run test       # vitest（用例在仓库根 tests/web/）
 ```
 
@@ -23,6 +27,16 @@ Node 18+。首次 `npm install` 如提示 esbuild 安装脚本未执行，运行
 - 生成物：[src/api/generated/contract.ts](file:///e:/tools/Factroy_Agents/smart-ERP/web/src/api/generated/contract.ts)，含全部 schema、`CONTRACT_SHA256` / `CONTRACT_PATH_COUNT`、`WRITE_PATHS` 与 `ApiOperations`（键为 `"METHOD /path"`）。
 - 页面与 client 的请求/响应类型只从 `ApiOperations` 取；`src/api/types.ts` 只做重导出与 UI 展示元数据（12 状态、8 类差异码），**不手写契约字段**。
 - 契约变更流程：后端重新生成契约 → `npm run gen:api` → 评审类型差异。`npm run build` 会在生成物漂移时直接失败。
+
+### 排查：契约没动却报「生成物漂移」（BOM/CRLF）
+
+生成器在 `JSON.parse` 与计算 `CONTRACT_SHA256` 之前，先去掉 BOM 并把 CRLF 归一化为 LF。因此同一份契约在 Windows（CRLF 检出）和 CI（LF 检出）会得到同一个 sha，不会出现「本地绿、CI 红」的假漂移。
+
+如果仍然报漂移，按顺序排查：
+
+1. `git diff --stat contracts/api/product_api.openapi.v1.json`：契约是否真的改过（字段增删，而非换行）。
+2. `git status web/src/api/generated/contract.ts`：生成物是否被某次「少了 `--` 的校验」静默重写；用 `npm run gen:api -- --check` 复跑确认。
+3. `git check-attr text eol -- contracts/api/product_api.openapi.v1.json`：确认 `.gitattributes` 的换行约定生效。归一化只覆盖 BOM/CRLF，不覆盖编辑器改写的其他字节。
 
 ## 连接配置
 

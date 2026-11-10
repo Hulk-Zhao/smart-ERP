@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "gen:api": "node scripts/gen-api-types.mjs",
-    "check:api": "node scripts/gen-api-types.mjs --check"
+    "check:api": "npm run gen:api -- --check"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",
