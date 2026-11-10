@@ -1,0 +1,70 @@
+{
+  "schema_version": "2.0",
+  "kind": "masterdata_exemptions",
+  "source": "fixtures/masterdata/exemptions_renewal_sample.json",
+  "entries": [
+    {
+      "exemption_id": "EX-2026-101",
+      "subject_type": "物料",
+      "subject_code": "IT-1004",
+      "rule_id": "UOM-003",
+      "submitted_by": "对账运营-李示例",
+      "submitted_role": "对账运营",
+      "submitted_at": "2025-12-20",
+      "approved_by": "财务经理-张示例",
+      "approved_role": "财务",
+      "basis": {"type": "客户书面确认", "ref": "客户确认函-2025-1218-包装规格", "valid_from": "2025-12-18", "valid_to": "2026-03-31"},
+      "reason": "第 1 次临时豁免",
+      "granted_at": "2026-01-01",
+      "expires_at": "2026-03-31"
+    },
+    {
+      "exemption_id": "EX-2026-102",
+      "subject_type": "物料",
+      "subject_code": "IT-1004",
+      "rule_id": "UOM-003",
+      "submitted_by": "对账运营-李示例",
+      "submitted_role": "对账运营",
+      "submitted_at": "2026-03-20",
+      "approved_by": "财务经理-张示例",
+      "approved_role": "财务",
+      "basis": {"type": "客户书面确认", "ref": "客户确认函-2026-0318-包装规格", "valid_from": "2026-03-18", "valid_to": "2026-06-30"},
+      "reason": "第 2 次临时豁免",
+      "granted_at": "2026-04-01",
+      "expires_at": "2026-06-30"
+    },
+    {
+      "exemption_id": "EX-2026-103",
+      "subject_type": "物料",
+      "subject_code": "IT-1004",
+      "rule_id": "UOM-003",
+      "submitted_by": "对账运营-李示例",
+      "submitted_role": "对账运营",
+      "submitted_at": "2026-06-20",
+      "approved_by": "财务经理-张示例",
+      "approved_role": "财务",
+      "basis": {"type": "客户书面确认", "ref": "客户确认函-2026-0618-包装规格", "valid_from": "2026-06-18", "valid_to": "2026-09-30"},
+      "reason": "第 3 次临时豁免",
+      "granted_at": "2026-07-01",
+      "expires_at": "2026-09-30"
+    },
+    {
+      "exemption_id": "EX-2026-104",
+      "subject_type": "物料",
+      "subject_code": "IT-1004",
+      "rule_id": "UOM-003",
+      "submitted_by": "对账运营-李示例",
+      "submitted_role": "对账运营",
+      "submitted_at": "2026-09-20",
+      "approved_by": "财务经理-张示例",
+      "approved_role": "财务",
+      "basis": {"type": "客户书面确认", "ref": "客户确认函-2026-0918-包装规格", "valid_from": "2026-09-18", "valid_to": "2026-12-31"},
+      "reason": "第 4 次临时豁免，触发升级复核",
+      "granted_at": "2026-10-01",
+      "expires_at": "2026-12-31",
+      "second_reviewer": "内控-王示例",
+      "second_reviewed_role": "内控",
+      "escalated_review_by": "财务总监-赵示例"
+    }
+  ]
+}
