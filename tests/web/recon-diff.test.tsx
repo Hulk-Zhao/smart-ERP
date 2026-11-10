@@ -15,7 +15,7 @@ beforeEach(async () => {
       // 含 rounding_tolerance 的批次：后端修复后正常返回 200
       return { body: reconDiffDetail() };
     }
-    return problem(404, 'E-DATA-MISSING', `unexpected ${request.method} ${request.path}`);
+    return problem(404, 'E-RESOURCE-NOTFOUND', `unexpected ${request.method} ${request.path}`);
   });
 
   configureApi({

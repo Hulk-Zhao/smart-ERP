@@ -58,7 +58,7 @@ beforeEach(async () => {
         },
       };
     }
-    return problem(404, 'E-DATA-MISSING', `unexpected ${request.method} ${request.path}`);
+    return problem(404, 'E-RESOURCE-NOTFOUND', `unexpected ${request.method} ${request.path}`);
   });
 
   configureApi({

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { api, downloadText, type MeteringExport } from '../api/client';
-import type { MeteringDataGapOut, MeteringStatementOut } from '../api/types';
+import type { BillingBucket, MeteringDataGapOut, MeteringStatementOut } from '../api/types';
 import { DiffTypeBadge } from '../components/Badges';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel } from '../components/ErrorPanel';
@@ -43,13 +43,47 @@ function Metric({
   );
 }
 
-function CountCard({ label, value, hint, tone = '' }: { label: string; value: number; hint?: string; tone?: string }) {
-  return (
-    <div className="min-w-0 rounded-lg border border-slate-200 px-2.5 py-2">
+const BUCKET_LABEL: Record<BillingBucket, string> = {
+  billable: '应处理',
+  auto_released: '自动放行',
+  dispute_hold: '争议挂起',
+  other_unbillable: '其他不计费',
+};
+
+function CountCard({
+  label,
+  value,
+  hint,
+  tone = '',
+  active = false,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  hint?: string;
+  tone?: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  const className = `min-w-0 rounded-lg border px-2.5 py-2 text-left ${
+    active ? 'border-sky-400 bg-sky-50 ring-1 ring-sky-200' : 'border-slate-200'
+  } ${onClick ? 'cursor-pointer hover:border-sky-300' : ''}`;
+  const content = (
+    <>
       <div className="label">{label}</div>
       <div className={`mt-0.5 font-mono text-[18px] ${tone || 'text-slate-800'}`}>{value}</div>
       {hint ? <div className="mt-0.5 break-words text-[10px] leading-4 text-slate-400">{hint}</div> : null}
-    </div>
+      {onClick ? (
+        <div className="mt-0.5 text-[10px] text-sky-700">{active ? '再次点击取消筛选' : '点击查看该桶行列表'}</div>
+      ) : null}
+    </>
+  );
+  return onClick ? (
+    <button type="button" aria-pressed={active} className={className} onClick={onClick}>
+      {content}
+    </button>
+  ) : (
+    <div className={className}>{content}</div>
   );
 }
 
@@ -164,6 +198,8 @@ export function MeteringPage() {
   const [exported, setExported] = useState<
     (MeteringExport & { downloadedAt: string; digest?: DigestState }) | null
   >(null);
+  const [bucket, setBucket] = useState<BillingBucket | null>(null);
+  const toggleBucket = (next: BillingBucket) => setBucket((current) => (current === next ? null : next));
 
   const statement = useQuery({
     queryKey: ['metering', batchId],
@@ -219,6 +255,8 @@ export function MeteringPage() {
   }
 
   const data = statement.data!;
+  const allLines = data.lines ?? [];
+  const visibleLines = bucket ? allLines.filter((line) => line.billing_bucket === bucket) : allLines;
   const gaps = data.data_gaps ?? [];
   const excluded = data.excluded_lines;
   const capGap = missingReason(gaps, ['cap_amount', 'cap'], '服务端未返回封顶配置');
@@ -303,10 +341,37 @@ export function MeteringPage() {
         </div>
         <div className="card-body space-y-2">
           <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-            <CountCard label="应处理" value={data.expected_lines} hint="本批次需要对账的行" />
-            <CountCard label="自动放行" value={data.auto_released_lines} hint="程序性事实：自动通过" tone="text-emerald-700" />
-            <CountCard label="争议挂起" value={excluded.dispute_hold} hint={`不计费合计 ${excluded.total}`} tone="text-amber-700" />
-            <CountCard label="其他不计费" value={excluded.other_unbillable} hint="含客户原因等其它口径" tone="text-slate-700" />
+            <CountCard
+              label={BUCKET_LABEL.billable}
+              value={data.expected_lines}
+              hint="本批次需要对账的行"
+              active={bucket === 'billable'}
+              onClick={() => toggleBucket('billable')}
+            />
+            <CountCard
+              label={BUCKET_LABEL.auto_released}
+              value={data.auto_released_lines}
+              hint="程序性事实：自动通过"
+              tone="text-emerald-700"
+              active={bucket === 'auto_released'}
+              onClick={() => toggleBucket('auto_released')}
+            />
+            <CountCard
+              label={BUCKET_LABEL.dispute_hold}
+              value={excluded.dispute_hold}
+              hint={`不计费合计 ${excluded.total}`}
+              tone="text-amber-700"
+              active={bucket === 'dispute_hold'}
+              onClick={() => toggleBucket('dispute_hold')}
+            />
+            <CountCard
+              label={BUCKET_LABEL.other_unbillable}
+              value={excluded.other_unbillable}
+              hint="含客户原因等其它口径"
+              tone="text-slate-700"
+              active={bucket === 'other_unbillable'}
+              onClick={() => toggleBucket('other_unbillable')}
+            />
           </div>
 
           <div className="grid grid-cols-1 gap-1.5 text-[11px] text-slate-600 sm:grid-cols-2">
@@ -439,13 +504,32 @@ export function MeteringPage() {
       <section className="card min-w-0">
         <div className="card-head">
           <h2 className="section-title">逐行明细</h2>
-          <span className="text-[11px] text-slate-400">共 {data.line_count} 行</span>
+          <span className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+            {bucket ? (
+              <>
+                已筛选：{BUCKET_LABEL[bucket]}桶 · {visibleLines.length} 行 / 共 {data.line_count} 行
+                <button type="button" className="link text-[11px]" onClick={() => setBucket(null)}>
+                  清除筛选
+                </button>
+              </>
+            ) : (
+              <>共 {data.line_count} 行 · 点击上方计数卡可按桶下钻</>
+            )}
+          </span>
         </div>
         <div className="card-body space-y-2">
-          {(data.lines ?? []).length === 0 ? (
-            <EmptyState variant="no-data" compact description="该批次没有计量行：本期确实无数据，不是加载失败。" />
+          {visibleLines.length === 0 ? (
+            <EmptyState
+              variant="no-data"
+              compact
+              description={
+                bucket
+                  ? `${BUCKET_LABEL[bucket]}桶下暂无行；可清除筛选查看全部。`
+                  : '该批次没有计量行：本期确实无数据，不是加载失败。'
+              }
+            />
           ) : (
-            (data.lines ?? []).map((line) => <LineCard key={`${line.line_no}-${line.side}`} line={line} />)
+            visibleLines.map((line) => <LineCard key={`${line.line_no}-${line.side}`} line={line} />)
           )}
         </div>
       </section>

@@ -126,7 +126,7 @@ function errorReply(mode: ErrorMode): Reply {
       missing_roles: ['reviewer'],
     });
   }
-  if (mode === 'notfound') return problem(404, 'E-DATA-MISSING', 'resource not found');
+  if (mode === 'notfound') return problem(404, 'E-RESOURCE-NOTFOUND', 'resource not found');
   if (mode === 'conflict') return problem(409, 'E-STATE-ILLEGAL', '当前状态不允许该迁移');
   return problem(503, 'E-DATA-MISSING', '单价未配置：未设置 ERP_METERING_UNIT_PRICE');
 }
@@ -155,7 +155,7 @@ function emptyReply(pageName: string, request: CapturedRequest): Reply {
   if (pageName === '计量表' && path.endsWith('/statement')) {
     return { body: meteringStatement({ lines: [], line_count: 0 }) };
   }
-  return problem(404, 'E-DATA-MISSING', `unexpected ${request.method} ${path}`);
+  return problem(404, 'E-RESOURCE-NOTFOUND', `unexpected ${request.method} ${path}`);
 }
 
 function configure(baseUrl: string): void {

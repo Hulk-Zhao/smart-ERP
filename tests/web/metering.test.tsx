@@ -61,7 +61,7 @@ beforeEach(async () => {
           },
         };
       }
-      if (mode === 'not-found') return problem(404, 'E-DATA-MISSING', 'batch not found');
+      if (mode === 'not-found') return problem(404, 'E-RESOURCE-NOTFOUND', 'batch not found');
       return { body: statementBody };
     }
     if (request.method === 'GET' && request.path === `/v1/recon/runs/${BATCH_ID}`) {
@@ -70,7 +70,7 @@ beforeEach(async () => {
     if (request.method === 'GET' && request.path === `/v1/recon/runs/${BATCH_ID}/diffs`) {
       return { body: { items: [], next_cursor: null } };
     }
-    return problem(404, 'E-DATA-MISSING', `unexpected ${request.method} ${request.path}`);
+    return problem(404, 'E-RESOURCE-NOTFOUND', `unexpected ${request.method} ${request.path}`);
   });
 
   configureApi({
@@ -126,6 +126,23 @@ describe('计量表：四类行 + data_gaps 显式可见 + CSV 摘要', () => {
 
     // calculation 算式
     expect(screen.getByText(/59 − 0 − 0 = 59 行 × 0.8000 CNY = 47.2000 CNY/)).toBeInTheDocument();
+  });
+
+  it('计数卡按后端 billing_bucket 下钻到该桶行列表', async () => {
+    renderPage(<MeteringPage />, {
+      route: `/recon/${BATCH_ID}/metering`,
+      path: '/recon/:batchId/metering',
+    });
+
+    await screen.findByText(/计量表 · 批次/);
+    fireEvent.click(screen.getByRole('button', { name: /自动放行/ }));
+
+    expect(screen.getByText(/已筛选：自动放行桶 · 1 行 \/ 共 2 行/)).toBeInTheDocument();
+    expect(screen.getByText('#1')).toBeInTheDocument();
+    expect(screen.queryByText('#2')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '清除筛选' }));
+    expect(screen.getByText('#2')).toBeInTheDocument();
   });
 
   it('上界说明只点名实际缺失的扣减项', async () => {

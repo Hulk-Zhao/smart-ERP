@@ -156,6 +156,7 @@ export function reconDiff(overrides: Partial<ReconDiffOut> = {}): ReconDiffOut {
   return {
     diff_id: DIFF_ID,
     type: 'rounding_tolerance',
+    billing_bucket: 'auto_released',
     amount: { amount: '0.0300', currency: 'CNY', tax_included: true },
     owner: 'system',
     suggestion: '数量/单价一致，金额差 0.03 元在舍入容差 0.05 元内，按容差放行',
@@ -261,6 +262,7 @@ export function meteringStatement(overrides: Partial<MeteringStatementOut> = {})
         line_no: 1,
         side: 'supplier',
         status: '已对账',
+        billing_bucket: 'auto_released',
         auto_released: true,
         needs_manual: false,
         confidence: '0.98',
@@ -281,6 +283,7 @@ export function meteringStatement(overrides: Partial<MeteringStatementOut> = {})
         line_no: 2,
         side: 'supplier',
         status: '差异挂起',
+        billing_bucket: 'dispute_hold',
         auto_released: false,
         needs_manual: true,
         confidence: '0.72',

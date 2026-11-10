@@ -23,7 +23,7 @@ beforeEach(async () => {
     if (request.method === 'POST' && request.path === `/v1/tickets/${W3_TICKET_ID}/actions/approve`) {
       return problem(403, 'E-POLICY-W3FORBIDDEN', 'W3 写等级禁止自动执行，整单拒绝；连接器零写入');
     }
-    return problem(404, 'E-DATA-MISSING', `unexpected ${request.method} ${request.path}`);
+    return problem(404, 'E-RESOURCE-NOTFOUND', `unexpected ${request.method} ${request.path}`);
   });
 
   configureApi({

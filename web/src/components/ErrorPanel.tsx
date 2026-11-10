@@ -107,7 +107,7 @@ export function ErrorPanel({
   backTo,
   onOpenSettings,
 }: ErrorPanelProps) {
-  const kind = errorKind(error, { notFoundWhenMissing: notFoundKind !== undefined });
+  const kind = errorKind(error);
   const resolvedNotFoundKind = notFoundKind ?? 'resource';
   const apiError = isApiError(error) ? error : null;
   const w3 = isW3Forbidden(error);

@@ -16,6 +16,7 @@ export type {
   ApprovalTaskOut,
   AuditChainOut,
   AuditImageOut,
+  BillingBucket,
   DiffTypeCode,
   DiscrepancyDraftOut,
   EvidenceOut,

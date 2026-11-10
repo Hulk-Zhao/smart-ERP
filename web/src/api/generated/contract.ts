@@ -1,13 +1,13 @@
 /**
  * 本文件由 `node scripts/gen-api-types.mjs` 从 C16 冻结契约生成，请勿手改。
  * 源文件：contracts/api/product_api.openapi.v1.json
- * 契约 sha256：506b163d83b67e36a4601246cbe87d95a3bb63f2e41b46484a2f2d0f7264adf4
+ * 契约 sha256：9f425508216f0f34b4f4d328c8273b2730cab97b829d5a0a40a1bb2efef9104b
  * 契约版本：1.0.0 · C16
  *
  * 契约变更流程：后端重新生成契约 → 执行 `npm run gen:api` → 评审类型差异。
  */
 
-export const CONTRACT_SHA256 = "506b163d83b67e36a4601246cbe87d95a3bb63f2e41b46484a2f2d0f7264adf4";
+export const CONTRACT_SHA256 = "9f425508216f0f34b4f4d328c8273b2730cab97b829d5a0a40a1bb2efef9104b";
 export const CONTRACT_VERSION = "1.0.0";
 export const CONTRACT_PATH_COUNT = 17;
 
@@ -16,11 +16,15 @@ export const WRITE_PATHS = ["/v1/approvals/{ticket_id}/approve","/v1/approvals/{
 
 /**
  * 工单动作入参；``comment`` 同时承担审批意见 / 终止原因（FR-107）。
+ * 
+ * ``reason`` 单列：回滚他人工单必须填写理由并留审计（FR-1303 / 权限矩阵 §4.5），
+ * 不能复用 ``comment``——否则「没填理由」与「填了意见」在审计里无法区分。
  */
 export interface ActionIn {
   comment?: string;
   confirmed_manual?: boolean;
   fail_code?: ("F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7") | null;
+  reason?: string | null;
   role?: ("reviewer" | "approver" | "cfo") | null;
   scope: ScopeIn;
 }
