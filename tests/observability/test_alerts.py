@@ -42,8 +42,9 @@ def test_rule_file_parses_and_has_required_groups(rules_doc: dict) -> None:
         assert group["rules"]
 
 
-def test_at_least_five_rules_with_wake_up_rationale(rules: list[dict]) -> None:
-    assert len(rules) >= 5
+def test_every_active_rule_has_wake_up_rationale(rules: list[dict]) -> None:
+    # 当前生效的只有 2 条对账规则；新增规则必须先有采集点才能进生效集合。
+    assert len(rules) == 2
     for rule in rules:
         assert rule["alert"]
         assert rule["expr"].strip()
@@ -55,15 +56,17 @@ def test_at_least_five_rules_with_wake_up_rationale(rules: list[dict]) -> None:
         assert annotations.get("runbook", "").strip()
 
 
-def test_audit_chain_rule_is_p0_and_fast_firing(rules: list[dict]) -> None:
-    audit = [rule for rule in rules if rule["alert"] == "SmartErpAuditChainBroken"]
-    assert len(audit) == 1
-    rule = audit[0]
-    assert rule["labels"]["severity"] == "P0"
-    assert rule["expr"].strip() == "max(smart_erp_audit_chain_broken) > 0"
+def test_audit_chain_rule_is_commented_as_p0_pending_wiring() -> None:
+    """P0 仍在文件里，但采集点为零，只能以注释形态存在并标归属流。"""
+
+    text = RULE_FILE.read_text(encoding="utf-8")
+    assert "# - alert: SmartErpAuditChainBroken" in text
+    assert "#   expr: max(smart_erp_audit_chain_broken) > 0" in text
     # P0 不允许拖长等待时间；1 分钟足够排除采集抖动。
-    assert rule["for"] == "1m"
-    assert rule["labels"]["compliance"] == "audit-chain"
+    assert "#   for: 1m" in text
+    assert "#     severity: P0" in text
+    assert "#     compliance: audit-chain" in text
+    assert "归属流：apps/audit" in _marker_for("SmartErpAuditChainBroken")
 
 
 def test_every_referenced_metric_exists_in_registry(rules: list[dict]) -> None:
@@ -80,15 +83,14 @@ def test_every_referenced_metric_exists_in_registry(rules: list[dict]) -> None:
 
 def test_required_alerts_are_covered(rules: list[dict]) -> None:
     names = {rule["alert"] for rule in rules}
-    for required in (
-        "SmartErpWriteFailureRateHigh",
-        "SmartErpUnresolvedTicketsGrowing",
+    assert names == {
         "SmartErpReconBatchFailureRateHigh",
-        "SmartErpAuditChainBroken",
-    ):
-        assert required in names
-    # 补偿/时钟 6 条规则依赖零采集点指标，按 README §6.1.2 必须注释掉，不得出现在生效规则里。
+        "SmartErpReconBatchP95Slow",
+    }, names
+    # 其余 9 条依赖零采集点指标，按 README §6.1.2 必须注释掉，不得出现在生效规则里。
     assert "SmartErpCompensationOverdueP2" not in names
+    assert "SmartErpWriteFailureRateHigh" not in names
+    assert "SmartErpAuditChainBroken" not in names
 
 
 # ---------------------------------------------------------------- P0 触发演示
@@ -193,13 +195,26 @@ WIRED_METRICS = {
     "smart_erp_recon_runs_failed_total",
 }
 
-#: T702 遗留的「规则在、采集点无」三条。本 PR 不动其启停（取消 P0 需单独决策），
-#: 但覆盖度按 0 记，且它们的采集点列在 README §6.1 里是「无」。
-LEGACY_UNWIRED_ALERTS = {
-    "SmartErpWriteFailureRateHigh",
-    "SmartErpUnresolvedTicketsGrowing",
-    "SmartErpAuditChainBroken",
-}
+#: 注释态规则的锚点与归属流标记。任何一条被注释的规则都必须二选一：
+#: 「采集点待接线（归属流：…）」或「待真实基线」——不允许无理由地静默停用。
+_COMMENTED_ALERT_RE = re.compile(r"^\s*#\s*-\s*alert:\s*(?P<name>[A-Za-z0-9_]+)\s*$", re.M)
+_MARKER_PREFIXES = ("采集点待接线（归属流：", "待真实基线")
+
+
+def _commented_alert_names() -> list[str]:
+    return [m.group("name") for m in _COMMENTED_ALERT_RE.finditer(RULE_FILE.read_text(encoding="utf-8"))]
+
+
+def _marker_for(name: str) -> str:
+    """取注释规则紧邻上方的非空行，即停用理由 + 归属流。"""
+
+    lines = RULE_FILE.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        if re.fullmatch(rf"\s*#\s*-\s*alert:\s*{re.escape(name)}", line):
+            for previous in reversed(lines[:index]):
+                if previous.strip():
+                    return previous.strip()
+    raise AssertionError(f"未找到被注释的规则 {name}")
 
 
 def test_dead_backlog_alert_is_removed(rules: list[dict]) -> None:
@@ -226,12 +241,28 @@ def test_pending_wiring_rules_are_commented_out() -> None:
         assert f"#     severity: {severity}" in text, name
 
 
-def test_active_rules_beyond_legacy_only_reference_wired_metrics(rules: list[dict]) -> None:
-    """新进规则引用的指标必须有生产采集点；遗留的 3 条显式豁免并单独记账。"""
+def test_every_commented_rule_states_owner_or_baseline() -> None:
+    """停用不是删除：每条注释规则都必须写清归属流/解锁条件，或「待真实基线」。"""
+
+    names = _commented_alert_names()
+    assert len(names) == len(set(names)), names
+    expected = set(_COMPENSATION_RULES) | {
+        "SmartErpWriteFailureRateHigh",
+        "SmartErpUnresolvedTicketsGrowing",
+        "SmartErpAuditChainBroken",
+        "SmartErpReconRunFailureRateHigh",
+    }
+    assert set(names) == expected, set(names) ^ expected
+    for name in names:
+        marker = _marker_for(name)
+        assert marker.startswith("#"), (name, marker)
+        assert any(prefix in marker for prefix in _MARKER_PREFIXES), (name, marker)
+
+
+def test_active_rules_only_reference_wired_metrics(rules: list[dict]) -> None:
+    """生效规则引用的每个指标都必须有生产采集点；无采集点的只能注释。"""
 
     for rule in rules:
-        if rule["alert"] in LEGACY_UNWIRED_ALERTS:
-            continue
         for reference in METRIC_REF_RE.findall(rule["expr"]):
             base = reference
             for suffix in _SERIES_SUFFIXES:
