@@ -1,0 +1,189 @@
+{
+  "$defs": {
+    "ReconcileOptions": {
+      "additionalProperties": false,
+      "properties": {
+        "auto_write": {
+          "default": false,
+          "title": "Auto Write",
+          "type": "boolean"
+        },
+        "batch_size": {
+          "default": 100,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Batch Size",
+          "type": "integer"
+        },
+        "tolerance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tolerance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ReconcileOptions",
+      "type": "object"
+    },
+    "ReconcileSources": {
+      "additionalProperties": false,
+      "properties": {
+        "erp": {
+          "minLength": 1,
+          "title": "Erp",
+          "type": "string"
+        },
+        "mes": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mes"
+        },
+        "statement_files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Statement Files",
+          "type": "array"
+        },
+        "wms": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wms"
+        }
+      },
+      "required": [
+        "erp"
+      ],
+      "title": "ReconcileSources",
+      "type": "object"
+    },
+    "Scope": {
+      "additionalProperties": false,
+      "description": "执行范围（G-05）。三个字段都必填，没有默认值。",
+      "properties": {
+        "org_id": {
+          "minLength": 1,
+          "title": "Org Id",
+          "type": "string"
+        },
+        "period": {
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$",
+          "title": "Period",
+          "type": "string"
+        },
+        "system_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "System Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "org_id",
+        "period",
+        "system_ids"
+      ],
+      "title": "Scope",
+      "type": "object"
+    },
+    "Tolerance": {
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "anyOf": [
+            {
+              "pattern": "^\\d+(\\.\\d{1,4})?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amount"
+        },
+        "price": {
+          "anyOf": [
+            {
+              "pattern": "^\\d+(\\.\\d{1,4})?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Price"
+        },
+        "qty": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Qty"
+        }
+      },
+      "title": "Tolerance",
+      "type": "object"
+    }
+  },
+  "$id": "https://contracts/agent/ag1.reconcile.input/1.0",
+  "additionalProperties": false,
+  "properties": {
+    "options": {
+      "$ref": "#/$defs/ReconcileOptions"
+    },
+    "scope": {
+      "$ref": "#/$defs/Scope"
+    },
+    "sources": {
+      "$ref": "#/$defs/ReconcileSources"
+    },
+    "suppliers": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Suppliers",
+      "type": "array"
+    }
+  },
+  "required": [
+    "scope",
+    "suppliers",
+    "sources"
+  ],
+  "title": "AG1ReconcileInput",
+  "type": "object"
+}

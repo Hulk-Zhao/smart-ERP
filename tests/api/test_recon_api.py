@@ -111,7 +111,7 @@ def test_recon_run_then_status_diffs_and_detail(env):
         headers=env.headers(),
     )
     assert missing.status_code == 404
-    assert missing.json()["code"] == "E-DATA-MISSING"
+    assert missing.json()["code"] == "E-RESOURCE-NOTFOUND"
 
 
 def test_recon_without_dataset_does_not_guess_sources(env):

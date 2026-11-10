@@ -198,11 +198,19 @@ def _authorize(
     )
 
 
-def _require_ticket(container: ApiContainer, ticket_id: UUID) -> TicketRecord:
-    ticket = container.tickets.get(ticket_id)
+def _require_ticket(
+    container: ApiContainer, session: SessionToken, ticket_id: UUID
+) -> TicketRecord:
+    """按 ``(tenant_id, ticket_id)`` 取工单；查不到统一 404。
+
+    不使用 403：403 会向攻击者确认「该 id 存在、只是不属于你」，等价于跨租户
+    存在性预言机。租户是查询条件，不是取到之后再判断的校验。
+    """
+
+    ticket = container.tickets.get(tenant_id=session.tenant_id, ticket_id=ticket_id)
     if ticket is None:
         raise ProblemError(
-            ErrorCode.DATA_MISSING, f"工单 {ticket_id} 不存在", status_code=404
+            ErrorCode.RESOURCE_NOT_FOUND, f"工单 {ticket_id} 不存在", status_code=404
         )
     return ticket
 
@@ -221,9 +229,13 @@ def _require_ticket_in_scope(ticket: TicketRecord, scope: Scope) -> None:
 
 
 def _require_initiator(ticket: TicketRecord, session: SessionToken) -> None:
-    """审批闸以「会话用户 = 发起人」判定；执行类动作必须由发起人提交。"""
+    """审批闸以「(租户, 用户) = (工单租户, 发起人)」判定。
 
-    if ticket.initiator_id != session.user_id:
+    只比 ``user_id`` 会在「同一 UUID 出现在两个租户」时把身份闸和租户闸一起
+    让过去；这里把租户并入身份比较，即便上层查询退化也不会跨租户放行。
+    """
+
+    if ticket.tenant_id != session.tenant_id or ticket.initiator_id != session.user_id:
         raise ProblemError(
             ErrorCode.AUTHZ_SCOPE,
             "执行类工单动作须由发起人（执行体）提交；审批人请走 /approvals 接口",
@@ -278,6 +290,7 @@ def list_tickets(
 ) -> tuple[list[TicketOut], str | None]:
     scope = _require_scope(session, build_scope(scope_in))
     rows, next_cursor = container.tickets.list(
+        tenant_id=session.tenant_id,
         scope=scope,
         state=state,
         scene_code=scene_code,
@@ -294,7 +307,7 @@ def get_ticket(
     container: ApiContainer, session: SessionToken, *, scope_in: ScopeIn, ticket_id: UUID
 ) -> TicketDetailOut:
     scope = _require_scope(session, build_scope(scope_in))
-    ticket = _require_ticket(container, ticket_id)
+    ticket = _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     return _ticket_detail(container, ticket)
 
@@ -309,7 +322,7 @@ async def approve_ticket(
     """审批通过并执行写计划：四道闸 → WriteGateway.execute → 审计影像 → 状态推进。"""
 
     scope = _require_scope(session, build_scope(body.scope))
-    ticket = _require_ticket(container, ticket_id)
+    ticket = _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     _require_initiator(ticket, session)
     if ticket.state is not TicketState.PENDING_APPROVAL:
@@ -425,7 +438,7 @@ def reject_ticket(
     """驳回：落审批记录并终止工单；无外部写入，因此不过写闸门。"""
 
     scope = _require_scope(session, build_scope(body.scope))
-    ticket = _require_ticket(container, ticket_id)
+    ticket = _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     if ticket.state is not TicketState.PENDING_APPROVAL:
         raise ProblemError(
@@ -474,7 +487,7 @@ def cancel_ticket(
     """终止：只允许尚未产生外部写入的三个状态，且必须写明原因。"""
 
     scope = _require_scope(session, build_scope(body.scope))
-    ticket = _require_ticket(container, ticket_id)
+    ticket = _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     if not body.comment.strip():
         raise ProblemError(ErrorCode.DATA_MISSING, "终止工单必须写明原因（comment）")
@@ -525,7 +538,7 @@ async def compensate_ticket(
     """触发补偿：先整单推导，再按系统分组经 WriteGateway 回写。"""
 
     scope = _require_scope(session, build_scope(body.scope))
-    ticket = _require_ticket(container, ticket_id)
+    ticket = _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     _require_initiator(ticket, session)
     if ticket.state not in (TicketState.EXECUTING, TicketState.COMPENSATING):
@@ -705,6 +718,7 @@ def list_pending_approvals(
 ) -> tuple[list[ApprovalTaskOut], str | None]:
     scope = _require_scope(session, build_scope(scope_in))
     rows, next_cursor = container.tickets.list(
+        tenant_id=session.tenant_id,
         scope=scope,
         state=TicketState.PENDING_APPROVAL.value,
         scene_code=scene_code,
@@ -750,7 +764,7 @@ def decide_approval(
     """审批人落审批记录；驳回同时终止工单，通过不代为执行（执行由发起人触发）。"""
 
     scope = _require_scope(session, build_scope(body.scope))
-    ticket = _require_ticket(container, ticket_id)
+    ticket = _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     if ticket.state is not TicketState.PENDING_APPROVAL:
         raise ProblemError(
@@ -902,10 +916,10 @@ def _recon_raw(scope: Scope, body: ReconRunIn, dataset: Any) -> dict[str, Any]:
 def _require_batch(
     container: ApiContainer, session: SessionToken, scope: Scope, batch_id: UUID
 ) -> ReconBatchRecord:
-    batch = container.recon_batches.get(batch_id)
-    if batch is None or batch.tenant_id != session.tenant_id:
+    batch = container.recon_batches.get(batch_id, tenant_id=session.tenant_id)
+    if batch is None:
         raise ProblemError(
-            ErrorCode.DATA_MISSING, f"对账批次 {batch_id} 不存在", status_code=404
+            ErrorCode.RESOURCE_NOT_FOUND, f"对账批次 {batch_id} 不存在", status_code=404
         )
     if batch.org_id != scope.org_id or batch.period != scope.period:
         raise ProblemError(
@@ -952,7 +966,7 @@ async def _load_snapshot(
     snapshot = await _recon_store(container).load(batch_id, session.tenant_id)
     if snapshot is None:
         raise ProblemError(
-            ErrorCode.DATA_MISSING, f"对账批次 {batch_id} 不存在", status_code=404
+            ErrorCode.RESOURCE_NOT_FOUND, f"对账批次 {batch_id} 不存在", status_code=404
         )
     if snapshot.org_id != scope.org_id or snapshot.period != scope.period:
         raise ProblemError(
@@ -1097,10 +1111,14 @@ def get_recon_diff(
 
 def _parse_diff_id(diff_id: str, result: ReconResult) -> int:
     if not diff_id.startswith("d") or not diff_id[1:].isdigit():
-        raise ProblemError(ErrorCode.DATA_MISSING, f"差异编号 {diff_id!r} 非法", status_code=404)
+        raise ProblemError(
+            ErrorCode.RESOURCE_NOT_FOUND, f"差异编号 {diff_id!r} 非法", status_code=404
+        )
     index = int(diff_id[1:])
     if index < 0 or index >= len(result.diffs):
-        raise ProblemError(ErrorCode.DATA_MISSING, f"差异 {diff_id} 不存在", status_code=404)
+        raise ProblemError(
+            ErrorCode.RESOURCE_NOT_FOUND, f"差异 {diff_id} 不存在", status_code=404
+        )
     return index
 
 
@@ -1166,7 +1184,7 @@ async def list_audit_images(
     limit: int | None,
 ) -> tuple[list[AuditImageOut], str | None]:
     scope = _require_scope(session, build_scope(scope_in))
-    ticket = _require_ticket(container, ticket_id)
+    ticket = _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     size = page_bounds(limit)
     offset = read_offset(cursor)
@@ -1193,7 +1211,7 @@ async def audit_chain(
     ticket_id: UUID,
 ) -> AuditChainOut:
     scope = _require_scope(session, build_scope(scope_in))
-    ticket = _require_ticket(container, ticket_id)
+    ticket = _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     verification = await container.ledger.verify(ticket.tenant_id)
     images = await container.ledger.list_images(
@@ -1222,7 +1240,7 @@ async def export_audit_csv(
     """按工单导出审计明细；返回 (文件名, 内容, sha256)。"""
 
     scope = _require_scope(session, build_scope(scope_in))
-    ticket = _require_ticket(container, ticket_id)
+    ticket = _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     images = await container.ledger.list_images(
         AuditQuery(

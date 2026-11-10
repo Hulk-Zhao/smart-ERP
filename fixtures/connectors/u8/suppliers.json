@@ -1,0 +1,23 @@
+[
+  {
+    "cVenCode": "V001",
+    "cVenName": "苏州精密铸造有限公司",
+    "cVenAbbName": "苏州精密",
+    "cTaxCode": "91320500MA1XXXXX1A",
+    "cMemo": "委外加工主供应商"
+  },
+  {
+    "cVenCode": "V002",
+    "cVenName": "无锡华通机械有限公司",
+    "cVenAbbName": "无锡华通",
+    "cTaxCode": "91320200MA2XXXXX2B",
+    "cMemo": null
+  },
+  {
+    "cVenCode": null,
+    "cVenName": "未建档供应商",
+    "cVenAbbName": null,
+    "cTaxCode": null,
+    "cMemo": "U8 里编码为空的脏数据"
+  }
+]

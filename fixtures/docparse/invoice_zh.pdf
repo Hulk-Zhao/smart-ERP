@@ -1,0 +1,120 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 787 >>
+stream
+BT /F1 18 Tf 1 0 0 1 50 790 Tm <0001000200030004000500060007> Tj ET
+BT /F1 12 Tf 1 0 0 1 50 750 Tm <0006000700080009000A000B000C000C000D000E000F001000100011> Tj ET
+BT /F1 12 Tf 1 0 0 1 50 722 Tm <0012000700130014000A000B000D0010000D001500160010001700160010000F> Tj ET
+BT /F1 12 Tf 1 0 0 1 50 694 Tm <00180019001A001B001C000A000B001D0007001E001F0020002100220023> Tj ET
+BT /F1 12 Tf 1 0 0 1 50 666 Tm <0024000300250026000A000B000F000F000E002700100010> Tj ET
+BT /F1 11 Tf 1 0 0 1 50 630 Tm <00280008000B0029000B002A002B001B001C000B0029000B002C002D000B0029000B002E002F000B0029000B002C0024000B0029000B00300031> Tj ET
+BT /F1 11 Tf 1 0 0 1 50 608 Tm <000F000B0029000B00320033002A002B000B0029000B0034000B0029000B000F0010000B0029000B000F0010002700100010000B0029000B000F00100010002700100010> Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type0 /BaseFont /SimSun /Encoding /Identity-H /DescendantFonts [6 0 R] /ToUnicode 8 0 R >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /CIDFontType2 /BaseFont /SimSun /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor 7 0 R /DW 1000 /W [ 1 [ 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 1000 ] ] >>
+endobj
+7 0 obj
+<< /Type /FontDescriptor /FontName /SimSun /Flags 4 /FontBBox [-25 -254 1000 880] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 >>
+endobj
+8 0 obj
+<< /Length 1052 >>
+stream
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /Adobe-Identity-UCS def
+/CMapType 2 def
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+52 beginbfchar
+<0001> <589E>
+<0002> <503C>
+<0003> <7A0E>
+<0004> <4E13>
+<0005> <7528>
+<0006> <53D1>
+<0007> <7968>
+<0008> <53F7>
+<0009> <7801>
+<000A> <003A>
+<000B> <0020>
+<000C> <0038>
+<000D> <0032>
+<000E> <0033>
+<000F> <0031>
+<0010> <0030>
+<0011> <0037>
+<0012> <5F00>
+<0013> <65E5>
+<0014> <671F>
+<0015> <0036>
+<0016> <002D>
+<0017> <0034>
+<0018> <9500>
+<0019> <552E>
+<001A> <65B9>
+<001B> <540D>
+<001C> <79F0>
+<001D> <84DD>
+<001E> <79D1>
+<001F> <6280>
+<0020> <6709>
+<0021> <9650>
+<0022> <516C>
+<0023> <53F8>
+<0024> <4EF7>
+<0025> <5408>
+<0026> <8BA1>
+<0027> <002E>
+<0028> <5E8F>
+<0029> <007C>
+<002A> <7269>
+<002B> <6599>
+<002C> <5355>
+<002D> <4F4D>
+<002E> <6570>
+<002F> <91CF>
+<0030> <91D1>
+<0031> <989D>
+<0032> <6D4B>
+<0033> <8BD5>
+<0034> <4E2A>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+endstream
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000001085 00000 n 
+0000001216 00000 n 
+0000001668 00000 n 
+0000001834 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R >>
+startxref
+2938
+%%EOF

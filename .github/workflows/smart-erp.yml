@@ -1,0 +1,209 @@
+﻿name: smart-erp CI
+
+# 依据 docs/product/tech/02-并发开发路线.md §2.9 S8 与 §4.6：
+#   本流水线只做「静态校验 + lint + 单元测试」，**不含任何部署步骤**
+#   （镜像构建、docker save、scp、docker load、compose up 都在发布序列里人工/发布机执行）。
+#
+# 为什么没有镜像构建：2 核构建机之外再在 CI 里 build 一遍会产生「CI 绿但现场包不同」的
+# 双源问题；镜像由 scripts/build-images.sh 在发布机产出并计算 sha256。
+
+on:
+  push:
+    branches: [main]
+    # 触发规则用「排除法」：除下列确定无关的路径外，任何改动都跑 CI。
+    # 反例：白名单式 paths 每新增一种文件类型就会静默漏跑一次——
+    # .git-blame-ignore-revs、docs/**、*.md 都这样漏过，PR 显示零 checks 却被当成「CI 通过」。
+    # 规约：CI 未触发即视为未验证（docs/product/tech/00-协作规约.md §9 第 5 条）。
+    paths-ignore:
+      - "dist/**"
+      - "**/.import_linter_cache/**"
+  pull_request:
+    paths-ignore:
+      - "dist/**"
+      - "**/.import_linter_cache/**"
+  workflow_dispatch:
+
+concurrency:
+  group: smart-erp-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. 部署面静态校验：compose 能解析、内存预算不超标、变量齐全、探针路径真实
+  # ---------------------------------------------------------------------------
+  deploy-static:
+    name: 部署面静态校验
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 安装测试依赖
+        run: python -m pip install --disable-pip-version-check pyyaml
+
+      - name: 离线静态校验（tests/deploy）
+        # 不用 -t .：tests/ 下没有 __init__.py，顶层包发现会报 not importable
+        run: python -m unittest discover -s tests/deploy -v
+
+      - name: compose 正向解析（demo 档）
+        run: |
+          docker compose \
+            --project-directory deploy/smart-erp \
+            --env-file tests/deploy/compose.env \
+            --file deploy/smart-erp/docker-compose.yml \
+            --profile demo config --quiet
+
+      - name: compose 正向解析（full 档）
+        # full = demo 常驻服务 + doc / worker-agent / worker-io / migrate
+        run: |
+          docker compose \
+            --project-directory deploy/smart-erp \
+            --env-file tests/deploy/compose.env \
+            --file deploy/smart-erp/docker-compose.yml \
+            --profile full config --quiet
+
+      - name: compose 负向校验（缺 ERP_IMAGE_TAG 必须失败）
+        run: |
+          set -euo pipefail
+          grep -v '^ERP_IMAGE_TAG=' tests/deploy/compose.env > /tmp/no-tag.env
+          if docker compose \
+               --project-directory deploy/smart-erp \
+               --env-file /tmp/no-tag.env \
+               --file deploy/smart-erp/docker-compose.yml \
+               config --quiet > /tmp/compose.out 2>/tmp/compose.err; then
+            echo "::error::缺 ERP_IMAGE_TAG 时 compose config 竟然通过，tag 强制失效"
+            exit 1
+          fi
+          grep -q "ERP_IMAGE_TAG" /tmp/compose.err /tmp/compose.out
+          echo "负向校验通过：缺 ERP_IMAGE_TAG 时被拒绝"
+
+  # ---------------------------------------------------------------------------
+  # 2. shell lint：发布脚本是本流的交付物，语法与常见坑必须机器把关
+  # ---------------------------------------------------------------------------
+  shell-lint:
+    name: 脚本 lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 语法检查
+        run: |
+          for f in scripts/*.sh; do bash -n "$f"; done
+
+      - name: shellcheck
+        run: shellcheck --severity=warning scripts/*.sh
+
+  # ---------------------------------------------------------------------------
+  # 3. Python lint + 单元测试（仓库全量，不只本流）
+  # ---------------------------------------------------------------------------
+  python-checks:
+    name: Python lint 与单元测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" ruff pyyaml
+
+      - name: 许可证门禁（AGPL / GPL / SSPL 硬拒绝 + 白名单）
+        # 制度化的 AGPL 收口（docs/product/tech/01-技术架构.md §2.2）：
+        # pip-licenses 枚举已安装依赖的许可证，scripts/check_licenses.py 对照
+        # contracts/deps/license-allowlist.txt；失败时输出包名 + 许可证 + 反向依赖链。
+        # pip-licenses 自身是 MIT，只装在 CI 里，不进运行期依赖。
+        run: |
+          python -m pip install --disable-pip-version-check pip-licenses
+          python scripts/check_licenses.py
+
+      - name: 锁文件漂移检查（存在 uv.lock 时）
+        # CI 装依赖走的是 `pip install -e ".[dev]"`，根本不读 uv.lock，
+        # 所以锁文件与 pyproject 漂移时没有任何流程会发现（曾出现 httpx 还挂在
+        # dev extra、lock 与 pyproject 不一致，靠人工排查才发现）。这里补一道：
+        # 有 uv.lock 就必须与 pyproject 一致；没有则跳过（不挡无锁文件的贡献者）。
+        run: |
+          if [ ! -f uv.lock ]; then
+            echo "uv.lock 不存在，跳过锁文件检查"
+            exit 0
+          fi
+          python -m pip install --disable-pip-version-check "uv>=0.5"
+          uv lock --check
+
+      - name: ruff 阻断档（真错误必须为零）
+        # 只卡「代码真的坏了」这一档：E9=语法/解析错误，F63=比较/断言类无效写法，
+        # F7=语法上合法但必然错的控制流，F82=未定义名（F821/F822/F823）。
+        # 这些不是风格偏好，出现即代表运行时必炸，必须零容忍。
+        run: |
+          ruff check apps tests db observability \
+            --select E9,F63,F7,F82 \
+            --output-format=concise
+
+      - name: ruff 风格项观测（非阻断）
+        # 全量清理（当前 200+ 处，多数可 --fix）暂不动：扫描者若直接改全仓库文件，
+        # 会和 S0/S7 的进行中改动冲突。这里只记录数字与趋势，不挡合并；
+        # 等 S0/S7 收工后单独立项做一次集中收口（届时把本步骤转为门禁）。
+        continue-on-error: true
+        run: |
+          echo "::group::ruff --statistics（全量风格项，仅观测）"
+          ruff check apps tests db observability --statistics
+          echo "::endgroup::"
+
+      - name: pytest（按流分目录执行）
+        # 为什么不是一次 `pytest tests`：
+        #   1) 历史上 tests/connectors 与 tests/platform 有同名 test_errors.py /
+        #      test_levels.py（后者已改名 test_connectors_*），且仓库没有
+        #      tests/__init__.py → prepend 模式下报 import file mismatch；
+        #   2) 只加 `--import-mode=importlib` 能解掉同名冲突，但会把「同目录裸导入」的
+        #      helper 打挂（from support/dbutil/security_support import ...），实测 12 个
+        #      模块收集失败。
+        # 分目录 = 每个进程只收集一个目录，两个问题同时消失，且新增同名文件也不会再炸。
+        # 待各流把 tests/ 改成正规包（__init__.py + 相对导入）后，可退回单进程全量收集。
+        run: |
+          set -uo pipefail
+          rc=0
+          for d in tests/*/; do
+            d="${d%/}"
+            [ -d "$d" ] || continue
+            echo "::group::pytest ${d}"
+            python -m pytest "${d}" -q
+            code=$?
+            echo "::endgroup::"
+            if [ "$code" -ne 0 ] && [ "$code" -ne 5 ]; then
+              # 5 = 该目录暂无用例（例如 tests/web）
+              echo "::error::pytest ${d} 失败（exit=${code}）"
+              rc=1
+            fi
+          done
+          exit "$rc"
+
+      - name: 基线观测（非阻断）：整棵 tests/ 单进程收集
+        # 观测项，不是门禁。门禁是上面的分目录循环（每个进程只收集一个目录，
+        # 同名文件与「同目录裸 helper 导入」两个问题同时消失）。
+        #
+        # 关于 --import-mode=importlib：实测不可用。它能解掉同名文件冲突，但
+        # importlib 模式不会把测试目录加入 sys.path，导致 tests/agents、
+        # tests/audit、tests/security 下 12 个模块的裸 helper 导入直接
+        # ModuleNotFoundError（from support/dbutil/audit_support/security_support import ...）。
+        # 因此这里保留 prepend 模式做「今天全量收集是否绿」的观测，红了不挡合并。
+        continue-on-error: true
+        run: python -m pytest tests -q
+
+      - name: 导入边界契约（C2）
+        run: lint-imports

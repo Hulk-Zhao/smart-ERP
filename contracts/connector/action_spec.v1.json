@@ -1,0 +1,21 @@
+{
+  "contract": "action-spec",
+  "fields": {
+    "compensation": "object | null（W1 及以上必填）",
+    "forbidden_fields": "string[]",
+    "idempotent": "boolean",
+    "key": "string, '{connector}.{alias}.{action}'",
+    "level": "W0 | W1 | W2",
+    "rate_limit": "object{qps, daily_quota, concurrency}",
+    "verify": "object（必填）",
+    "writable_fields": "string[]"
+  },
+  "registration_rejects": [
+    "level == W3",
+    "level >= W1 且 compensation == null",
+    "verify == null",
+    "writable_fields ∩ critical_readonly_fields 非空",
+    "action 命中禁止动词表"
+  ],
+  "version": "1.0"
+}

@@ -1,0 +1,16 @@
+# docparse.Dockerfile 的构建上下文过滤（BuildKit 读取与 Dockerfile 同名的 *.dockerignore）
+# 目的：构建上下文只留源码，docs/tests/.git 不进 daemon。
+.git
+.gitignore
+.github
+docs
+tests
+deploy
+.screenshots
+**/__pycache__
+**/*.py[cod]
+.venv
+venv
+node_modules
+dist
+*.log

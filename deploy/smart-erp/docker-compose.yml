@@ -1,0 +1,484 @@
+# =============================================================================
+# 聚合型 AI ERP · 云端精简档（demo：4C4G 现机 5 容器 / full：8G 起 9 容器）
+# -----------------------------------------------------------------------------
+# 依据：docs/product/tech/01-技术架构.md §1A.3（compose 拓扑）/ §1A.4（网络与端口）
+#       §1A.6（健康检查与限额）/ §1A.7（共用 PG15 隔离）
+#
+# 档位差异（与 §1A.3 差异表一致）：
+#   demo：api / worker（agent+io 合一）/ scheduler / connector-gw / web，合计 1200MiB；
+#   full：demo 全部 + doc（3G）/ worker-agent（2G）/ worker-io（1G）/ migrate（一次性）。
+#         full 档通过 `--profile full` 启动；migrate 不进常驻循环（restart: "no"）。
+#
+# 设计约束（评审时逐条对照，不是疏漏）：
+#   1. 数据库复用外部 PG15（hulkai-gz-api 的 aps-postgres），本文件不起 pg / redis /
+#      minio —— 任何档位都没有这些容器，CI 与 tests/deploy 均有断言。
+#   2. 队列状态在 PG 的 erp.job_queue 表，不用 Redis（§1A.7.3）。
+#   3. 迁移不在任何常驻容器的 entrypoint 里执行（§1A.6）；发布时由 erp_migrator
+#      单独跑 alembic，成功后才 up -d。
+#   4. 镜像 tag 必须是完整 40 位 git sha，用 ${ERP_IMAGE_TAG:?...} 强制；不建镜像仓库。
+#   5. 不使用 memswap_limit 放水：宁可单容器 OOM 重启，也不要 4G 整机 swap 假死。
+#
+# 用法：
+#   cp deploy/smart-erp/.env.example deploy/smart-erp/.env   # 填 ERP_IMAGE_TAG 等
+#   docker compose --project-directory deploy/smart-erp --profile demo up -d
+# =============================================================================
+name: smart-erp
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+# 三个 Python 进程（api / worker / scheduler）共用 app 镜像；gw 与 web 各自独立。
+x-app-image: &app-image "smart-erp/app:${ERP_IMAGE_TAG:?ERP_IMAGE_TAG must be the full 40-char git sha}"
+
+x-app-env: &app-env
+  TZ: Asia/Shanghai
+  LANG: C.UTF-8
+  PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  # 键名以 apps/platform/config.py 为准（S0 已落地）：ERP_APP_ENV，不是 ERP_ENV
+  ERP_APP_ENV: ${ERP_APP_ENV:-demo}
+  ERP_LOG_LEVEL: ${ERP_LOG_LEVEL:-INFO}
+  ERP_IMAGE_TAG: ${ERP_IMAGE_TAG:?ERP_IMAGE_TAG must be the full 40-char git sha}
+  ERP_CONFIG_DIR: ${ERP_CONFIG_DIR:-/app/config}
+
+services:
+  # ---------------------------------------------------------------------------
+  # api：唯一对外暴露的业务端口 8010（香港反代 → 广州，见 §1A.4）
+  # 预算 384m / 0.8 核；/healthz 不查依赖（避免共用实例抖动引发重启风暴）
+  # ---------------------------------------------------------------------------
+  api:
+    profiles: ["demo", "full"]
+    image: *app-image
+    container_name: erp_api
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command:
+      - uvicorn
+      - apps.main:app
+      - --host=0.0.0.0
+      - --port=8010
+      - --workers=1
+      - --limit-concurrency=64
+      - --root-path=${ERP_API_ROOT_PATH:-/erp/api}
+    environment:
+      <<: *app-env
+      ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
+      ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-4}
+      ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-4}
+      # 角色级已有默认；这里显式下发，避免实例 owner 漏设时没有兜底（C14）
+      ERP_DB_STATEMENT_TIMEOUT_MS: ${ERP_DB_STATEMENT_TIMEOUT_MS:-30000}
+      ERP_DB_LOCK_TIMEOUT_MS: ${ERP_DB_LOCK_TIMEOUT_MS:-3000}
+      ERP_DB_IDLE_TX_TIMEOUT_MS: ${ERP_DB_IDLE_TX_TIMEOUT_MS:-60000}
+      ERP_API_PORT: ${ERP_API_PORT:-8010}
+      ERP_API_ROOT_PATH: ${ERP_API_ROOT_PATH:-/erp/api}
+      ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
+      ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
+      ERP_OBJECT_STORE_PATH: ${ERP_OBJECT_STORE_PATH:-/data/objects}
+      ERP_S3_ENDPOINT: ${ERP_S3_ENDPOINT:-}
+      ERP_S3_BUCKET: ${ERP_S3_BUCKET:-}
+      ERP_S3_ACCESS_KEY: ${ERP_S3_ACCESS_KEY:-}
+      ERP_S3_SECRET_KEY: ${ERP_S3_SECRET_KEY:-}
+      ERP_LLM_BASE_URL: ${ERP_LLM_BASE_URL:-}
+      ERP_LLM_API_KEY: ${ERP_LLM_API_KEY:-}
+      ERP_LLM_MODEL: ${ERP_LLM_MODEL:-}
+      ERP_LLM_TIMEOUT_SECONDS: ${ERP_LLM_TIMEOUT_SECONDS:-60}
+      ERP_METRICS_PORT: ${ERP_METRICS_PORT:-8011}
+    ports:
+      # 仅香港反代源 IP；安全组必须限源（§1A.4 端口分配）
+      - "${ERP_API_PORT:-8010}:8010"
+    volumes:
+      - erp_objects:/data/objects
+      - erp_logs:/app/logs
+      - ./config:/app/config:ro
+    networks:
+      - smart-erp-net
+      - erp-db-net
+    depends_on:
+      connector-gw:
+        condition: service_healthy
+    mem_limit: 384m
+    cpus: 0.8
+    healthcheck:
+      # 纯 python 探测：slim 镜像不带 curl/wget，避免为探针多装一个包
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8010/healthz', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # worker：demo 档把 agent 队列与 io 队列合并在一个容器（full 档拆 worker-io）
+  # 预算 512m / 1.5 核；健康检查写 worker_heartbeat 行（§1A.6），不依赖 broker
+  # ---------------------------------------------------------------------------
+  worker:
+    profiles: ["demo"]
+    image: *app-image
+    container_name: erp_worker
+    restart: unless-stopped
+    stop_grace_period: 60s
+    command:
+      - python
+      - -m
+      - core.runtime.worker
+      - --queues=${ERP_WORKER_QUEUES:-agent,io}
+      - --concurrency=${ERP_WORKER_CONCURRENCY:-4}
+    environment:
+      <<: *app-env
+      ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
+      ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-4}
+      ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
+      ERP_WORKER_QUEUES: ${ERP_WORKER_QUEUES:-agent,io}
+      ERP_WORKER_CONCURRENCY: ${ERP_WORKER_CONCURRENCY:-4}
+      ERP_WORKER_HEALTH_PORT: ${ERP_WORKER_HEALTH_PORT:-8011}
+      ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
+      ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
+      ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
+      ERP_OBJECT_STORE_PATH: ${ERP_OBJECT_STORE_PATH:-/data/objects}
+      ERP_S3_ENDPOINT: ${ERP_S3_ENDPOINT:-}
+      ERP_S3_BUCKET: ${ERP_S3_BUCKET:-}
+      ERP_S3_ACCESS_KEY: ${ERP_S3_ACCESS_KEY:-}
+      ERP_S3_SECRET_KEY: ${ERP_S3_SECRET_KEY:-}
+      ERP_LLM_BASE_URL: ${ERP_LLM_BASE_URL:-}
+      ERP_LLM_API_KEY: ${ERP_LLM_API_KEY:-}
+      ERP_LLM_MODEL: ${ERP_LLM_MODEL:-}
+      ERP_LLM_TIMEOUT_SECONDS: ${ERP_LLM_TIMEOUT_SECONDS:-60}
+      ERP_METRICS_PORT: ${ERP_METRICS_PORT:-8011}
+    volumes:
+      - erp_objects:/data/objects
+      - erp_logs:/app/logs
+      - ./config:/app/config:ro
+    networks:
+      - smart-erp-net
+      - erp-db-net
+    expose:
+      # 8011 只在内网可达：健康/指标由 api 与运维侧采集，不作宿主发布
+      - "8011"
+    mem_limit: 512m
+    cpus: 1.5
+    healthcheck:
+      test: ["CMD", "python", "-m", "tools.health", "worker"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # scheduler：单实例（pg_advisory_lock），只做巡检与定时，不执行迁移
+  # 预算 96m / 0.2 核
+  # ---------------------------------------------------------------------------
+  scheduler:
+    profiles: ["demo", "full"]
+    image: *app-image
+    container_name: erp_scheduler
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command: ["python", "-m", "core.runtime.scheduler"]
+    environment:
+      <<: *app-env
+      ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
+      ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-1}
+      ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
+      ERP_SCHEDULER_TICK_SECONDS: ${ERP_SCHEDULER_TICK_SECONDS:-60}
+      ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
+      ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
+      ERP_METRICS_PORT: ${ERP_METRICS_PORT:-8011}
+    volumes:
+      - erp_logs:/app/logs
+    networks:
+      - smart-erp-net
+      - erp-db-net
+    mem_limit: 96m
+    cpus: 0.2
+    healthcheck:
+      # 近 5 分钟无心跳即判死；锁丢失时返回非 0（§1A.6）
+      test: ["CMD", "python", "-m", "tools.health", "scheduler"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # connector-gw：连接器网关（MCP Server + 限流 + 拦截记录）
+  # 最小权限：不挂 erp-db-net（网关不需要 DB），read_only 根文件系统
+  # 预算 160m / 0.3 核；8012 只在内网暴露
+  # ---------------------------------------------------------------------------
+  connector-gw:
+    profiles: ["demo", "full"]
+    image: "smart-erp/connector-gw:${ERP_IMAGE_TAG:?ERP_IMAGE_TAG must be the full 40-char git sha}"
+    container_name: erp_gw
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # 入口以 S1 落地的 apps/connectors/gateway.py 为准：host 默认 0.0.0.0，
+    # 端口读 ERP_CONNECTOR_GW_PORT（缺省 8012），因此这里不再硬编码 --port。
+    # tests/deploy 有断言锁死这条命令，防止回退到旧路径 connectors.gateway。
+    command: ["python", "-m", "apps.connectors.gateway"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+    environment:
+      TZ: Asia/Shanghai
+      LANG: C.UTF-8
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      ERP_APP_ENV: ${ERP_APP_ENV:-demo}
+      ERP_LOG_LEVEL: ${ERP_LOG_LEVEL:-INFO}
+      ERP_IMAGE_TAG: ${ERP_IMAGE_TAG:?ERP_IMAGE_TAG must be the full 40-char git sha}
+      ERP_CONFIG_DIR: ${ERP_CONFIG_DIR:-/app/config}
+      # 与下方 expose 的 8012 对齐；apps/connectors/gateway.py 读这个键
+      ERP_CONNECTOR_GW_PORT: ${ERP_CONNECTOR_GW_PORT:-8012}
+      ERP_GW_TIMEOUT_SECONDS: ${ERP_GW_TIMEOUT_SECONDS:-30}
+      # 出网白名单写在 config 快照里，随仓库版本管理；此处只给路径
+      ERP_GW_EGRESS_ALLOWLIST_FILE: ${ERP_GW_EGRESS_ALLOWLIST_FILE:-/app/config/gw-egress.yaml}
+    volumes:
+      - ./config:/app/config:ro
+    networks:
+      - smart-erp-net
+    expose:
+      # 8012 只在内网可达：栈内 api/worker 调用，宿主不发布（§1A.4）
+      - "8012"
+    mem_limit: 160m
+    cpus: 0.3
+    healthcheck:
+      # 返回已注册动作数与白名单 hash（§1A.6）
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8012/healthz', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # web：自带 nginx 的静态产物，子路径部署 base=/demo/smart-erp/
+  # 预算 48m / 0.1 核；8088:8080 仅香港反代访问
+  # ---------------------------------------------------------------------------
+  web:
+    profiles: ["demo", "full"]
+    image: "smart-erp/web:${ERP_IMAGE_TAG:?ERP_IMAGE_TAG must be the full 40-char git sha}"
+    container_name: erp_web
+    restart: unless-stopped
+    stop_grace_period: 15s
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "${ERP_WEB_PORT:-8088}:8080"
+    networks:
+      - smart-erp-net
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 48m
+    cpus: 0.1
+    healthcheck:
+      # nginx:alpine 自带 busybox wget；/healthz 由 web-nginx.conf 直接返回 200
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging: *default-logging
+
+  # ===========================================================================
+  # 以下 4 个服务只在 full 档启动（--profile full）；demo 档不占用内存
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # doc：文档解析（OCR/版面分析未来在此进程内做）
+  # 预算 3072m / 1.5 核；解析器冷启动慢，start_period 给到 300s（§1A.3）
+  # 现状：S5 尚未交付 erp_doc 常驻进程，入口是镜像内的临时健康壳，
+  #       /readyz 会真跑一次解析管线（见 projects/smart-ERP/docker/docparse_service.py）
+  # ---------------------------------------------------------------------------
+  doc:
+    profiles: ["full"]
+    image: "smart-erp/doc:${ERP_IMAGE_TAG:?ERP_IMAGE_TAG must be the full 40-char git sha}"
+    container_name: erp_doc
+    restart: unless-stopped
+    stop_grace_period: 120s
+    command: ["python", "/app/docparse_service.py", "--port=8020"]
+    environment:
+      <<: *app-env
+      ERP_APP_ENV: ${ERP_APP_ENV:-full}
+      # 与下方 expose 的 8020 对齐
+      ERP_DOC_PORT: ${ERP_DOC_PORT:-8020}
+      ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
+      ERP_OBJECT_STORE_PATH: ${ERP_OBJECT_STORE_PATH:-/data/objects}
+      ERP_S3_ENDPOINT: ${ERP_S3_ENDPOINT:-}
+      ERP_S3_BUCKET: ${ERP_S3_BUCKET:-}
+      ERP_S3_ACCESS_KEY: ${ERP_S3_ACCESS_KEY:-}
+      ERP_S3_SECRET_KEY: ${ERP_S3_SECRET_KEY:-}
+      ERP_METRICS_PORT: ${ERP_METRICS_PORT:-8011}
+    volumes:
+      - erp_objects:/data/objects
+      - ./config:/app/config:ro
+    networks:
+      - smart-erp-net
+    expose:
+      # 8020 只在内网：worker/doc 之间互访，宿主不发布（§1A.4）
+      - "8020"
+    mem_limit: 3072m
+    cpus: 1.5
+    healthcheck:
+      # 探 /readyz：真跑一次解析管线，管线坏了容器就应判不健康（/healthz 只证明进程活着）
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8020/readyz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # worker-agent：full 档把 agent 队列单独拆出（demo 档由 worker 合并承担）
+  # 预算 2048m / 2 核
+  # ---------------------------------------------------------------------------
+  worker-agent:
+    profiles: ["full"]
+    image: *app-image
+    container_name: erp_worker_agent
+    restart: unless-stopped
+    stop_grace_period: 60s
+    command:
+      - python
+      - -m
+      - core.runtime.worker
+      - --queues=agent
+      - --concurrency=${ERP_AGENT_WORKER_CONCURRENCY:-4}
+    environment:
+      <<: *app-env
+      ERP_APP_ENV: ${ERP_APP_ENV:-full}
+      ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
+      ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-4}
+      ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
+      ERP_WORKER_QUEUES: agent
+      ERP_WORKER_CONCURRENCY: ${ERP_AGENT_WORKER_CONCURRENCY:-4}
+      ERP_WORKER_HEALTH_PORT: ${ERP_WORKER_HEALTH_PORT:-8011}
+      ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
+      ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
+      ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
+      ERP_OBJECT_STORE_PATH: ${ERP_OBJECT_STORE_PATH:-/data/objects}
+      ERP_S3_ENDPOINT: ${ERP_S3_ENDPOINT:-}
+      ERP_S3_BUCKET: ${ERP_S3_BUCKET:-}
+      ERP_S3_ACCESS_KEY: ${ERP_S3_ACCESS_KEY:-}
+      ERP_S3_SECRET_KEY: ${ERP_S3_SECRET_KEY:-}
+      ERP_LLM_BASE_URL: ${ERP_LLM_BASE_URL:-}
+      ERP_LLM_API_KEY: ${ERP_LLM_API_KEY:-}
+      ERP_LLM_MODEL: ${ERP_LLM_MODEL:-}
+      ERP_LLM_TIMEOUT_SECONDS: ${ERP_LLM_TIMEOUT_SECONDS:-60}
+      ERP_METRICS_PORT: ${ERP_METRICS_PORT:-8011}
+    volumes:
+      - erp_objects:/data/objects
+      - erp_logs:/app/logs
+      - ./config:/app/config:ro
+    networks:
+      - smart-erp-net
+      - erp-db-net
+    expose:
+      - "8011"
+    mem_limit: 2048m
+    cpus: 2.0
+    healthcheck:
+      test: ["CMD", "python", "-m", "tools.health", "worker"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # worker-io：full 档的 io 队列（文件导入/导出/对象存储搬运），与 agent 隔离，
+  # 避免大 IO 任务把 agent 的响应时间拖长
+  # 预算 1024m / 1 核
+  # ---------------------------------------------------------------------------
+  worker-io:
+    profiles: ["full"]
+    image: *app-image
+    container_name: erp_worker_io
+    restart: unless-stopped
+    stop_grace_period: 120s
+    command:
+      - python
+      - -m
+      - core.runtime.worker
+      - --queues=io
+      - --concurrency=${ERP_IO_WORKER_CONCURRENCY:-2}
+    environment:
+      <<: *app-env
+      ERP_APP_ENV: ${ERP_APP_ENV:-full}
+      ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
+      ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-2}
+      ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
+      ERP_WORKER_QUEUES: io
+      ERP_WORKER_CONCURRENCY: ${ERP_IO_WORKER_CONCURRENCY:-2}
+      ERP_WORKER_HEALTH_PORT: ${ERP_WORKER_HEALTH_PORT:-8011}
+      ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
+      ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
+      ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
+      ERP_OBJECT_STORE_PATH: ${ERP_OBJECT_STORE_PATH:-/data/objects}
+      ERP_S3_ENDPOINT: ${ERP_S3_ENDPOINT:-}
+      ERP_S3_BUCKET: ${ERP_S3_BUCKET:-}
+      ERP_S3_ACCESS_KEY: ${ERP_S3_ACCESS_KEY:-}
+      ERP_S3_SECRET_KEY: ${ERP_S3_SECRET_KEY:-}
+      ERP_DOC_SERVICE_URL: ${ERP_DOC_SERVICE_URL:-http://doc:8020}
+      ERP_METRICS_PORT: ${ERP_METRICS_PORT:-8011}
+    volumes:
+      - erp_objects:/data/objects
+      - erp_logs:/app/logs
+      - ./config:/app/config:ro
+    networks:
+      - smart-erp-net
+      - erp-db-net
+    expose:
+      - "8011"
+    mem_limit: 1024m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "python", "-m", "tools.health", "worker"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # migrate：一次性迁移（erp_migrator 角色，连接数限 4）
+  # 不进常驻循环：restart: "no"，跑完即退出；发布流程里先 run --rm migrate 再 up -d
+  # 预算 128m / 0.2 核
+  # ---------------------------------------------------------------------------
+  migrate:
+    profiles: ["full"]
+    image: *app-image
+    container_name: erp_migrate
+    restart: "no"
+    command: ["alembic", "-c", "/app/alembic.ini", "upgrade", "head"]
+    environment:
+      <<: *app-env
+      ERP_APP_ENV: ${ERP_APP_ENV:-full}
+      # 用迁移专用角色，不用业务的 erp_app：DDL 权限只在 erp_migrator 上
+      ERP_DATABASE_URL: ${ERP_MIGRATION_DATABASE_URL:?ERP_MIGRATION_DATABASE_URL is required (postgresql+asyncpg://erp_migrator:...@<pg-host>:5432/smart_erp)}
+    networks:
+      - smart-erp-net
+      - erp-db-net
+    mem_limit: 128m
+    cpus: 0.2
+    logging: *default-logging
+
+volumes:
+  # demo 档没有 MinIO：对象走 LocalObjectStore 落在 erp_objects（§1A.3）
+  erp_objects:
+    name: smart-erp_objects
+  erp_logs:
+    name: smart-erp_logs
+
+networks:
+  # 栈内互访网络
+  smart-erp-net:
+    name: smart-erp_net
+  # 外部网络：APS 栈的默认网络，共用 PG15 只在该网内 expose 5432。
+  # 该网络不存在时 up 会直接报错（预期行为），preflight 需先 `SELECT 1`。
+  erp-db-net:
+    name: ${ERP_DB_NETWORK:-hulkai-gz-api_default}
+    external: true

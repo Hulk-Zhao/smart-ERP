@@ -1,0 +1,17 @@
+# web.Dockerfile 的构建上下文过滤
+# 注意：不要排除 web/ 与 projects/smart-ERP/docker/（构建需要 package.json 与 nginx 配置）
+.git
+.gitignore
+.github
+docs
+tests
+deploy
+.screenshots
+**/__pycache__
+**/*.py[cod]
+.venv
+venv
+node_modules
+dist
+**/web/node_modules
+*.log
