@@ -13,10 +13,15 @@ from observability.exporter import (
 )
 from observability.gateway import TracedConnector, audit_write_span
 from observability.metrics import (
+    BATCH_STATUS_TO_RESULT,
     DEFAULT_METRICS_PATH,
     FAILURE_CLASSES,
     METRICS_ENABLED_VAR,
     METRICS_PATH_VAR,
+    RECON_AUTO_OUTCOMES,
+    RECON_DEGRADATION_REASONS,
+    RECON_LINE_OUTCOMES,
+    RECON_RATIO_BUCKETS,
     RECON_RESULTS,
     STAGE_BUCKETS,
     TICKET_STATUSES,
@@ -28,6 +33,7 @@ from observability.metrics import (
     MetricLabelError,
     MetricsEndpoint,
     MetricsRegistry,
+    classify_recon_line,
     install_metrics,
     metrics_enabled,
     render_metrics,
@@ -55,6 +61,7 @@ from observability.trace import (
 )
 
 __all__ = [
+    "BATCH_STATUS_TO_RESULT",
     "CHAIN_PHASES",
     "DEFAULT_METRICS_PATH",
     "DEFAULT_TRACE_FILE",
@@ -62,6 +69,10 @@ __all__ = [
     "KNOWN_SPANS",
     "METRICS_ENABLED_VAR",
     "METRICS_PATH_VAR",
+    "RECON_AUTO_OUTCOMES",
+    "RECON_DEGRADATION_REASONS",
+    "RECON_LINE_OUTCOMES",
+    "RECON_RATIO_BUCKETS",
     "RECON_RESULTS",
     "REQUIRED_ATTRIBUTES",
     "STAGE_BUCKETS",
@@ -90,6 +101,7 @@ __all__ = [
     "UsageRecord",
     "audit_write_span",
     "build_decision_chain",
+    "classify_recon_line",
     "exporter_from_env",
     "format_traceparent",
     "install_metrics",
