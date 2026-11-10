@@ -96,8 +96,11 @@ run_remote() {
   fi
 }
 
-echo "== 1/5 建远端目录 ${REMOTE_DIR} =="
-run_remote "mkdir -p '${REMOTE_DIR}/dist'"
+echo "== 1/5 建远端目录 ${REMOTE_DIR}（含 inbox 文件通道收件箱）=="
+# inbox 与 docker-compose.yml 里的 ./inbox:/data/inbox:ro 对应：
+#   网关以 uid=10001 只读访问，目录属主就是 10001，权限 0750 足够；
+#   必须先建好：目录缺失时 docker 会以 root 自动建一个，属主不对，connector-gw 读不到就启动失败。
+run_remote "mkdir -p '${REMOTE_DIR}/dist' && install -d -m 0750 -o 10001 -g 10001 '${REMOTE_DIR}/inbox'"
 
 echo "== 2/5 传镜像包与校验文件（约 0.18–0.25G，5–7 分钟）=="
 if (( DRY_RUN )); then

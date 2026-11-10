@@ -414,6 +414,68 @@ class ComposeStaticTest(unittest.TestCase):
             "service_healthy",
         )
 
+    def test_file_inbox_mount_is_read_only(self):
+        """文件通道：inbox 只能只读挂给 connector-gw，且不得落在可写卷里。"""
+        gw = self.services["connector-gw"]
+        volumes = [str(v) for v in gw.get("volumes", [])]
+        inbox_mounts = [v for v in volumes if "/data/inbox" in v]
+        self.assertEqual(
+            inbox_mounts, ["./inbox:/data/inbox:ro"],
+            f"connector-gw 必须且只能只读挂载 ./inbox:/data/inbox:ro，实际 {volumes}",
+        )
+        for volume in inbox_mounts:
+            self.assertTrue(volume.endswith(":ro"), f"inbox 必须只读挂载：{volume}")
+
+        # 其余服务不得挂 inbox；也不得把 inbox 做成可写 named volume
+        for name, svc in self.services.items():
+            if name == "connector-gw":
+                continue
+            with self.subTest(service=name):
+                mounts = " ".join(str(v) for v in svc.get("volumes", []))
+                self.assertNotIn("/data/inbox", mounts, f"{name} 不应挂载文件通道收件箱")
+        self.assertNotIn("inbox", self.compose.get("volumes", {}))
+
+        # 环境键必须登记在 connector-gw 上，且默认留空（演示/生产默认关闭）
+        self.assertIn("ERP_FILE_INBOX", gw["environment"])
+        self.assertEqual(str(gw["environment"]["ERP_FILE_INBOX"]), "${ERP_FILE_INBOX:-}")
+
+    def test_file_inbox_is_demo_only_by_default(self):
+        """demo 档默认开启 /data/inbox；full/prod 保持空值 = 关闭。"""
+        env_dir = DEPLOY_DIR / "env"
+
+        def read_env(name: str) -> dict:
+            keys = {}
+            for line in (env_dir / name).read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                keys[key.strip()] = value.strip()
+            return keys
+
+        self.assertEqual(
+            read_env("demo.env").get("ERP_FILE_INBOX"), "/data/inbox",
+            "demo 档应默认开启文件通道（/data/inbox）",
+        )
+        self.assertEqual(read_env("prod.env").get("ERP_FILE_INBOX"), "",
+                         "full/prod 必须默认关闭文件通道（空值）")
+
+    def test_file_inbox_backup_scope(self):
+        """备份排除 inbox、恢复不清空：目录是宿主绑定挂载，不在备份卷内，且 RUNBOOK 写明口径。"""
+        runbook = (DEPLOY_DIR / "RUNBOOK.md").read_text(encoding="utf-8")
+        self.assertIn("inbox", runbook)
+        self.assertIn("不进备份", runbook, "RUNBOOK 必须写明 inbox 不进备份")
+        self.assertIn("恢复不清空", runbook, "RUNBOOK 必须写明 restore 不得清空 inbox")
+
+        # 部署脚本必须先建 inbox 并交还给 uid 10001（容器用户 app），否则网关读不到
+        deploy_script = (SCRIPTS_DIR / "deploy-images.sh").read_text(encoding="utf-8")
+        self.assertIn("install -d -m 0750 -o 10001 -g 10001", deploy_script)
+        self.assertIn("inbox", deploy_script)
+
+        # 备份对象只有 named volume；inbox 不是 named volume，结构上就不会被卷备份带走
+        named_volumes = set(self.compose.get("volumes", {}))
+        self.assertEqual(named_volumes, {"erp_objects", "erp_logs"})
+
 
 class ArtifactsTest(unittest.TestCase):
     """Dockerfile / 脚本 / 开通 SQL 的静态断言。"""
