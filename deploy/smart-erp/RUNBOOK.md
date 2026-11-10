@@ -342,11 +342,23 @@ curl -m 5 -o /dev/null -sS -w '%{http_code}\n' https://<域名>/metrics   # 期�
 配合 5.3 第 ③ 条（`http://<公网IP>:8010/metrics` 必须连接失败），「矩阵三行 + 根路径兜底 +
 公网直连失败」全部通过，才算「指标既不能绕过 nginx，也不能直连宿主」。换域名/改前缀后必须重跑。
 
-> **开关下发位置**：`docker-compose.yml` 已把 `ERP_METRICS_ENABLED` 显式下发给 `api`
-> （schema `scope=compose`、`services=["api"]`），`deploy/smart-erp/.env.example` 保持空值——
-> 生产默认关闭。做第 2 行时在 `deploy/smart-erp/.env` 里临时写 `1`，验收完删掉该行
-> （或改回 `0`）并再次 `--force-recreate api`；`env/prod.env` 不登记该键，避免「关闭」
-> 在线上偶发变成「开启」。
+> **接线与开关下发位置**：
+>
+> - 挂载点在 `apps/main.py:35`：`install_metrics(app, get_container().metrics)`（#65）。
+>   指标注册表取的是容器里同一个 `metrics` 实例，业务埋点与 `/metrics` 输出是同一份数据。
+> - `ERP_METRICS_ENABLED` 只认 `1/true/yes/on`（大小写不敏感），空值或其它值一律视为关闭；
+>   关闭时 `install_metrics` 直接返回、不注册路由，所以第 1 行是 404。
+>   `docker-compose.yml` 已把该键显式下发给 `api`（schema `scope=compose`、`services=["api"]`），
+>   `deploy/smart-erp/.env.example` 保持空值——生产默认关闭。
+> - 端点路径由 `ERP_METRICS_PATH` 决定（默认 `/metrics`），同样由 compose 下发给 `api`。
+>   改这个值必须同步改探针 URL 和 nginx 的 `location = /erp/api/metrics`；且它**必须以 `/`
+>   开头**，否则启动期 `install_metrics` 抛 `MetricError`，api 容器直接起不来——不是运行期 404，
+>   而是 `docker compose ps` 里 restart 计数一路涨。
+> - 做第 2 行时在 `deploy/smart-erp/.env` 里临时写 `ERP_METRICS_ENABLED=1`，验收完删掉该行
+>   （或改回 `0`）并再次 `--force-recreate api`；`env/prod.env` 不登记该键，避免「关闭」
+>   在线上偶发变成「开启」。
+> - 镜像口径：以上按 #65 的装配实现写。若镜像主干 sha 早于 #65 合入（例如 `c3c662b`），
+>   `apps/main.py` 里还没有这行调用，第 2 行会恒为 404——那是镜像内容问题，不是开关没生效。
 
 ### 5.3 发布后自检（三条都要过）
 
