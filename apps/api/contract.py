@@ -109,7 +109,6 @@ def build_app() -> FastAPI:
         title="Smart-ERP 产品 API",
         description=DESCRIPTION,
         version=CONTRACT_VERSION,
-        openapi_version="3.1.0",
         servers=[{"url": BASE_URL}],
         docs_url=None,
         redoc_url=None,
