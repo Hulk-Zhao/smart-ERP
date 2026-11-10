@@ -142,8 +142,9 @@
 
 **④ 怎么设、怎么确认生效。**
 
-- 通过 `InspectionOptions(duplicate_name_window=256)` 传入（CLI 未暴露该旋钮），
-  报告的 `options.duplicate_name_window` 会回显实际值，用它确认配置已生效；
+- 两条等价入口：CLI `--duplicate-name-window 256`，或
+  `InspectionOptions(duplicate_name_window=256)`；报告 `options.duplicate_name_window`
+  会回显实际值，用它确认配置已生效（不传时为默认 128）；
 - 复核动作：先用默认值出结论，再只对「与供应商主档对账」的那一批用 256
   重跑，diff 多出来的证据行即可，不必全量重跑再人眼比对。
 

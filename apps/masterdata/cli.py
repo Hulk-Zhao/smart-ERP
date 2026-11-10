@@ -109,6 +109,16 @@ def _parse_threshold(
     return value
 
 
+def _parse_positive_int(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"需要正整数，收到 {raw!r}") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"需要正整数，收到 {raw!r}")
+    return value
+
+
 def _parse_as_of(parser: argparse.ArgumentParser, raw: str | None) -> date:
     if not raw:
         return date.today()
@@ -313,6 +323,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="降级行占比告警阈值，默认沿用配置（30%）",
     )
     parser.add_argument(
+        "--duplicate-name-window",
+        type=_parse_positive_int,
+        default=128,
+        metavar="N",
+        help=(
+            "形近名称排序邻域宽度，默认 128；供应商超过 2 万或要求 100%% 召回时"
+            "设 256（10 万行耗时约增至 1.6~1.8 倍）"
+        ),
+    )
+    parser.add_argument(
         "--downgrades",
         type=Path,
         help="导出「降级清单」JSON 的路径（只读导出，本次不接 API）",
@@ -389,6 +409,7 @@ def main(argv: list[str] | None = None) -> int:
         block_line_ratio_threshold=(
             threshold if threshold is not None else Decimal("0.30")
         ),
+        duplicate_name_window=args.duplicate_name_window,
     )
 
     if args.list_rules:

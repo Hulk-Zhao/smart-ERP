@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from apps.masterdata import RULES
+from apps.masterdata import RULES, InspectionOptions, inspect, load_snapshot
+from apps.masterdata.benchmark import canonical_json
 from apps.masterdata.cli import main
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -192,6 +193,32 @@ def test_cli_rejects_invalid_block_threshold():
     with pytest.raises(SystemExit) as exc:
         main(["--input", str(DIRTY), "--block-threshold", "1.5"])
     assert exc.value.code == 2
+
+
+def test_cli_duplicate_name_window_echoes_and_matches_options(capsys):
+    code = main(
+        [
+            "--input",
+            str(DIRTY),
+            "--duplicate-name-window",
+            "256",
+            "--format",
+            "json",
+        ]
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    # 命令行传的值必须出现在报告 options 里，运维才能确认生效
+    assert payload["options"]["duplicate_name_window"] == 256
+
+    # CLI 与 InspectionOptions 两条路产出逐字节相同的 findings
+    expected = inspect(
+        load_snapshot(DIRTY),
+        options=InspectionOptions(duplicate_name_window=256),
+    )
+    assert canonical_json(payload["findings"]) == canonical_json(
+        expected.to_dict()["findings"]
+    )
 
 
 def test_cli_exemptions_reduce_block_and_downgrade_lines(capsys):
