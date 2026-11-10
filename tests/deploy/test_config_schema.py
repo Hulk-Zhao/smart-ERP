@@ -153,6 +153,30 @@ class ConfigSchemaTest(unittest.TestCase):
         self.assertIn("多个默认值", err)
         self.assertIn("defaultsByService", err)
 
+    def test_injected_key_must_be_compose_scope(self):
+        """compose 已注入却标 scope=code：只把 services 写对也必须红。"""
+        path = self.copy_schema()
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["properties"]["ERP_API_PORT"]["scope"] = "code"
+        data["properties"]["ERP_API_PORT"]["services"] = ["api"]
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        code, _, err = run(["--schema", str(path), "--compose", str(COMPOSE)])
+        self.assertEqual(code, 1)
+        self.assertIn("scope 必须为 compose", err)
+        self.assertIn("若不应注入，请从 compose 移除", err)
+
+    def test_ports_only_compose_key_not_flagged_by_scope_rule(self):
+        """只在 ports/networks 插值的键不进 environment，新规则不得误伤。"""
+        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+        rep = vcs.Report()
+        props = vcs.validate_schema(schema, rep)
+        per_service, _, _, _ = vcs.compose_usages(COMPOSE)
+        for key in ("ERP_API_BIND", "ERP_WEB_PORT", "ERP_DB_NETWORK"):
+            self.assertNotIn(key, per_service)
+            self.assertEqual(props[key]["scope"], "compose")
+        vcs.validate_compose(COMPOSE, props, rep)
+        self.assertEqual(rep.errors, [])
+
     def test_compose_required_must_match_schema(self):
         path = self.copy_schema()
         data = json.loads(path.read_text(encoding="utf-8"))
