@@ -1067,8 +1067,8 @@ async def _price_snapshot(
 
     policy = _try_metering_policy(container)
     if policy is None:
-        # 没有合同价、也没有 env 单价：保持全 NULL；账单读取时沿用原有的
-        # E-DATA-MISSING 503（这是既有部署语义，不在 0008 里改动）。
+        # 没有合同价、也没有 env 单价：保持全 NULL；账单读取时按口径 A 报
+        # E-PRICE-MISSING（source=env），不再用 E-DATA-MISSING。
         return snapshot, None
     return (
         replace(
