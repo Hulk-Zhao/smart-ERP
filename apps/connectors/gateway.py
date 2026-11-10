@@ -142,8 +142,9 @@ class GatewayRegistry:
 def build_default_registry() -> GatewayRegistry:
     """装配默认连接器。
 
-    默认只有 U8 假实现；``ERP_FILE_INBOX`` 指向存在的目录时才挂文件通道
-    （只读导入，不声明任何写动作）。任何装配失败都直接抛出，由 main 报错退出。
+    默认只有 U8 假实现；``ERP_FILE_INBOX`` 未设置或留空时不挂文件通道；
+    显式设置但目录不存在/不可读时直接抛错（启动失败），不静默降级成
+    「少挂一个连接器」。任何装配失败都直接抛出，由 main 报错退出。
     """
 
     from pathlib import Path
@@ -162,14 +163,22 @@ def build_default_registry() -> GatewayRegistry:
 
     registry.register("u8", stack.connector, probe=probe)
 
-    inbox = os.environ.get("ERP_FILE_INBOX")
-    if inbox and Path(inbox).is_dir():
+    inbox = (os.environ.get("ERP_FILE_INBOX") or "").strip()
+    if inbox:
+        # 显式配置了就必须可用：目录不存在/不可读即启动失败，
+        # 不允许「配置了但悄悄少挂一个连接器」这种静默降级。
+        root = Path(inbox)
+        if not root.is_dir():
+            raise RuntimeError(f"ERP_FILE_INBOX 已配置但目录不存在: {root}")
+        # 该检查在 root 身份下恒为真（容器默认 root），"不可读"分支需以非 root 运行才能覆盖。
+        if not os.access(root, os.R_OK):
+            raise RuntimeError(f"ERP_FILE_INBOX 已配置但目录不可读: {root}")
+
         from apps.connectors.file.factory import build_file_stack
 
-        file_stack = build_file_stack(root=Path(inbox))
+        file_stack = build_file_stack(root=root)
 
-        async def file_probe(root: str = inbox) -> bool:
-            path = Path(root)
+        async def file_probe(path: Path = root) -> bool:
             return path.is_dir() and os.access(path, os.R_OK)
 
         registry.register("file", file_stack.connector, probe=file_probe)

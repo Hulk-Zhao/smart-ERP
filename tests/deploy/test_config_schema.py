@@ -55,7 +55,7 @@ class ConfigSchemaTest(unittest.TestCase):
         code, out, err = run(["--all"])
         self.assertEqual(code, 0, err)
         self.assertIn("PASS", out)
-        self.assertIn("62 个键", out)
+        self.assertIn("63 个键", out)
 
     def test_observability_keys_are_registered(self):
         """代码读点必须在 .env.example 有对应项（配置面不许说谎）。"""

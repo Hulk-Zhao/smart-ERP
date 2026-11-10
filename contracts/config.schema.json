@@ -311,6 +311,16 @@
       "phase": "startup",
       "default": "http://doc:8020"
     },
+    "ERP_FILE_INBOX": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "",
+      "description": "文件通道收件箱目录；留空=不挂载 file 连接器，显式设置但目录不存在/不可读时 connector-gw 启动失败（apps/connectors/gateway.py）"
+    },
     "ERP_GATEWAY_PORT": {
       "type": "string",
       "scope": "code",

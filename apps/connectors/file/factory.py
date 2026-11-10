@@ -52,7 +52,7 @@ def build_file_stack(
     resolved_root = (
         Path(root)
         if root is not None
-        else Path(os.environ.get("ERP_FILE_INBOX", "var/inbox"))
+        else Path(os.environ.get("ERP_FILE_INBOX") or "var/inbox")
     )
     limit = read_limit or DEFAULT_READ_LIMIT
     rate_limiter = limiter or ActionRateLimiter({READ_LIMIT_KEY: limit})
