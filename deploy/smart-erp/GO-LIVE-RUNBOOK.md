@@ -163,6 +163,7 @@ scripts/deploy-images.sh --tag ${NEW_SHA} --no-up
 - **顺序**：G11a（`00-provision.sql`）→ **G11b（`alembic upgrade head`）** → G12（起栈）。
 - **自检**：迁移完成后按 RUNBOOK §0 的 SQL 查 `information_schema.role_table_grants`，
   应用直接读写的业务表应各自含 `DELETE,INSERT,SELECT,UPDATE`；出现 `(none)` 即开通顺序漏了。
+  以当前 migration head 为准：表清单会随迁移变化，这条只验权限，不锁表名与数量。
 - **角色不要混**：生产 / 网关 `erp_app`，迁移 `erp_migrator`，CI `erp_test`。
 
 ### G11b 执行数据库迁移（仅当镜像 head ≠ 库内版本）✅（约 1–5 min）
@@ -231,7 +232,8 @@ curl -s -o /dev/null -w 'web_index=%{http_code}\n' http://127.0.0.1:8088/
 > curl -m 3 -sS -o /dev/null -w 'metrics=%{http_code}\n' https://<域名>/metrics
 > curl -m 3 -sS -o /dev/null -w 'metrics_direct=%{http_code}\n' http://<公网IP>:8010/metrics
 > ```
-> 预期 `public_api=200`、`public_web=200`、后两条**连接失败或 403/404**。
+> 预期 `public_api=200`、`public_web=200`；`metrics_direct` 必须连接失败；`metrics` 必须 **403**
+> （404 不算通过——与「端点未挂载」同码，完整判定见 §4.4 三行矩阵）。
 
 ### G15 页面实测 ⚠️（约 3 min）
 
@@ -280,7 +282,21 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8010/healthz
 ### 4.4 `/metrics` 从公网不可达 🔴 R4（依赖 R2/R3）
 
 > **当前不可执行**：与 G14 同源，安全组与 hk-web 未落地前无法判定。
-> 通过口径：`http://<公网IP>:8010/metrics` 连接失败（curl exit 7/28）；`https://<域名>/metrics` 返回 403/404，**不得 200**。返回 200 视为端口泄露 → 立即回滚并收口。
+> 与 RUNBOOK §5.2 同一口径，按 1 → 2 → 3 顺序执行。
+>
+> 判断原则：**只有第 2 行（开启后容器内直连 200）能证明端点存在，第 3 行才有意义。**
+> 跳过第 2 行直接看第 3 行，等于在验一个可能不存在的端点——`#48` 的 deny 规则就是
+> 这样保护了一个不存在的端点，靠 404 通过，属于假通过。
+>
+> | # | 操作 | 期望 | 证明了什么 |
+> |---|---|---|---|
+> | 1 | `.env` 里 `ERP_METRICS_ENABLED=`（空）或 `0`，重建 api 后容器内探针 | **404** | 关闭时端点不暴露 |
+> | 2 | `.env` 里 `ERP_METRICS_ENABLED=1`，重建 api 后容器内探针 | **200**，且正文含 `smart_erp_recon_batches_total` | 端点确实挂载、指标在产出 |
+> | 3 | 保持第 2 行开启状态，`curl -m 3 -o /dev/null -sS -w '%{http_code}\n' https://<域名>/erp/api/metrics` | **403** | nginx 的 deny 生效，不是「端点不存在」 |
+>
+> 第 3 行返回 **404 不算通过**：与第 1 行同码，既可能是 nginx 写成 `return 404`，也可能是没 reload；
+> 返回 200 即指标外泄，立即回滚并收口。站点根路径兜底 `https://<域名>/metrics` 也必须是 **403**。
+> `http://<公网IP>:8010/metrics` 必须连接失败（curl exit 7/28）。容器内探针与完整命令见 RUNBOOK §5.2。
 
 ### 4.5 备份产物 `SHA256SUMS` 校验通过 ✅
 

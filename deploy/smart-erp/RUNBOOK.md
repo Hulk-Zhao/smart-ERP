@@ -40,6 +40,7 @@ SELECT c.relname AS table_name,
  GROUP BY c.relname
  ORDER BY c.relname;
 -- 期望：应用直接读写的业务表各自含 DELETE,INSERT,SELECT,UPDATE；
+-- 以当前 migration head 为准：表清单会随迁移变化，本条只验权限，不锁表名与数量。
 -- 出现 (none) 就是第 1 步被跳过（或对象在 provision 之前创建），先补授权再继续。
 -- audit_* / recon_* / worker_* 等只有收紧后的局部权限（如仅 INSERT,SELECT），属设计如此。
 ```
