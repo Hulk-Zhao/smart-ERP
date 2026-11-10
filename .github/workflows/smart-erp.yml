@@ -176,7 +176,9 @@ jobs:
         # 分目录 = 每个进程只收集一个目录，两个问题同时消失，且新增同名文件也不会再炸。
         # 待各流把 tests/ 改成正规包（__init__.py + 相对导入）后，可退回单进程全量收集。
         run: |
-          set -uo pipefail
+          # actions 默认 shell 是 `bash -e`，pytest 返回 5（目录无用例）会直接中止，
+          # 下面的「5 可容忍」判断永远到不了；先关掉 errexit 再自行判定。
+          set +e -uo pipefail
           rc=0
           for d in tests/*/; do
             d="${d%/}"
