@@ -115,7 +115,7 @@
       "secret": false,
       "phase": "startup",
       "default": "0.0.0.0",
-      "description": "连接器网关监听地址（gateway.py --host 缺省值）"
+      "description": "连接器网关监听地址（gateway.py --host 缺省值）；固定为 0.0.0.0：compose 不下发本键，容器内始终走代码默认，修改无效"
     },
     "ERP_CONNECTOR_GW_PORT": {
       "type": "integer",
@@ -329,7 +329,7 @@
       "secret": false,
       "phase": "startup",
       "default": "8012",
-      "description": "ERP_CONNECTOR_GW_PORT 的兼容别名，两者都缺省 8012"
+      "description": "ERP_CONNECTOR_GW_PORT 的兼容别名，两者都缺省 8012；仅在 ERP_CONNECTOR_GW_PORT 缺失时读取，compose 永远先设后者，修改通常无效"
     },
     "ERP_GW_EGRESS_ALLOWLIST_FILE": {
       "type": "string",
@@ -443,7 +443,8 @@
       "required": false,
       "secret": false,
       "phase": "startup",
-      "default": "cloud"
+      "default": "cloud",
+      "description": "预留：当前全仓无读取点（LLM 客户端尚未实现），设置了不生效"
     },
     "ERP_LLM_TEMPERATURE": {
       "type": "integer",
@@ -452,7 +453,8 @@
       "required": false,
       "secret": false,
       "phase": "startup",
-      "default": 0
+      "default": 0,
+      "description": "预留：当前全仓无读取点（LLM 客户端尚未实现），设置了不生效"
     },
     "ERP_LLM_TIMEOUT_SECONDS": {
       "type": "integer",
@@ -643,7 +645,8 @@
       "required": false,
       "secret": false,
       "phase": "startup",
-      "default": "cn-south-1"
+      "default": "cn-south-1",
+      "description": "预留：当前全仓无读取点，设置了不生效"
     },
     "ERP_S3_SECRET_KEY": {
       "type": "string",
@@ -729,7 +732,7 @@
       "secret": false,
       "phase": "startup",
       "default": "",
-      "description": "1/true/yes/on 才落盘 trace；其它值视为关闭（observability/exporter.py）"
+      "description": "当前未接线：解析已支持（1/true/yes/on 视为开启），但 exporter 零调用方（exporter_from_env 无生产调用），改了不生效"
     },
     "ERP_TRACE_FILE": {
       "type": "string",
@@ -739,7 +742,7 @@
       "secret": false,
       "phase": "startup",
       "default": "./logs/traces.jsonl",
-      "description": "trace 追加写文件，每行一个 span（observability/exporter.py）"
+      "description": "trace 追加写文件，每行一个 span（observability/exporter.py）；当前未接线：exporter 零调用方，改了不生效"
     },
     "ERP_METRICS_ENABLED": {
       "type": "string",
