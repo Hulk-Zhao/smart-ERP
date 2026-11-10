@@ -33,6 +33,7 @@ import subprocess
 import time
 import uuid
 from collections.abc import Iterator
+from datetime import datetime
 
 import pytest
 from alembic import command
@@ -158,7 +159,11 @@ async def _fetch_price(
             row = (
                 await conn.execute(
                     text(PRICE_LOOKUP_SQL),
-                    {"tenant_id": tenant_id, "currency": currency, "at": at},
+                    {
+                        "tenant_id": tenant_id,
+                        "currency": currency,
+                        "at": datetime.fromisoformat(at),
+                    },
                 )
             ).first()
             return None if row is None else (str(row[0]), str(row[1]))
