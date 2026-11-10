@@ -506,7 +506,13 @@ class ArtifactsTest(unittest.TestCase):
     def test_backup_tar_exclude_works_in_runtime_image(self):
         """运行时镜像 alpine:3.20 是 busybox tar；--exclude 两种写法必须真的排掉 inbox。
 
-        没有 docker 或拉不到镜像时跳过（不把环境缺失当绿，也不当失败）。
+        镜像由 CI 的 pre-pull 步骤提前拉到本机（deploy-static 与 python-checks 都跑），
+        这里不再自行 pull：
+          - docker CLI 缺失或 daemon 不可用 → skip（环境不具备，无法验证）；
+          - docker 可用但镜像不在 → fail（pre-pull 未生效或本地没拉，属真异常，不许当绿）。
+        断言只依赖 busybox tar 的排除语义，不依赖具体 digest：上游重推同 tag 会换 digest，
+        属可接受的脆弱点；若 busybox 换成不兼容实现，下面的 tar 断言会失败，届时换镜像并
+        同步改断言即可，不要用 digest 钉死。
         """
         text = (SCRIPTS_DIR / "backup-smart-erp.sh").read_text(encoding="utf-8")
         self.assertIn('OBJ_IMAGE="${ERP_BACKUP_OBJECT_IMAGE:-alpine:3.20}"', text,
@@ -514,14 +520,17 @@ class ArtifactsTest(unittest.TestCase):
         if not shutil.which("docker"):
             self.skipTest("本机没有 docker，跳过 busybox tar 行为验证")
         image = "alpine:3.20"
+        daemon = subprocess.run(["docker", "info"], capture_output=True, check=False)
+        if daemon.returncode != 0:
+            self.skipTest("docker 守护进程不可用（CLI 在但 daemon 连不上），跳过")
         if subprocess.run(
             ["docker", "image", "inspect", image], capture_output=True, check=False
         ).returncode != 0:
-            pulled = subprocess.run(
-                ["docker", "pull", "-q", image], capture_output=True, check=False, timeout=180
+            self.fail(
+                f"镜像 {image} 不在本机：CI 由 deploy-static / python-checks 的 pre-pull "
+                f"步骤保证；本地请先 docker pull {image}。镜像缺失不得 skip，"
+                "否则这条断言在主干上等于不存在"
             )
-            if pulled.returncode != 0:
-                self.skipTest("拉不到 alpine:3.20，跳过（网络问题不冒充通过）")
         with tempfile.TemporaryDirectory(prefix="s8-tar-") as tmp:
             root = Path(tmp)
             (root / "objects").mkdir()
