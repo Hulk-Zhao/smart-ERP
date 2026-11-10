@@ -31,12 +31,22 @@ def test_pyproject_includes_runtime_packages() -> None:
         assert pattern in include, f"packages.find.include 缺 {pattern}：{include}"
 
 
+# 一等包判据（可执行，不靠印象）：
+#   仓库根下**含 __init__.py** 的目录 = 可被 import 的 Python 包，必须进镜像产物。
+# 例外清单必须逐个列理由，目前只有一个：
+#   tests/ —— 测试树，不随镜像分发；当前没有 __init__.py，将来即使加上也不该进产物。
+# 不在判据内（不是包，没有 __init__.py）：web/（前端源码，入口是 package.json）、
+# scripts/（运维脚本）、db/（alembic 迁移资产）、docs/、deploy/、projects/。
+EXCLUDED_PACKAGE_DIRS = {"tests"}
+
+
 def _first_party_roots() -> set[str]:
-    """仓库根下的一等包（有 __init__.py 的目录）。"""
     return {
         path.name
         for path in ROOT.iterdir()
-        if path.is_dir() and (path / "__init__.py").is_file()
+        if path.is_dir()
+        and (path / "__init__.py").is_file()
+        and path.name not in EXCLUDED_PACKAGE_DIRS
     }
 
 
@@ -47,7 +57,7 @@ def test_every_first_party_package_is_packaged() -> None:
     observability.metrics），而 include 仍是 apps/core/tools。镜像 build 成功，
     api 容器一启动就 ModuleNotFoundError，web 反代最终表现成 502——正是
     「build 绿、运行红」的典型。枚举清单挡不住「新增包忘记登记」，这里按
-    磁盘实际包集合反查。
+    上面的可执行判据反查磁盘实际包集合。
     """
     from fnmatch import fnmatch
 
@@ -65,6 +75,7 @@ def test_every_first_party_package_is_packaged() -> None:
     )
     assert not missing, (
         f"这些一等包没被打进镜像：{missing}；include={include}。"
+        "判据 = 仓库根下含 __init__.py 的目录（例外见 EXCLUDED_PACKAGE_DIRS）。"
         "镜像 build 成功不代表能启动，漏包会在容器启动时 ModuleNotFoundError。"
     )
 
@@ -73,7 +84,14 @@ def test_find_packages_matches_image_layout() -> None:
     from setuptools import find_packages
 
     found = set(find_packages(where=str(ROOT), include=_include_patterns()))
-    for package in ("apps", "apps.agents", "core", "core.runtime", "tools"):
+    for package in (
+        "apps",
+        "apps.agents",
+        "core",
+        "core.runtime",
+        "tools",
+        "observability",
+    ):
         assert package in found, f"打包发现缺 {package}；实际 {sorted(found)}"
 
 
