@@ -1,0 +1,17 @@
+{
+  "name": "recon_lines_sample",
+  "description": "本期对账行样例（全部虚构）：10 行中 4 行命中阻断主体，用于验证降级行占比与 30% 阈值告警",
+  "as_of_period": "2026-10",
+  "lines": [
+    {"line_id": "LINE-0001", "supplier_code": "SUP-009", "item_code": "IT-1004", "period": "2026-10", "billable": true},
+    {"line_id": "LINE-0002", "supplier_code": "SUP-012", "item_code": "IT-3001", "period": "2026-10", "billable": true},
+    {"line_id": "LINE-0003", "customer_code": "CUS-001", "item_code": "IT-2001", "period": "2026-10", "billable": true},
+    {"line_id": "LINE-0004", "supplier_code": "SUP-010", "item_code": "IT-3002", "period": "2026-10", "billable": true},
+    {"line_id": "LINE-0005", "supplier_code": "SUP-004", "item_code": "IT-3001", "period": "2026-10", "billable": true},
+    {"line_id": "LINE-0006", "supplier_code": "SUP-005", "item_code": "IT-1003", "period": "2026-10", "billable": true},
+    {"line_id": "LINE-0007", "customer_code": "CUS-003", "item_code": "IT-2002", "period": "2026-10", "billable": true},
+    {"line_id": "LINE-0008", "customer_code": "CUS-005", "item_code": "IT-3003", "period": "2026-10", "billable": true},
+    {"line_id": "LINE-0009", "supplier_code": "SUP-011", "item_code": "IT-6001", "period": "2026-10", "billable": true},
+    {"line_id": "LINE-0010", "supplier_code": "SUP-008", "item_code": "IT-3002", "period": "2026-10", "billable": true}
+  ]
+}

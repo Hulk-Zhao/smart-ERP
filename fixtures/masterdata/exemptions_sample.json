@@ -1,0 +1,37 @@
+{
+  "schema_version": "2.0",
+  "kind": "masterdata_exemptions",
+  "source": "fixtures/masterdata/exemptions_sample.json",
+  "entries": [
+    {
+      "exemption_id": "EX-2026-001",
+      "subject_type": "物料",
+      "subject_code": "IT-1004",
+      "rule_id": "UOM-003",
+      "submitted_by": "对账运营-李示例",
+      "submitted_role": "对账运营",
+      "submitted_at": "2026-09-28",
+      "approved_by": "财务经理-张示例",
+      "approved_role": "财务",
+      "basis": {"type": "客户书面确认", "ref": "客户确认函-2026-0912-包装规格", "valid_from": "2026-09-12", "valid_to": "2027-01-31"},
+      "reason": "包装规格已核实为 1000 PCS/BOX，偏离同类属正常业务口径",
+      "granted_at": "2026-10-01",
+      "expires_at": "2026-12-31"
+    },
+    {
+      "exemption_id": "EX-2026-000",
+      "subject_type": "物料",
+      "subject_code": "IT-1004",
+      "rule_id": "UOM-003",
+      "submitted_by": "对账运营-李示例",
+      "submitted_role": "对账运营",
+      "submitted_at": "2026-06-28",
+      "approved_by": "财务经理-张示例",
+      "approved_role": "财务",
+      "basis": {"type": "客户书面确认", "ref": "客户确认函-2026-0620-包装规格", "valid_from": "2026-06-20", "valid_to": "2026-10-31"},
+      "reason": "上一期临时豁免，已到期自动失效",
+      "granted_at": "2026-07-01",
+      "expires_at": "2026-09-30"
+    }
+  ]
+}

@@ -1,0 +1,213 @@
+{
+  "name": "masterdata_clean",
+  "description": "干净主数据：全部虚构数据，用作每条规则的反例（应 0 差异）",
+  "org_id": "ORG-A",
+  "as_of_period": "2026-10",
+  "base_currency": "CNY",
+  "ledgers": [
+    {"ledger_id": "L001", "org_id": "ORG-A", "name": "示例制造账套"},
+    {"ledger_id": "L002", "org_id": "ORG-B", "name": "示例贸易账套"}
+  ],
+  "periods": [
+    {"period": "2026-07", "closed": true},
+    {"period": "2026-08", "closed": true},
+    {"period": "2026-09", "closed": true},
+    {"period": "2026-10", "closed": false}
+  ],
+  "tax_codes": [
+    {"code": "VAT13", "name": "增值税13%", "rate": "0.13", "filing_rate": "0.13"},
+    {"code": "VAT06", "name": "增值税6%", "rate": "0.06", "filing_rate": "0.06"}
+  ],
+  "currency_rates": [
+    {"currency": "USD", "period": "2026-09", "rate": "7.2", "ledger_id": "L001", "updated_period": "2026-09"}
+  ],
+  "suppliers": [
+    {
+      "code": "SUP-001",
+      "name": "宁波示例精密制造有限公司",
+      "tax_no": "91330200MA2CLEAN01",
+      "bank_account": "6222020000000000001",
+      "org_id": "ORG-A",
+      "ledger_id": "L001",
+      "currency": "CNY",
+      "payment_term": "NET30",
+      "tax_code": "VAT13"
+    },
+    {
+      "code": "SUP-002",
+      "name": "苏州示例包装材料有限公司",
+      "tax_no": "91320500MA2CLEAN02",
+      "bank_account": "6222020000000000002",
+      "org_id": "ORG-A",
+      "ledger_id": "L001",
+      "currency": "CNY",
+      "payment_term": "NET30",
+      "tax_code": "VAT13"
+    },
+    {
+      "code": "SUP-003",
+      "name": "上海示例电子元件有限公司",
+      "tax_no": "91310000MA2CLEAN03",
+      "bank_account": "6222020000000000003",
+      "org_id": "ORG-A",
+      "ledger_id": "L001",
+      "currency": "CNY",
+      "payment_term": "NET30",
+      "tax_code": "VAT13"
+    },
+    {
+      "code": "SUP-004",
+      "name": "杭州示例五金有限公司",
+      "tax_no": "91330100MA2CLEAN04",
+      "bank_account": "6222020000000000004",
+      "org_id": "ORG-A",
+      "ledger_id": "L001",
+      "currency": "CNY",
+      "payment_term": "NET30",
+      "tax_code": "VAT13"
+    }
+  ],
+  "customers": [
+    {
+      "code": "CUS-001",
+      "name": "北京示例科技有限公司",
+      "tax_no": "91110100MA2CLEANC1",
+      "org_id": "ORG-A",
+      "ledger_id": "L001",
+      "currency": "CNY",
+      "payment_term": "NET30",
+      "tax_code": "VAT13"
+    },
+    {
+      "code": "CUS-002",
+      "name": "深圳示例贸易有限公司",
+      "tax_no": "91440300MA2CLEANC2",
+      "org_id": "ORG-A",
+      "ledger_id": "L001",
+      "currency": "CNY",
+      "payment_term": "NET30",
+      "tax_code": "VAT13"
+    }
+  ],
+  "payment_contracts": [
+    {"party_type": "供应商", "party_code": "SUP-001", "payment_term": "NET30", "contract_no": "C-2026-001"},
+    {"party_type": "客户", "party_code": "CUS-001", "payment_term": "NET30", "contract_no": "C-2026-002"}
+  ],
+  "items": [
+    {
+      "code": "IT-1001",
+      "name": "示例注塑外壳",
+      "spec": "A型",
+      "base_unit": "PCS",
+      "category": "注塑件",
+      "org_id": "ORG-A",
+      "ledger_id": "L001",
+      "tax_code": "VAT13"
+    },
+    {
+      "code": "IT-1002",
+      "name": "示例注塑底座",
+      "spec": "B型",
+      "base_unit": "PCS",
+      "category": "注塑件",
+      "org_id": "ORG-A",
+      "ledger_id": "L001",
+      "tax_code": "VAT13"
+    },
+    {
+      "code": "IT-1003",
+      "name": "示例注塑面板",
+      "spec": "C型",
+      "base_unit": "PCS",
+      "category": "注塑件",
+      "org_id": "ORG-A",
+      "ledger_id": "L001",
+      "tax_code": "VAT13"
+    },
+    {
+      "code": "IT-1004",
+      "name": "示例注塑支架",
+      "spec": "D型",
+      "base_unit": "PCS",
+      "category": "注塑件",
+      "org_id": "ORG-A",
+      "ledger_id": "L001",
+      "tax_code": "VAT13"
+    },
+    {
+      "code": "IT-2001",
+      "name": "示例包装纸箱",
+      "spec": "5层",
+      "base_unit": "PCS",
+      "category": "包装",
+      "org_id": "ORG-A",
+      "ledger_id": "L001",
+      "tax_code": "VAT13"
+    },
+    {
+      "code": "IT-2002",
+      "name": "示例包装胶带",
+      "spec": "48mm",
+      "base_unit": "PCS",
+      "category": "包装",
+      "org_id": "ORG-A",
+      "ledger_id": "L001",
+      "tax_code": "VAT13"
+    },
+    {
+      "code": "IT-3001",
+      "name": "示例螺丝",
+      "spec": "M3",
+      "base_unit": "PCS",
+      "category": "五金",
+      "org_id": "ORG-A",
+      "ledger_id": "L001",
+      "tax_code": "VAT13"
+    },
+    {
+      "code": "IT-3002",
+      "name": "示例螺母",
+      "spec": "M3",
+      "base_unit": "PCS",
+      "category": "五金",
+      "org_id": "ORG-A",
+      "ledger_id": "L001",
+      "tax_code": "VAT13"
+    },
+    {
+      "code": "IT-3003",
+      "name": "示例垫片",
+      "spec": "M3",
+      "base_unit": "PCS",
+      "category": "五金",
+      "org_id": "ORG-A",
+      "ledger_id": "L001",
+      "tax_code": "VAT13"
+    }
+  ],
+  "unit_conversions": [
+    {"item_code": "IT-1001", "from_unit": "PCS", "to_unit": "BOX", "factor": "100", "last_used_period": "2026-09", "usage_count": 12},
+    {"item_code": "IT-1001", "from_unit": "BOX", "to_unit": "PCS", "factor": "0.01", "last_used_period": "2026-09", "usage_count": 12},
+    {"item_code": "IT-1002", "from_unit": "PCS", "to_unit": "BOX", "factor": "100", "last_used_period": "2026-09", "usage_count": 8},
+    {"item_code": "IT-1003", "from_unit": "PCS", "to_unit": "BOX", "factor": "100", "last_used_period": "2026-09", "usage_count": 5},
+    {"item_code": "IT-1004", "from_unit": "PCS", "to_unit": "BOX", "factor": "100", "last_used_period": "2026-09", "usage_count": 3},
+    {"item_code": "IT-2001", "from_unit": "PCS", "to_unit": "BOX", "factor": "50", "last_used_period": "2026-09", "usage_count": 4},
+    {"item_code": "IT-2002", "from_unit": "PCS", "to_unit": "BOX", "factor": "100", "last_used_period": "2026-09", "usage_count": 2},
+    {"item_code": "IT-3001", "from_unit": "PCS", "to_unit": "BOX", "factor": "1000", "last_used_period": "2026-09", "usage_count": 2},
+    {"item_code": "IT-3002", "from_unit": "PCS", "to_unit": "BOX", "factor": "1000", "last_used_period": "2026-09", "usage_count": 2},
+    {"item_code": "IT-3003", "from_unit": "PCS", "to_unit": "BOX", "factor": "1000", "last_used_period": "2026-09", "usage_count": 2}
+  ],
+  "documents": [
+    {"doc_no": "D-2026-0001", "doc_type": "PO", "doc_period": "2026-09", "posting_period": "2026-09", "org_id": "ORG-A", "ledger_id": "L001", "supplier_code": "SUP-001", "item_code": "IT-1001", "unit": "PCS", "line_no": 1},
+    {"doc_no": "D-2026-0002", "doc_type": "PO", "doc_period": "2026-09", "posting_period": "2026-09", "org_id": "ORG-A", "ledger_id": "L001", "supplier_code": "SUP-001", "item_code": "IT-1002", "unit": "PCS", "line_no": 1},
+    {"doc_no": "D-2026-0003", "doc_type": "PO", "doc_period": "2026-09", "posting_period": "2026-09", "org_id": "ORG-A", "ledger_id": "L001", "supplier_code": "SUP-003", "item_code": "IT-1003", "unit": "PCS", "line_no": 1},
+    {"doc_no": "D-2026-0004", "doc_type": "PO", "doc_period": "2026-09", "posting_period": "2026-09", "org_id": "ORG-A", "ledger_id": "L001", "supplier_code": "SUP-003", "item_code": "IT-1004", "unit": "PCS", "line_no": 1},
+    {"doc_no": "D-2026-0005", "doc_type": "PO", "doc_period": "2026-09", "posting_period": "2026-09", "org_id": "ORG-A", "ledger_id": "L001", "supplier_code": "SUP-002", "item_code": "IT-2001", "unit": "PCS", "line_no": 1},
+    {"doc_no": "D-2026-0006", "doc_type": "PO", "doc_period": "2026-09", "posting_period": "2026-09", "org_id": "ORG-A", "ledger_id": "L001", "supplier_code": "SUP-002", "item_code": "IT-2002", "unit": "PCS", "line_no": 1},
+    {"doc_no": "D-2026-0007", "doc_type": "PO", "doc_period": "2026-09", "posting_period": "2026-09", "org_id": "ORG-A", "ledger_id": "L001", "supplier_code": "SUP-004", "item_code": "IT-3001", "unit": "PCS", "line_no": 1},
+    {"doc_no": "D-2026-0008", "doc_type": "PO", "doc_period": "2026-09", "posting_period": "2026-09", "org_id": "ORG-A", "ledger_id": "L001", "supplier_code": "SUP-004", "item_code": "IT-3002", "unit": "PCS", "line_no": 1},
+    {"doc_no": "D-2026-0009", "doc_type": "PO", "doc_period": "2026-09", "posting_period": "2026-09", "org_id": "ORG-A", "ledger_id": "L001", "supplier_code": "SUP-004", "item_code": "IT-3003", "unit": "PCS", "line_no": 1},
+    {"doc_no": "D-2026-0010", "doc_type": "PO", "doc_period": "2026-09", "posting_period": "2026-09", "org_id": "ORG-A", "ledger_id": "L001", "supplier_code": "SUP-001", "item_code": "IT-1001", "unit": "PCS", "line_no": 2},
+    {"doc_no": "D-2026-0011", "doc_type": "PO", "doc_period": "2026-09", "posting_period": "2026-09", "org_id": "ORG-A", "ledger_id": "L001", "supplier_code": "SUP-001", "item_code": "IT-1001", "unit": "PCS", "line_no": 3, "currency": "USD", "exchange_rate": "7.2"}
+  ]
+}
