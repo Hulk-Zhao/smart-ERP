@@ -47,7 +47,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 TEST_ENV_FILE = Path(__file__).resolve().parent / "compose.env"
 
 DEMO_SERVICES = {"api", "worker", "scheduler", "connector-gw", "web"}
-FULL_ONLY_SERVICES = {"doc", "worker-agent", "worker-io", "migrate"}
+FULL_ONLY_SERVICES = {"doc", "worker-agent", "worker-io", "migrate", "compensation"}
 EXPECTED_SERVICES = DEMO_SERVICES | FULL_ONLY_SERVICES
 # 任何档位都不许出现的容器（共用 PG15，队列在 PG，对象存储走本地卷/MinIO 外部）
 FORBIDDEN_SERVICES = {"pg", "postgres", "redis", "cache", "minio"}
@@ -140,7 +140,7 @@ class ComposeStaticTest(unittest.TestCase):
         )
 
     def test_profiles_partition(self):
-        """demo 档 5 个服务，full 档额外 4 个；两档都覆盖的常驻服务列 demo+full。"""
+        """demo 档 5 个服务，full 档额外 5 个；两档都覆盖的常驻服务列 demo+full。"""
         for name in DEMO_SERVICES:
             with self.subTest(service=name):
                 profiles = self.services[name]["profiles"]

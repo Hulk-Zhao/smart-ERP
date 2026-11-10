@@ -206,6 +206,49 @@ services:
     logging: *default-logging
 
   # ---------------------------------------------------------------------------
+  # compensation：补偿执行器（独立进程，消费 erp.compensation_task）
+  # 只认队列有到期行（不按工单/步骤状态扫）；自 serve /metrics 与 /healthz（8013 内网）
+  # full 档专属：demo 档仍由 API 同步回滚，不需要执行器；预算 256m / 0.5 核
+  # ---------------------------------------------------------------------------
+  compensation:
+    profiles: ["full"]
+    image: *app-image
+    container_name: erp_compensation
+    restart: unless-stopped
+    stop_grace_period: 60s
+    command: ["python", "-m", "apps.agents.compensation_worker"]
+    environment:
+      <<: *app-env
+      ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
+      ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-2}
+      ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
+      ERP_COMPENSATION_PORT: ${ERP_COMPENSATION_PORT:-8013}
+      ERP_COMPENSATION_POLL_SECONDS: ${ERP_COMPENSATION_POLL_SECONDS:-1.0}
+      ERP_COMPENSATION_STALE_SECONDS: ${ERP_COMPENSATION_STALE_SECONDS:-60}
+    volumes:
+      - erp_logs:/app/logs
+    networks:
+      - smart-erp-net
+      - erp-db-net
+    # 只在内网可抓 /metrics 与 /healthz，不发布宿主端口
+    expose:
+      - "8013"
+    mem_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      # 只探本进程的 /healthz：最近一次 tick 超时即 503
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8013/healthz', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
   # connector-gw：连接器网关（MCP Server + 限流 + 拦截记录）
   # 最小权限：不挂 erp-db-net（网关不需要 DB），read_only 根文件系统
   # 预算 160m / 0.3 核；8012 只在内网暴露

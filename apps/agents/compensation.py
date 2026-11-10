@@ -107,6 +107,7 @@ _DONE_SQL = text(
        SET state = 'done', last_error = NULL,
            lease_owner = NULL, heartbeat_at = NULL
      WHERE id = :task_id AND state = 'running'
+       AND (CAST(:owner AS text) IS NULL OR lease_owner = :owner)
     """
 )
 
@@ -126,6 +127,7 @@ _FAILED_SQL = text(
                ELSE now() + make_interval(secs => :retry_in)
            END
      WHERE id = :task_id
+       AND (CAST(:owner AS text) IS NULL OR lease_owner = :owner)
     """
 )
 
@@ -252,9 +254,9 @@ class CompensationQueue:
             (_view(row) for row in rows), key=lambda item: item.compensate_seq, reverse=True
         )
 
-    async def mark_done(self, task_id: UUID) -> None:
+    async def mark_done(self, task_id: UUID, *, owner: str | None = None) -> None:
         async with self._sf() as session, session.begin():
-            await session.execute(_DONE_SQL, {"task_id": task_id})
+            await session.execute(_DONE_SQL, {"task_id": task_id, "owner": owner})
 
     async def mark_failed(
         self,
@@ -263,6 +265,7 @@ class CompensationQueue:
         *,
         max_attempts: int = 3,
         retry_in_seconds: float = 8.0,
+        owner: str | None = None,
     ) -> None:
         async with self._sf() as session, session.begin():
             await session.execute(
@@ -272,6 +275,7 @@ class CompensationQueue:
                     "error": error[:2000],
                     "max_attempts": max_attempts,
                     "retry_in": float(retry_in_seconds),
+                    "owner": owner,
                 },
             )
 

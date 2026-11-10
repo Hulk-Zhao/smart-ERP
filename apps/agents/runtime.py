@@ -8,8 +8,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
+import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -32,6 +34,8 @@ from apps.platform.policy.levels import ActionSpec, SceneSpec
 
 UNIQUE_VERIFY_KINDS = frozenset({"read_by_external_id", "read_by_idem_key"})
 RECOVERY_THRESHOLD_ERROR = "E-RECOVERY-THRESHOLD"
+
+logger = logging.getLogger("erp.agents.runtime")
 
 
 def request_hash(payload: Mapping[str, Any]) -> str:
@@ -61,6 +65,10 @@ class CompensateCall:
     action_key: str
     payload: Mapping[str, Any]
     original_idem_key: str
+    # 执行器需要按系统路由到具体连接器；外部对象号来自步骤的 after_ref。
+    # 默认值保证既有调用方（测试替身）不用改。
+    target_system: str = ""
+    external_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -491,10 +499,17 @@ class TicketRuntime:
         """倒序消费补偿队列；全部成功 → 已回滚，任一失败 → 需人工处置。"""
 
         held = False
+        lease_stop: asyncio.Event | None = None
+        lease_task: asyncio.Task[None] | None = None
         if owner is not None:
             if not await self._leases.acquire(ticket_id, owner, ttl_seconds=self._lease_ttl):
                 raise LeaseNotHeld(f"工单 {ticket_id} 的补偿执行未取得租约")
             held = True
+            # 多步补偿的总时长可能超过租约 TTL：不续期就会被别的执行器接管并重跑。
+            lease_stop = asyncio.Event()
+            lease_task = asyncio.create_task(
+                self._renew_ticket_lease(ticket_id, owner, lease_stop)
+            )
         try:
             ticket = await self._store.get_ticket(ticket_id)
             if TicketState(ticket.state) is not TicketState.COMPENSATING:
@@ -524,7 +539,10 @@ class TicketRuntime:
                     break
                 if task.attempts > self._max_comp_attempts:
                     await self._queue.mark_failed(
-                        task.id, "补偿尝试次数超限", max_attempts=1
+                        task.id,
+                        "补偿尝试次数超限",
+                        max_attempts=1,
+                        owner=owner_name,
                     )
                     self._alerts.emit(
                         Alert(
@@ -543,7 +561,9 @@ class TicketRuntime:
                     )
                     continue
                 await self._queue.heartbeat(task.id, owner_name)
-                await self._run_compensation(ticket_id, task, trace_id=trace_id)
+                await self._run_compensation(
+                    ticket_id, task, owner=owner_name, trace_id=trace_id
+                )
 
             counts = await self._queue.counts(ticket_id)
             steps = await self._store.list_steps(ticket_id)
@@ -584,6 +604,11 @@ class TicketRuntime:
                 failed=0,
             )
         finally:
+            if lease_task is not None and lease_stop is not None:
+                lease_stop.set()
+                lease_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await lease_task
             if held:
                 await self._leases.release(ticket_id, owner)  # type: ignore[arg-type]
 
@@ -607,35 +632,92 @@ class TicketRuntime:
             )
         return tuple(reclaimed)
 
+    async def _renew_ticket_lease(
+        self, ticket_id: UUID, owner: str, stop: asyncio.Event
+    ) -> None:
+        """补偿循环期间按 TTL/3 续工单租约；停止事件置位即退出。"""
+
+        interval = max(1.0, self._lease_ttl / 3)
+        while not stop.is_set():
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=interval)
+                return
+            except TimeoutError:
+                pass
+            try:
+                renewed = await self._leases.renew(
+                    ticket_id, owner, ttl_seconds=self._lease_ttl
+                )
+            except Exception:
+                logger.exception("工单 %s 补偿租约续期异常", ticket_id)
+                continue
+            if not renewed:
+                logger.warning("工单 %s 补偿租约已被接管，停止续期", ticket_id)
+                return
+
+    async def _compensate_with_heartbeat(
+        self, task_id: UUID, owner: str, call: CompensateCall, idem: str
+    ) -> CompensateResult:
+        """单次补偿调用期间持续写任务心跳，避免 stale 阈值内被重认领。"""
+
+        if self._compensator is None:
+            raise RuntimeGuardError("未注入补偿执行器")
+        interval = max(1.0, min(20.0, self._comp_stale / 3))
+        call_task = asyncio.ensure_future(self._compensator(call, idem))
+        try:
+            while True:
+                done, _ = await asyncio.wait({call_task}, timeout=interval)
+                if done:
+                    return call_task.result()
+                alive = await self._queue.heartbeat(task_id, owner)
+                if not alive:
+                    raise LeaseNotHeld(
+                        f"补偿任务 {task_id} 心跳失效（已被接管），放弃本次结果"
+                    )
+        finally:
+            if not call_task.done():
+                call_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await call_task
+
     async def _run_compensation(
         self,
         ticket_id: UUID,
         task: CompensationTaskView,
         *,
+        owner: str,
         trace_id: str | None,
     ) -> None:
         step = await self._store.get_step(task.original_step)
         if step.write_level > 2:
             await self._queue.mark_failed(
-                task.id, "补偿等级高于原动作（不可执行）", max_attempts=1
+                task.id,
+                "补偿等级高于原动作（不可执行）",
+                max_attempts=1,
+                owner=owner,
             )
             return
         call = CompensateCall(
             action_key=step.action_key,
             payload=dict(step.request_snapshot or {}),
             original_idem_key=step.idempotency_key,
+            target_system=step.target_system,
+            external_id=step.after_ref,
         )
         idem = f"{step.idempotency_key}:undo"
         try:
             if self._compensator is None:
                 raise RuntimeGuardError("未注入补偿执行器")
-            result = await self._compensator(call, idem)
+            # 单次外部调用可能超过 stale 阈值：执行期间持续续心跳，
+            # 否则行会被别的实例判死重认领（at-least-once 之外的额外重复）。
+            result = await self._compensate_with_heartbeat(task.id, owner, call, idem)
         except Exception as exc:  # noqa: BLE001
             await self._queue.mark_failed(
                 task.id,
                 f"{type(exc).__name__}: {exc}",
                 max_attempts=self._max_comp_attempts,
                 retry_in_seconds=self._comp_retry,
+                owner=owner,
             )
             await self._store.record_compensation(
                 ticket_id=ticket_id,
@@ -647,7 +729,7 @@ class TicketRuntime:
             return
 
         if result.status in {"compensated", "unchanged"}:
-            await self._queue.mark_done(task.id)
+            await self._queue.mark_done(task.id, owner=owner)
             await self._store.record_compensation(
                 ticket_id=ticket_id,
                 compensate_seq=task.compensate_seq,
@@ -661,6 +743,7 @@ class TicketRuntime:
             f"补偿未成功: {result.status}",
             max_attempts=self._max_comp_attempts,
             retry_in_seconds=self._comp_retry,
+            owner=owner,
         )
         await self._sleep(self._comp_retry)
 
