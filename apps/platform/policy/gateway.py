@@ -121,11 +121,15 @@ class WriteGateway:
         connector_cap: Callable[[str], WriteLevel] | None = None,
         breaker_cap: Callable[[str], WriteLevel] | None = None,
         approvals: ApprovalGate | None = None,
+        narrowed_fields: frozenset[str] | None = None,
     ) -> None:
         self._connector = connector
         self._connector_cap = connector_cap or (lambda action_key: WriteLevel.W2)
         self._breaker_cap = breaker_cap or (lambda scene_code: WriteLevel.W2)
         self._approvals = approvals or DenyAllApprovals()
+        # 审批单据给出的字段子集：只可能进一步收窄写入面，不参与 effective_level 计算，
+        # 因此不会放宽写等级——W3 仍然在 execute 里直接拒绝。
+        self._narrowed_fields = None if narrowed_fields is None else frozenset(narrowed_fields)
 
     async def execute(
         self,
@@ -166,13 +170,18 @@ class WriteGateway:
 
         return GatewayResult(level=level, write=write, verify=verify, preview=preview)
 
-    @staticmethod
-    def _assert_field_scope(action: ActionSpec, payload: Mapping[str, Any]) -> None:
+    def _assert_field_scope(self, action: ActionSpec, payload: Mapping[str, Any]) -> None:
         extra = set(payload) - set(action.writable_fields)
         if extra:
             raise FieldScopeViolation(
                 f"动作 {action.key} 接到的字段超出声明 scope: {sorted(extra)}"
             )
+        if self._narrowed_fields is not None:
+            outside = set(payload) - self._narrowed_fields
+            if outside:
+                raise FieldScopeViolation(
+                    f"动作 {action.key} 接到的字段超出审批给定的范围: {sorted(outside)}"
+                )
 
     @staticmethod
     def _assert_no_forbidden(action: ActionSpec, payload: Mapping[str, Any]) -> None:

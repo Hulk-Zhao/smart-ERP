@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 from apps.platform.contracts.errors import ErrorCode
 from apps.platform.policy.levels import WriteLevel
 from apps.security.identity import UserPrincipal
+from apps.security.roles import BusinessCategoryPolicy
 
 DEFAULT_DUAL_AMOUNT = Decimal(100000)
 DEFAULT_CFO_AMOUNT = Decimal(500000)
@@ -116,14 +117,22 @@ class ApprovalService:
         *,
         thresholds: ApprovalThresholds | None = None,
         clock: Callable[[], datetime] | None = None,
+        categories: BusinessCategoryPolicy | None = None,
     ) -> None:
         self._thresholds = thresholds or ApprovalThresholds()
         self._clock = clock or (lambda: datetime.now(UTC))
         self._records: dict[str, list[ApprovalRecord]] = {}
+        self._categories = categories or BusinessCategoryPolicy()
 
     @property
     def thresholds(self) -> ApprovalThresholds:
         return self._thresholds
+
+    @property
+    def categories(self) -> BusinessCategoryPolicy:
+        """场景 → 业务类别注册表；新增场景在此登记后才可复核。"""
+
+        return self._categories
 
     def required_roles(
         self,
@@ -166,6 +175,7 @@ class ApprovalService:
         comment: str,
         decided_at: datetime | None = None,
         exception_reason: str | None = None,
+        scene_code: str | None = None,
     ) -> ApprovalRecord:
         if not ticket_id.strip():
             raise ApprovalError("ticket_id 不得为空")
@@ -174,6 +184,10 @@ class ApprovalService:
         if "platform_admin" in approver.roles:
             raise SoDViolation("平台管理员不得参与业务复核（FR-1403）")
         self._assert_role_capability(role, approver.roles)
+        # 不传 scene_code 等价旧行为；API 路径必须传，按场景类别收口复核权限。
+        self._categories.assert_reviewer(
+            scene_code=scene_code, role=role, principal=approver
+        )
 
         existing = self._records.get(ticket_id, [])
         if any(record.approver_id == approver.user_id for record in existing):
