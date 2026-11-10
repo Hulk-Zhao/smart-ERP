@@ -9,8 +9,9 @@
 #                --build-arg ERP_WEB_BASE=/demo/smart-erp/ \
 #                -t smart-erp/web:$(git rev-parse HEAD) .
 #
-# 未实测说明：仓库尚无 web/package.json 与 web 源码，构建需等 S6 落地；
-#   本文件保证「镜像结构、非 root、healthcheck 路径 /healthz」三件事是确定的。
+# 构建输入：web/（S6）与 contracts/（契约真源）都必须进构建阶段——
+#   web/scripts/gen-api-types.mjs 以仓库根为基准解析
+#   contracts/api/product_api.openapi.v1.json，漏拷会直接 ENOENT。
 # =============================================================================
 ARG NODE_IMAGE=node:22-alpine
 ARG NGINX_IMAGE=nginx:1.27-alpine
@@ -25,10 +26,14 @@ RUN npm ci --no-audit --no-fund
 
 COPY web/ ./
 
+# 契约真源：gen-api-types.mjs 从仓库根（容器内即 /）解析 contracts/，必须原样拷入
+COPY contracts /contracts
+
 # 子路径部署：与香港反代 /demo/smart-erp/ 对齐；本机预览可传 ./
 ARG ERP_WEB_BASE=/demo/smart-erp/
 ENV ERP_WEB_BASE=${ERP_WEB_BASE}
-RUN npm run build
+# 必须显式透传：Vite 只认命令行 --base，ENV 不会自动生效
+RUN npm run build -- --base="${ERP_WEB_BASE}"
 
 # ---- 阶段 2：运行（非 root，8080 非特权端口）----
 FROM ${NGINX_IMAGE} AS runtime
