@@ -15,6 +15,8 @@
 | 6 | `ERP_IMAGE_TAG=<sha> docker compose --profile demo config --quiet` 与 `--profile full config --quiet`（在 `deploy/smart-erp/`） | 两档都 exit 0 |
 | 7 | `scripts/deploy-images.sh` | 远端 `sha256sum -c` 通过、`/healthz` 200 |
 | 8 | full 档额外：`docker run -d --name erp_doc_smoke --read-only --tmpfs /tmp:size=64m smart-erp/doc:<sha>` 后容器内请求 `/healthz` 与 `/readyz` | 均 200，`docker rm -f erp_doc_smoke` 清理 |
+| 9 | **8010 卡口**：`docker port erp_api`、`ss -lntp \| grep ':8010'`，并核对云安全组入站规则 | `docker port` 必须是 `127.0.0.1:8010`（不是 `0.0.0.0:8010`）；`ss` 只出现 `127.0.0.1:8010`；安全组 8010 无 `0.0.0.0/0` / `::/0`。任一不符立即停止发布（生产必须 `--profile full`，demo 档的 `api` 是 0.0.0.0，禁止公网部署） |
+| 10 | 公网侧复核（外部机器）：`curl -m 3 http://<公网IP>:8010/healthz` 与 `/metrics` | 均连接失败；能连通即视为端口泄露，回滚并收口 |
 
 第 4、5 步必须真跑容器，不要用「Dockerfile 看起来没 COPY tests」代替：
 历史上有过入口写错（`connectors.gateway`）与运行期依赖漏装（`httpx`）两次
@@ -25,6 +27,8 @@
 ## 合并前自证：批量机器修改（硬性，与发版无关）
 
 任何一次**批量机器修改**（`ruff --fix` 自动修复、格式化器、批量重命名、批量字符串替换）在合并前，必须在 PR 正文给出「仅等价变换」的逐类证明；缺一不得合并。这不是发版时才做的说明，是**合并前的清单项**。
+
+> **构造期不变量清单不在本文件重复**：涉及安全语义字段、构造期不变量或「抽成独立方法」的重构，合并前自证按 `docs/product/tech/00-协作规约.md` §9.1 执行——检查构造期的归一化、防御性拷贝、冻结与校验是否被等价保留，证据以 blob 级 `+N/−M` 逐行为准。模板只在 §9.1 一处维护，此处不抄。
 
 | 类别 | 必答内容 |
 |---|---|
