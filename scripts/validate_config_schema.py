@@ -171,9 +171,18 @@ def validate_compose(compose: Path, props: dict[str, dict], rep: Report) -> None
             rep.fail(f"{key}: compose 默认值 {next(iter(actual.values()))!r} 与 schema default={spec.get('default')!r} 不一致")
     # 服务清单：schema 记录的 services 必须与 compose 实际注入的服务一致
     for key, services in sorted(per_service.items()):
-        recorded = set((props.get(key) or {}).get("services") or [])
+        spec = props.get(key) or {}
+        recorded = set(spec.get("services") or [])
         if recorded != services:
             rep.fail(f"{key}: services 记录 {sorted(recorded)} 与实际注入 {sorted(services)} 不一致")
+        # 反向约束：只要键进了任何一个 service 的 environment，它就是 compose 键。
+        # 只改 services 不改 scope 的「半升级」会让登记继续撒谎，必须一起红。
+        if key in props and spec.get("scope") != "compose":
+            injected = "/".join(sorted(services))
+            rep.fail(
+                f"{key}: 该键被 {injected} 服务注入，scope 必须为 compose"
+                f"（当前 {spec.get('scope')!r}）；若不应注入，请从 compose 移除"
+            )
 
 
 def validate_env(
