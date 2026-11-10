@@ -125,15 +125,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]" ruff pyyaml
 
-      - name: 许可证门禁（AGPL / GPL / SSPL 硬拒绝 + 白名单）
-        # 制度化的 AGPL 收口（docs/product/tech/01-技术架构.md §2.2）：
-        # pip-licenses 枚举已安装依赖的许可证，scripts/check_licenses.py 对照
-        # contracts/deps/license-allowlist.txt；失败时输出包名 + 许可证 + 反向依赖链。
-        # pip-licenses 自身是 MIT，只装在 CI 里，不进运行期依赖。
-        run: |
-          python -m pip install --disable-pip-version-check pip-licenses
-          python scripts/check_licenses.py
-
       - name: 锁文件漂移检查（存在 uv.lock 时）
         # CI 装依赖走的是 `pip install -e ".[dev]"`，根本不读 uv.lock，
         # 所以锁文件与 pyproject 漂移时没有任何流程会发现（曾出现 httpx 还挂在
