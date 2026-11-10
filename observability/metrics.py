@@ -72,6 +72,12 @@ RECON_DEGRADATION_REASONS: tuple[str, ...] = (
     "other",
 )
 
+#: 对账失败所在阶段（封闭词表）。失败与「批次结果」分开计数：量变少不等于失败。
+RECON_FAILURE_STAGES: tuple[str, ...] = ("input", "engine", "persist")
+
+#: 无法归类的异常用这个 code；取 ``ErrorCode.value``，自由文本永不进标签。
+RECON_FAILURE_UNCLASSIFIED = "unclassified"
+
 #: 批次自动匹配率桶（0–1）。2 位小数的分母限制下，桶只分辨「差 / 可用 / 接近全自动」。
 RECON_RATIO_BUCKETS: tuple[float, ...] = (0.5, 0.7, 0.8, 0.9, 0.95, 0.99, 1.0)
 
@@ -444,6 +450,11 @@ class MetricsRegistry:
             "降级（无法对账）批次计数，按缺失项种类归因",
             ("reason",),
         )
+        self.recon_runs_failed_total = Counter(
+            "smart_erp_recon_runs_failed_total",
+            "对账请求失败次数，按失败阶段与问题码计数（含未归类异常）",
+            ("stage", "code"),
+        )
         self.unresolved_tickets = Gauge(
             "smart_erp_unresolved_tickets",
             "当前未解决工单数（unresolved）",
@@ -468,6 +479,7 @@ class MetricsRegistry:
             self.recon_supplier_lines_total,
             self.recon_batch_auto_match_ratio,
             self.recon_degraded_batches_total,
+            self.recon_runs_failed_total,
             self.unresolved_tickets,
             self.compensation_backlog,
             self.audit_chain_broken,
@@ -577,6 +589,20 @@ class MetricsRegistry:
 
         if label == "unreconcilable":
             self.recon_degraded_batches_total.inc(reason=_degradation_reason(result))
+
+    def record_recon_failure(self, *, stage: str, code: str) -> None:
+        """记一次**失败**的对账请求（异常/中断），与批次结果计数分开。
+
+        ``stage`` 取 ``RECON_FAILURE_STAGES``；``code`` 取 ``ErrorCode.value``，
+        无法归类时用 ``RECON_FAILURE_UNCLASSIFIED``。二者都是封闭/受控词表，
+        不接受自由文本（problem+json 的 detail 永远不进标签）。
+        """
+
+        if stage not in RECON_FAILURE_STAGES:
+            raise MetricError(f"stage 必须是 {RECON_FAILURE_STAGES}，实际 {stage!r}")
+        if not code or not isinstance(code, str) or len(code) > 64:
+            raise MetricLabelError(f"code 必须是 ≤64 字符的非空字符串，实际 {code!r}")
+        self.recon_runs_failed_total.inc(stage=stage, code=code)
 
     def set_unresolved(self, count: int) -> None:
         self.unresolved_tickets.set(_count_value(count, "unresolved"))

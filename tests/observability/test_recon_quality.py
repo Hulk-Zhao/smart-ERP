@@ -262,3 +262,36 @@ def test_auto_match_ratio_bucket_boundaries() -> None:
 def test_quality_redlines_cannot_become_labels(label: str) -> None:
     with pytest.raises(MetricLabelError):
         Counter("smart_erp_probe_total", "探针", (label,))
+
+
+# ---------------------------------------------------------------- 失败路径
+
+
+def test_failed_runs_have_their_own_counter() -> None:
+    registry = MetricsRegistry()
+
+    registry.record_recon_failure(stage="input", code="E-DATA-MISSING")
+    registry.record_recon_failure(stage="persist", code="E-IDEM-CONFLICT")
+
+    assert (
+        registry.recon_runs_failed_total.value(stage="input", code="E-DATA-MISSING") == 1
+    )
+    assert (
+        registry.recon_runs_failed_total.value(stage="persist", code="E-IDEM-CONFLICT")
+        == 1
+    )
+    # 失败与「批次结果」互不冒充：量变少和失败在告警上是两件事。
+    assert sum(registry.recon_batches_total.value(result=item) for item in RECON_RESULTS) == 0
+
+    text = render_metrics(registry)
+    assert 'smart_erp_recon_runs_failed_total{stage="persist",code="E-IDEM-CONFLICT"} 1' in text
+
+
+def test_failed_runs_reject_unknown_stage_and_empty_code() -> None:
+    registry = MetricsRegistry()
+
+    with pytest.raises(MetricError):
+        registry.record_recon_failure(stage="database", code="E-DATA-MISSING")
+    with pytest.raises(MetricLabelError):
+        registry.record_recon_failure(stage="input", code="")
+

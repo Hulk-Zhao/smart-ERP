@@ -12,6 +12,7 @@ import conftest as cf
 from fastapi.testclient import TestClient
 
 from apps.api.container import get_container
+from apps.api.recon_store import ReconConflict
 from apps.main import create_app
 from apps.platform.config import Settings
 
@@ -97,3 +98,43 @@ def test_recon_run_is_observed_exactly_once(env) -> None:
     assert batches == 1
     _, _, duration_count = registry.recon_batch_duration_seconds.snapshot()
     assert duration_count == 1
+
+
+class _ConflictStore:
+    """模拟同一 batch_id 二次写入：真实 store 会抛 ReconConflict。"""
+
+    async def save(self, _snapshot) -> None:
+        raise ReconConflict("批次已存在")
+
+
+def test_missing_dataset_is_counted_as_input_failure(env) -> None:
+    body = _body(env)
+    body.pop("dataset")
+
+    response = env.client.post(
+        f"{PREFIX}/recon/runs", json=body, headers=env.headers("initiator", "k-fail-input")
+    )
+
+    assert response.status_code == 422, response.text
+    registry = env.container.metrics
+    assert registry.recon_runs_failed_total.value(
+        stage="input", code="E-DATA-MISSING"
+    ) == 1
+    # 失败不冒充批次：结果计数保持为 0。
+    assert sum(
+        registry.recon_batches_total.value(result=label) for label in RESULT_LABELS
+    ) == 0
+
+
+def test_persist_conflict_is_counted_as_failure(env) -> None:
+    env.container.recon_store = _ConflictStore()
+
+    response = env.client.post(
+        f"{PREFIX}/recon/runs", json=_body(env), headers=env.headers("initiator", "k-fail-persist")
+    )
+
+    assert response.status_code == 409, response.text
+    assert env.container.metrics.recon_runs_failed_total.value(
+        stage="persist", code="E-IDEM-CONFLICT"
+    ) == 1
+

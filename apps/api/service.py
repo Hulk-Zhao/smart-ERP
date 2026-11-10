@@ -104,6 +104,7 @@ from apps.security.roles import (
     assert_can_rollback,
 )
 from apps.security.scope import Scope, ScopeGuard
+from observability.metrics import RECON_FAILURE_UNCLASSIFIED
 
 FAIL_CODE_OPTIONS = tuple(sorted(COMPENSATE_FAIL_CODES))
 MAX_AUDIT_LIST = 1000
@@ -894,71 +895,98 @@ def _record_decision(
 async def run_recon(
     container: ApiContainer, session: SessionToken, *, body: ReconRunIn
 ) -> ReconBatchOut:
-    scope = _require_scope(session, build_scope(body.scope))
-    dataset = body.dataset or container.recon_datasets.lookup(body.sources.statement_files)
-    if dataset is None:
-        raise ProblemError(
-            ErrorCode.DATA_MISSING,
-            "缺少对账数据行：请提供 dataset，或先登记 sources.statement_files 对应的数据集"
-            "（本接口不猜测取数来源）",
+    """对账入口：成功记批次结果，失败单独记 ``recon_runs_failed_total``。
+
+    失败与「批次量变少」在告警上是两件事：异常路径必须自己计数，不能被
+    ``recon_batches_total`` 的减少掩盖。``stage`` 只在三个封闭阶段间推进。
+    """
+
+    stage = "input"
+
+    async def _execute() -> ReconBatchOut:
+        nonlocal stage
+        scope = _require_scope(session, build_scope(body.scope))
+        dataset = body.dataset or container.recon_datasets.lookup(
+            body.sources.statement_files
         )
-
-    batch_id = uuid4()
-    _authorize(
-        container,
-        session,
-        scope,
-        level=WriteLevel.W0,
-        ticket_id=str(batch_id),
-        system=container.pick_meta(scope.system_ids).system,
-        amount=Decimal(0),
-    )
-
-    raw = _recon_raw(scope, body, dataset)
-    started = time.monotonic()
-    recon_request = build_request(raw)
-    if not recon_request.our_lines and not recon_request.supplier_lines:
-        result = empty_result("我们的单据与供应商对账单都没有数据行")
-    else:
-        result = reconcile(recon_request)
-
-    batch = ReconBatchRecord(
-        batch_id=batch_id,
-        tenant_id=session.tenant_id,
-        org_id=scope.org_id,
-        period=scope.period,
-        system_ids=scope.system_ids,
-        suppliers=tuple(body.suppliers),
-        status=result.batch_status.value,
-        conclusive=result.conclusive,
-        status_reason=result.status_reason,
-        metrics=_metrics_out(result.metrics).model_dump(mode="json"),
-        missing_items=tuple(
-            _missing_out(item).model_dump(mode="json") for item in result.missing_items
-        ),
-        result=result,
-        created_by=session.user_id,
-        created_at=datetime.now(UTC),
-    )
-    input_fingerprint = request_fingerprint(body.model_dump(mode="json"))
-    try:
-        await _recon_store(container).save(
-            snapshot_from_batch(
-                batch,
-                input_fingerprint=input_fingerprint,
-                rerun_of=body.rerun_of,
-                rerun_reason=body.rerun_reason,
-                view=_batch_view(batch),
+        if dataset is None:
+            raise ProblemError(
+                ErrorCode.DATA_MISSING,
+                "缺少对账数据行：请提供 dataset，或先登记 sources.statement_files 对应的数据集"
+                "（本接口不猜测取数来源）",
             )
+
+        batch_id = uuid4()
+        _authorize(
+            container,
+            session,
+            scope,
+            level=WriteLevel.W0,
+            ticket_id=str(batch_id),
+            system=container.pick_meta(scope.system_ids).system,
+            amount=Decimal(0),
         )
-    except ReconConflict as exc:
-        raise ProblemError(ErrorCode.IDEM_CONFLICT, str(exc), status_code=409) from exc
-    container.recon_batches.add(batch)
-    # 每批次只记一次：observe_recon_result 已含批次计数，不要再叠加 record_recon_batch。
-    container.metrics.observe_recon_result(
-        result, duration_seconds=time.monotonic() - started
-    )
-    return _batch_out(batch)
+
+        stage = "engine"
+        raw = _recon_raw(scope, body, dataset)
+        started = time.monotonic()
+        recon_request = build_request(raw)
+        if not recon_request.our_lines and not recon_request.supplier_lines:
+            result = empty_result("我们的单据与供应商对账单都没有数据行")
+        else:
+            result = reconcile(recon_request)
+
+        batch = ReconBatchRecord(
+            batch_id=batch_id,
+            tenant_id=session.tenant_id,
+            org_id=scope.org_id,
+            period=scope.period,
+            system_ids=scope.system_ids,
+            suppliers=tuple(body.suppliers),
+            status=result.batch_status.value,
+            conclusive=result.conclusive,
+            status_reason=result.status_reason,
+            metrics=_metrics_out(result.metrics).model_dump(mode="json"),
+            missing_items=tuple(
+                _missing_out(item).model_dump(mode="json") for item in result.missing_items
+            ),
+            result=result,
+            created_by=session.user_id,
+            created_at=datetime.now(UTC),
+        )
+        input_fingerprint = request_fingerprint(body.model_dump(mode="json"))
+        stage = "persist"
+        try:
+            await _recon_store(container).save(
+                snapshot_from_batch(
+                    batch,
+                    input_fingerprint=input_fingerprint,
+                    rerun_of=body.rerun_of,
+                    rerun_reason=body.rerun_reason,
+                    view=_batch_view(batch),
+                )
+            )
+        except ReconConflict as exc:
+            raise ProblemError(
+                ErrorCode.IDEM_CONFLICT, str(exc), status_code=409
+            ) from exc
+        container.recon_batches.add(batch)
+        # 每批次只记一次：observe_recon_result 已含批次计数，不要再叠加 record_recon_batch。
+        container.metrics.observe_recon_result(
+            result, duration_seconds=time.monotonic() - started
+        )
+        return _batch_out(batch)
+
+    try:
+        return await _execute()
+    except ProblemError as exc:
+        container.metrics.record_recon_failure(stage=stage, code=exc.code.value)
+        raise
+    except Exception:
+        container.metrics.record_recon_failure(
+            stage=stage, code=RECON_FAILURE_UNCLASSIFIED
+        )
+        raise
 
 
 def _recon_raw(scope: Scope, body: ReconRunIn, dataset: Any) -> dict[str, Any]:
