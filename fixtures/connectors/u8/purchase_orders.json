@@ -1,0 +1,76 @@
+[
+  {
+    "cPOID": "1001",
+    "cCode": "PO202610310001",
+    "dPODate": "2026-10-31T00:00:00",
+    "cVenCode": "V001",
+    "cVenName": "苏州精密铸造有限公司",
+    "cMemo": "委外加工件",
+    "details": [
+      {
+        "iPOsID": 1,
+        "cInvCode": "M-1001",
+        "cInvName": "法兰盘毛坯",
+        "cComUnitName": "件",
+        "iQuantity": 120,
+        "iTaxPrice": 35.5,
+        "iUnitPrice": 31.4159,
+        "iTaxRate": 13,
+        "iMoney": 4260
+      },
+      {
+        "iPOsID": 2,
+        "cInvCode": "M-1002",
+        "cInvName": "齿轮轴",
+        "cComUnitName": "件",
+        "iQuantity": 40,
+        "iTaxPrice": 210.5,
+        "iUnitPrice": 186.2832,
+        "iTaxRate": 13,
+        "iMoney": 8420
+      }
+    ]
+  },
+  {
+    "cPOID": "1002",
+    "cCode": "PO202610310002",
+    "dPODate": "2026-10-31",
+    "cVenCode": "V002",
+    "cVenName": "无锡华通机械有限公司",
+    "cMemo": "金额与数量×单价不一致的单据",
+    "details": [
+      {
+        "iPOsID": 1,
+        "cInvCode": "M-2001",
+        "cInvName": "毛坯钢锭",
+        "cComUnitName": "吨",
+        "iQuantity": 10,
+        "iTaxPrice": 99,
+        "iUnitPrice": 87.6106,
+        "iTaxRate": 13,
+        "iMoney": 980
+      }
+    ]
+  },
+  {
+    "cPOID": "1003",
+    "cCode": "PO202610310003",
+    "dPODate": "2026-10-31",
+    "cVenCode": null,
+    "cVenName": null,
+    "cMemo": "供应商编码为空",
+    "details": [
+      {
+        "iPOsID": 1,
+        "cInvCode": "M-1001",
+        "cInvName": "法兰盘毛坯",
+        "cComUnitName": "件",
+        "iQuantity": 5,
+        "iTaxPrice": 35.5,
+        "iUnitPrice": 31.4159,
+        "iTaxRate": 13,
+        "iMoney": 177.5
+      }
+    ]
+  }
+]

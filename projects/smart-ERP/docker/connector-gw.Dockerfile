@@ -8,7 +8,8 @@
 #   docker build -f projects/smart-ERP/docker/connector-gw.Dockerfile \
 #                -t smart-erp/connector-gw:$(git rev-parse HEAD) .
 #
-# 未实测说明：同 api.Dockerfile —— 仓库尚无 pyproject.toml 与 connectors/ 包。
+# 未实测说明：同 api.Dockerfile —— 镜像构建依赖仓库根 pyproject.toml 与 apps/connectors/ 包。
+# 入口固定为 apps.connectors.gateway（包入口由 tests/deploy 的 entrypoint 用例锁定）。
 # =============================================================================
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 
@@ -49,4 +50,4 @@ USER app
 
 EXPOSE 8012
 
-CMD ["python", "-m", "connectors.gateway", "--host=0.0.0.0", "--port=8012"]
+CMD ["python", "-m", "apps.connectors.gateway", "--host=0.0.0.0", "--port=8012"]
