@@ -455,7 +455,13 @@ class ArtifactsTest(unittest.TestCase):
         bash = _usable_bash()
         if not bash:
             self.skipTest("本机没有可用的 bash（WSL 壳不算），跳过语法检查")
-        for name in ("build-images.sh", "deploy-images.sh"):
+        for name in (
+            "build-images.sh",
+            "deploy-images.sh",
+            "backup-smart-erp.sh",
+            "restore-smart-erp.sh",
+            "upgrade-smart-erp.sh",
+        ):
             path = SCRIPTS_DIR / name
             with self.subTest(script=name):
                 self.assertTrue(path.is_file(), f"缺少 {path}")
@@ -483,6 +489,44 @@ class ArtifactsTest(unittest.TestCase):
         text = (SCRIPTS_DIR / "build-images.sh").read_text(encoding="utf-8")
         self.assertNotIn("docker push", text, "决策：不建镜像仓库")
         self.assertIn("docker save", text)
+
+    def test_backup_script_scope_and_inbox_exclusion(self):
+        """备份只碰 smart_erp 库 + erp_objects 卷，且显式排除 inbox（瞬时收件目录）。"""
+        text = (SCRIPTS_DIR / "backup-smart-erp.sh").read_text(encoding="utf-8")
+        self.assertIn('DB_NAME" != "smart_erp"', text, "库名红线必须写死在脚本里")
+        self.assertIn('exit 3', text, "库名不符必须直接拒绝（退出码 3）")
+        self.assertIn("erp_objects", text)
+        self.assertIn("pg_dump -Fc", text)
+        # 不备份实例级对象，避免把 APS 等其它住户带进来
+        self.assertNotIn("pg_dumpall", text)
+        # inbox：绑定挂载的瞬时输入，打包时必须显式排除（两种写法都排，兼容 busybox tar）
+        self.assertIn("--exclude='./inbox'", text)
+        self.assertIn("--exclude='inbox'", text)
+
+    def test_restore_script_never_touches_inbox(self):
+        """恢复只写 --target-volume；inbox 只许出现在注释里，不得有任何删除/清空动作。"""
+        text = (SCRIPTS_DIR / "restore-smart-erp.sh").read_text(encoding="utf-8")
+        self.assertIn("--target-volume", text)
+        self.assertIn("--force", text, "非空库必须要求显式 --force")
+        # 唯一允许的删除是临时目录清理（trap 里的 TMP_DIR），不得删 inbox 或产物
+        self.assertNotRegex(text, r"rm\s+-[a-z]*[rf][a-z]*\s+[^\n]*inbox")
+        for line in text.splitlines():
+            if "inbox" in line:
+                self.assertTrue(
+                    line.lstrip().startswith("#"),
+                    f"restore 脚本不得对 inbox 做任何操作，只能是注释：{line.strip()}",
+                )
+
+    def test_upgrade_script_requires_backup_and_migrates_first(self):
+        """升级前置：当天备份 + 新旧镜像；迁移失败不碰应用容器；回滚指向 old-tag。"""
+        text = (SCRIPTS_DIR / "upgrade-smart-erp.sh").read_text(encoding="utf-8")
+        self.assertIn('[[ "$OLD_TAG" =~ ^[0-9a-f]{40}$ ]]', text)
+        self.assertIn('[[ "$NEW_TAG" =~ ^[0-9a-f]{40}$ ]]', text)
+        self.assertIn('"$PROFILE" == "demo" || "$PROFILE" == "full"', text)
+        self.assertIn("今天还没有备份", text, "必须先有当天备份才能升级")
+        self.assertIn("迁移不可自动回退", text)
+        self.assertIn("应用容器未动", text, "migrate 失败时应用容器必须保持旧版本")
+        self.assertIn('ERP_IMAGE_TAG="$OLD_TAG"', text, "失败路径必须给出回旧 tag 的命令")
 
     def test_provision_sql_isolation(self):
         sql = PROVISION_SQL.read_text(encoding="utf-8")
