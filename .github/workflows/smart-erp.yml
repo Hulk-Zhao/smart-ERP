@@ -259,9 +259,37 @@ jobs:
           ruff check apps tests db observability --statistics
           echo "::endgroup::"
 
-      - name: 测试库迁移（0001→0005 全链）
+      - name: 建应用角色 erp_app（非 owner，供权限负向用例使用）
+        # 「审计表不可改」只有以 erp_app 真实身份连接才测得出来：owner 不受 REVOKE 约束。
+        # 角色必须在跑迁移之前存在，否则 0002/0006 里按角色存在性判断的
+        # REVOKE/GRANT 会被整段跳过，用例只能 skip、等于没有证据。
+        run: |
+          python - <<'PY'
+          import asyncio
+          import asyncpg
+
+          async def main() -> None:
+              conn = await asyncpg.connect(
+                  "postgresql://erp_test:erp_test@127.0.0.1:5432/smart_erp_test"
+              )
+              try:
+                  exists = await conn.fetchval(
+                      "SELECT 1 FROM pg_roles WHERE rolname = 'erp_app'"
+                  )
+                  if not exists:
+                      await conn.execute(
+                          "CREATE ROLE erp_app LOGIN PASSWORD 'erp_app_test_only' "
+                          "NOSUPERUSER NOCREATEDB NOCREATEROLE"
+                      )
+              finally:
+                  await conn.close()
+
+          asyncio.run(main())
+          PY
+
+      - name: 测试库迁移（0001→0006 全链）
         # service 的 health-check 已保证 PG 就绪；这里跑真实迁移链并用 alembic current
-        # 断言停在 0005_worker_runtime，避免「连上了但表没建」的假绿。
+        # 断言停在 0006_audit_image_prev_uniq，避免「连上了但表没建」的假绿。
         # env.py 的连接串唯一真源是 ERP_DATABASE_URL（C14），不要另造一份。
         env:
           ERP_DATABASE_URL: postgresql+asyncpg://erp_test:erp_test@127.0.0.1:5432/smart_erp_test
@@ -269,7 +297,7 @@ jobs:
           set -euo pipefail
           alembic -c alembic.ini upgrade head
           alembic -c alembic.ini current | tee /tmp/alembic-current.txt
-          grep -q "0005_worker_runtime" /tmp/alembic-current.txt
+          grep -q "0006_audit_image_prev_uniq" /tmp/alembic-current.txt
 
       - name: 预拉部署测试镜像 alpine:3.20（失败即 infra 红）
         # tar 行为用例要求镜像已在手：拉取失败必须是明确的 infra 红，
