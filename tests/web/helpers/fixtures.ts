@@ -2,6 +2,7 @@ import type {
   ApprovalTaskOut,
   AuditChainOut,
   AuditImageOut,
+  MeteringLineOut,
   MeteringStatementOut,
   ReconBatchOut,
   ReconDiffDetailOut,
@@ -213,6 +214,42 @@ export function reconDiffDetail(overrides: Partial<ReconDiffDetailOut> = {}): Re
   };
 }
 
+/** 与 expected_lines=64、四桶 59+0+3+2 完全一致的完整明细，用于验收「卡片数字 = 列表行数」。 */
+function meteringLine(line_no: number, bucket: MeteringLineOut['billing_bucket']): MeteringLineOut {
+  const billable = bucket === 'billable';
+  const dispute = bucket === 'dispute_hold';
+  const ref = String(line_no).padStart(3, '0');
+  return {
+    line_no,
+    side: 'supplier',
+    status: billable ? '已对账' : dispute ? '差异挂起' : '未匹配',
+    billing_bucket: bucket,
+    auto_released: billable || bucket === 'auto_released',
+    needs_manual: dispute,
+    confidence: billable ? '0.98' : dispute ? '0.72' : '0.55',
+    ticket_no: `T-${1000 + line_no}`,
+    supplier_code: 'S-001',
+    owner: billable ? 'system' : 'supplier',
+    our_ref: `u8:PO-202610-${ref}#1`,
+    supplier_ref: `statement:ST-202610-${ref}#1`,
+    before_ref: null,
+    after_ref: billable ? `audit:image-${line_no}` : null,
+    human_modified: null,
+    diff_types: billable ? [] : ['rounding_tolerance'],
+    source_refs: [`statement:ST-202610-${ref}#1`],
+    evidence: [],
+    excluded_reason: billable ? '' : dispute ? '差异未确认，挂起不计费' : '未匹配，不计费',
+  };
+}
+
+function meteringLines(): MeteringLineOut[] {
+  return [
+    ...Array.from({ length: 59 }, (_, index) => meteringLine(index + 1, 'billable')),
+    ...Array.from({ length: 3 }, (_, index) => meteringLine(60 + index, 'dispute_hold')),
+    ...Array.from({ length: 2 }, (_, index) => meteringLine(63 + index, 'other_unbillable')),
+  ];
+}
+
 export function meteringStatement(overrides: Partial<MeteringStatementOut> = {}): MeteringStatementOut {
   return {
     batch_id: BATCH_ID,
@@ -244,7 +281,7 @@ export function meteringStatement(overrides: Partial<MeteringStatementOut> = {})
     confirmed_misrelease_lines: null,
     customer_reason_lines: null,
     human_reviewed_lines: null,
-    line_accounting: '有效行数只计程序性事实，不判断结论是否正确',
+    line_accounting: '应处理 64 = 自动放行 59 + 争议挂起 3 + 其他不计费 2（明细行合计 64）',
     calculation: [
       '自动放行 59 行',
       '已确认错放行 0 行（无数据源，按 0 扣减）',
@@ -256,51 +293,8 @@ export function meteringStatement(overrides: Partial<MeteringStatementOut> = {})
       { field: 'customer_reason_lines', reason: '客户原因分类当前无数据源', owner_role: '客户成功/商务', action: '提供客户原因分类与凭证' },
     ],
     computed_at: '2026-11-10T12:00:00Z',
-    line_count: 2,
-    lines: [
-      {
-        line_no: 1,
-        side: 'supplier',
-        status: '已对账',
-        billing_bucket: 'auto_released',
-        auto_released: true,
-        needs_manual: false,
-        confidence: '0.98',
-        ticket_no: 'T-1001',
-        supplier_code: 'S-001',
-        owner: 'system',
-        our_ref: 'u8:PO-202610-001#1',
-        supplier_ref: 'statement:ST-202610-001#1',
-        before_ref: null,
-        after_ref: 'audit:image-1',
-        human_modified: null,
-        diff_types: [],
-        source_refs: ['statement:ST-202610-001#1'],
-        evidence: [],
-        excluded_reason: '',
-      },
-      {
-        line_no: 2,
-        side: 'supplier',
-        status: '差异挂起',
-        billing_bucket: 'dispute_hold',
-        auto_released: false,
-        needs_manual: true,
-        confidence: '0.72',
-        ticket_no: 'T-1002',
-        supplier_code: 'S-001',
-        owner: 'supplier',
-        our_ref: 'u8:PO-202610-002#1',
-        supplier_ref: 'statement:ST-202610-002#1',
-        before_ref: null,
-        after_ref: null,
-        human_modified: null,
-        diff_types: ['rounding_tolerance'],
-        source_refs: ['statement:ST-202610-002#1'],
-        evidence: [],
-        excluded_reason: '差异未确认，挂起不计费',
-      },
-    ],
+    line_count: 64,
+    lines: meteringLines(),
     ...overrides,
   };
 }

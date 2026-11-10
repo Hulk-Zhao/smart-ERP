@@ -456,6 +456,45 @@ function diffDetail(diffId: string): ReconDiffDetailOut {
   };
 }
 
+/** 与 expected_lines=64、四桶 59+0+3+2 完全一致的完整明细，保证卡片数字 = 下钻行数。 */
+function meteringLine(
+  line_no: number,
+  bucket: 'billable' | 'auto_released' | 'dispute_hold' | 'other_unbillable',
+): NonNullable<MeteringStatementOut['lines']>[number] {
+  const billable = bucket === 'billable';
+  const dispute = bucket === 'dispute_hold';
+  const ref = String(line_no).padStart(3, '0');
+  return {
+    line_no,
+    side: 'supplier',
+    status: billable ? '已对账' : dispute ? '差异挂起' : '未匹配',
+    billing_bucket: bucket,
+    auto_released: billable || bucket === 'auto_released',
+    needs_manual: dispute,
+    confidence: billable ? '0.98' : dispute ? '0.72' : '0.55',
+    ticket_no: `T-${1000 + line_no}`,
+    supplier_code: 'S-001',
+    owner: billable ? 'system' : 'supplier',
+    our_ref: `u8:PO-202610-${ref}#1`,
+    supplier_ref: `statement:ST-202610-${ref}#1`,
+    before_ref: null,
+    after_ref: billable ? `audit:image-${line_no}` : null,
+    human_modified: null,
+    diff_types: billable ? [] : ['rounding_tolerance'],
+    source_refs: [`statement:ST-202610-${ref}#1`],
+    evidence: [],
+    excluded_reason: billable ? '' : dispute ? '差异未确认，挂起不计费' : '未匹配，不计费',
+  };
+}
+
+function meteringLines(): NonNullable<MeteringStatementOut['lines']> {
+  return [
+    ...Array.from({ length: 59 }, (_, index) => meteringLine(index + 1, 'billable')),
+    ...Array.from({ length: 3 }, (_, index) => meteringLine(60 + index, 'dispute_hold')),
+    ...Array.from({ length: 2 }, (_, index) => meteringLine(63 + index, 'other_unbillable')),
+  ];
+}
+
 function metering(): MeteringStatementOut {
   return {
     batch_id: BATCH,
@@ -480,8 +519,21 @@ function metering(): MeteringStatementOut {
     confirmed_misrelease_lines: null,
     customer_reason_lines: null,
     human_reviewed_lines: null,
-    line_accounting: '有效行数只计程序性事实，不判断结论是否正确',
-    calculation: ['自动放行 59 行', '已确认错放行 0 行（无数据源，按 0 扣减）', '客户原因 0 行（无数据源，按 0 扣减）', '59 − 0 − 0 = 59 行 × 0.8000 CNY = 47.2000 CNY'],
+    line_accounting: '应处理 64 = 自动放行 59 + 争议挂起 3 + 其他不计费 2（明细行合计 64）',
+    calculation: [
+      '应处理行数 = 供应商对账单行数 = 64（来源：对账引擎 metrics.supplier_lines）',
+      '自动放行行数 = 引擎状态「已匹配」且无需人工 = 59',
+      '争议挂起行数 = 引擎标记需人工（待人工/匹配歧义/候选待人工）= 3',
+      '其他不计费行数 = 供应商侧未匹配/重复计费/不可解析 = 2',
+      '计费桶 = billable 59 + auto_released 0 + dispute_hold 3 + other_unbillable 2 = 明细行数 64（逐行 billing_bucket 与计数同源）',
+      '已确认错放行行数 = 无数据源（未接入，按 0 扣减）；客户原因不计费行数 = 无数据源（未接入，按 0 扣减）',
+      // 下面两行镜像自 apps/api/metering.py 的 calculation 原文：服务端把 billable_count 写作「有效对账行数」，是错的。
+      // API 修好文案后必须同步改这里，否则 mock（演示与截图来源）会与契约长期不一致。
+      '有效对账行数 = 自动放行 59 − 已确认错放行 0 = 59（上界：确认数据接入后只会下调）',
+      '本期金额 = 有效对账行数 59 × 单行单价 0.8000 = 47.2000 CNY',
+      '累计金额 = 已计金额 120.0000 + 本期金额 47.2000 = 167.2000',
+      '未配置封顶金额（ERP_METERING_CAP_AMOUNT），封顶余额不可核对',
+    ],
     data_gaps: [
       {
         field: 'cap_amount',
@@ -503,51 +555,8 @@ function metering(): MeteringStatementOut {
       },
     ],
     computed_at: '2026-11-10T12:00:00Z',
-    line_count: 2,
-    lines: [
-      {
-        line_no: 1,
-        side: 'supplier',
-        status: '已对账',
-        billing_bucket: 'billable',
-        auto_released: true,
-        needs_manual: false,
-        confidence: '0.98',
-        ticket_no: 'T-1001',
-        supplier_code: 'S-001',
-        owner: 'system',
-        our_ref: 'u8:PO-202610-001#1',
-        supplier_ref: 'statement:ST-202610-001#1',
-        before_ref: null,
-        after_ref: 'audit:image-1',
-        human_modified: null,
-        diff_types: [],
-        source_refs: ['statement:ST-202610-001#1'],
-        evidence: [],
-        excluded_reason: '',
-      },
-      {
-        line_no: 2,
-        side: 'supplier',
-        status: '差异挂起',
-        billing_bucket: 'dispute_hold',
-        auto_released: false,
-        needs_manual: true,
-        confidence: '0.72',
-        ticket_no: 'T-1002',
-        supplier_code: 'S-001',
-        owner: 'supplier',
-        our_ref: 'u8:PO-202610-002#1',
-        supplier_ref: 'statement:ST-202610-002#1',
-        before_ref: null,
-        after_ref: null,
-        human_modified: null,
-        diff_types: ['rounding_tolerance'],
-        source_refs: ['statement:ST-202610-002#1'],
-        evidence: [],
-        excluded_reason: '差异未确认，挂起不计费',
-      },
-    ],
+    line_count: 64,
+    lines: meteringLines(),
   };
 }
 

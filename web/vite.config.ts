@@ -1,7 +1,12 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
-const fromWeb = (path: string) => new URL(path, import.meta.url).pathname;
+// Windows 下 URL.pathname 会得到 "/E:/..."，被 esbuild 拼成 "E:\E:\..."；
+// 这里去掉盘符前的斜杠，得到 "E:/..."。
+const fromWeb = (path: string) => {
+  const resolved = new URL(path, import.meta.url).pathname;
+  return /^\/[A-Za-z]:\//.test(resolved) ? resolved.slice(1) : resolved;
+};
 
 // 前端独立开发：默认走真实 /erp/api，VITE_USE_MOCK=true 时切到离线 mock
 export default defineConfig({
