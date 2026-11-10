@@ -127,9 +127,8 @@ class WriteGateway:
         self._connector_cap = connector_cap or (lambda action_key: WriteLevel.W2)
         self._breaker_cap = breaker_cap or (lambda scene_code: WriteLevel.W2)
         self._approvals = approvals or DenyAllApprovals()
-        # 审批单据给出的字段子集：只可能进一步收窄写入面，不参与 effective_level 计算，
-        # 因此不会放宽写等级——W3 仍然在 execute 里直接拒绝。
-        self._narrowed_fields = None if narrowed_fields is None else frozenset(narrowed_fields)
+        #: B 级（服务账号降级）租约上的字段白名单；None 表示 A 级，不额外收窄。
+        self._narrowed_fields = narrowed_fields
 
     async def execute(
         self,
@@ -155,6 +154,7 @@ class WriteGateway:
             raise ApprovalRequiredError(ticket_id, level)
 
         self._assert_field_scope(action, payload)
+        self._assert_narrowed_fields(action, payload)
         self._assert_no_forbidden(action, payload)
 
         preview = await self._connector.preview(action, payload)
@@ -170,18 +170,26 @@ class WriteGateway:
 
         return GatewayResult(level=level, write=write, verify=verify, preview=preview)
 
-    def _assert_field_scope(self, action: ActionSpec, payload: Mapping[str, Any]) -> None:
+    @staticmethod
+    def _assert_field_scope(action: ActionSpec, payload: Mapping[str, Any]) -> None:
         extra = set(payload) - set(action.writable_fields)
         if extra:
             raise FieldScopeViolation(
                 f"动作 {action.key} 接到的字段超出声明 scope: {sorted(extra)}"
             )
-        if self._narrowed_fields is not None:
-            outside = set(payload) - self._narrowed_fields
-            if outside:
-                raise FieldScopeViolation(
-                    f"动作 {action.key} 接到的字段超出审批给定的范围: {sorted(outside)}"
-                )
+
+    def _assert_narrowed_fields(
+        self, action: ActionSpec, payload: Mapping[str, Any]
+    ) -> None:
+        """B 级租约的字段白名单：白名单外字段一律拒写（不静默丢弃）。"""
+
+        if self._narrowed_fields is None:
+            return
+        extra = set(payload) - set(self._narrowed_fields)
+        if extra:
+            raise FieldScopeViolation(
+                f"动作 {action.key} 的入参超出 B 级字段白名单: {sorted(extra)}"
+            )
 
     @staticmethod
     def _assert_no_forbidden(action: ActionSpec, payload: Mapping[str, Any]) -> None:
