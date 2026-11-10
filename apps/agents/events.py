@@ -30,6 +30,7 @@ CREATED_EVENT = "created"
 TRANSITION_EVENT = "transition"
 STEP_EVENT = "step"
 COMPENSATION_EVENT = "compensation"
+RECOVERED_EVENT = "recovered"
 
 
 class ReplayError(Exception):

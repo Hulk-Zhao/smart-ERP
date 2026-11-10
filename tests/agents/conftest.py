@@ -74,7 +74,10 @@ async def _truncate(url: str) -> None:
             await conn.execute(
                 text(
                     "TRUNCATE erp.ticket_event, erp.ticket_step, "
-                    "erp.compensation_task, erp.ticket CASCADE"
+                    "erp.compensation_task, erp.ticket_event_anchor, "
+                    "erp.audit_guard_state, erp.job_queue, "
+                    "erp.worker_heartbeat, erp.scheduler_lease, "
+                    "erp.ticket CASCADE"
                 )
             )
     finally:
