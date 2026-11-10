@@ -11,8 +11,11 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 from collections import defaultdict, deque
+from dataclasses import dataclass
 from decimal import Decimal
+from difflib import SequenceMatcher
 from itertools import combinations
 
 from .models import (
@@ -32,7 +35,6 @@ from .models import (
 )
 from .normalize import (
     fold_code,
-    name_similarity,
     normalize_bank_account,
     normalize_currency,
     normalize_name,
@@ -657,12 +659,129 @@ def check_duplicate_supplier_tax(
     return findings
 
 
+@dataclass(frozen=True)
+class _SupplierView:
+    """一次归一化的供应商视图。
+
+    分桶与相似度比较只读这里，避免在每对比较里重复做税号/银行/名称归一。
+    """
+
+    supplier: Supplier
+    tax_no: str
+    bank: str
+    name: str
+
+
+def _similar_name_pairs(
+    views: list[_SupplierView], options: InspectionOptions
+) -> list[tuple[_SupplierView, _SupplierView, float]]:
+    """形近名称候选：双向排序邻域 + 前缀扩展 + 长度差/估比早退。
+
+    相似度 ≥ 阈值的两个名称必然共享长前缀或长后缀：按名称正序排序可以找到
+    前者，按反转名称排序可以找到后者（例如「XX公司A」与「XX公司AB」差异在
+    尾部，正序会隔很远，反转后立刻相邻）。另外补一遍「短名是长名前缀」的
+    精确二分，避免同一前缀下名字太多时被窗口漏掉。
+
+    这是召回率的已知折中：既不像前缀又不像后缀的极端情况可能漏报；窗口
+    越宽召回越高、耗时越高（``duplicate_name_window`` 可配）。
+    """
+    candidates = [
+        view
+        for view in views
+        if len(view.name) >= options.duplicate_name_min_length
+    ]
+    threshold = float(options.duplicate_name_threshold)
+    gap_ratio = float(options.duplicate_name_length_ratio)
+    window = options.duplicate_name_window
+
+    pairs: list[tuple[_SupplierView, _SupplierView, float]] = []
+
+    def consider(left: _SupplierView, right: _SupplierView) -> None:
+        if left.name == right.name:
+            return
+        shorter = min(len(left.name), len(right.name))
+        # 长度差超过上界时 ratio 不可能达到阈值，整数比较即可淘汰
+        if abs(len(left.name) - len(right.name)) > int(shorter * gap_ratio) + 1:
+            return
+        matcher = SequenceMatcher(None, left.name, right.name)
+        if matcher.real_quick_ratio() < threshold:
+            return
+        ratio = matcher.ratio()
+        if Decimal(str(ratio)) >= options.duplicate_name_threshold:
+            pairs.append((left, right, ratio))
+
+    orders = (
+        sorted(candidates, key=lambda view: view.name),
+        sorted(candidates, key=lambda view: view.name[::-1]),
+    )
+    for ordered in orders:
+        for index, left in enumerate(ordered):
+            for right in ordered[index + 1 : index + 1 + window]:
+                consider(left, right)
+
+    # 统一的命名排序会让「短名 + 后缀」型长名散落到很远；按长度分组后
+    # 二分定位同前缀名字，只补这一小类候选。
+    by_length: dict[int, list[_SupplierView]] = defaultdict(list)
+    for view in candidates:
+        by_length[len(view.name)].append(view)
+    ordered_by_length = {
+        length: sorted(group, key=lambda view: view.name)
+        for length, group in by_length.items()
+    }
+    names_by_length = {
+        length: [view.name for view in group]
+        for length, group in ordered_by_length.items()
+    }
+    for view in candidates:
+        max_gap = int(len(view.name) * gap_ratio) + 1
+        for extra in range(1, max_gap + 1):
+            group = ordered_by_length.get(len(view.name) + extra)
+            if not group:
+                continue
+            names = names_by_length[len(view.name) + extra]
+            position = bisect_left(names, view.name)
+            while position < len(names) and names[position].startswith(
+                view.name
+            ):
+                consider(view, group[position])
+                position += 1
+    return pairs
+
+
+def _note_supplier_pair(
+    pair_why: dict[tuple[str, str], list[str]],
+    left: _SupplierView,
+    right: _SupplierView,
+    why: list[str],
+) -> None:
+    """记录一对供应商的重复原因；同税号由 DUP-001 阻断，这里不重复报。"""
+    if left.tax_no and left.tax_no == right.tax_no:
+        return
+    left_code = left.supplier.code
+    right_code = right.supplier.code
+    key = (
+        (left_code, right_code)
+        if left_code < right_code
+        else (right_code, left_code)
+    )
+    merged = pair_why.setdefault(key, [])
+    for reason in why:
+        if reason not in merged:
+            merged.append(reason)
+
+
 def check_duplicate_supplier_other(
     snapshot: MasterDataSnapshot,
     options: InspectionOptions,
     spec: RuleSpec,
 ) -> list[Finding]:
-    """银行账号相同或名称归一后高度相似：提示级，允许共享账户等合理场景。"""
+    """银行账号相同或名称归一后高度相似：提示级，允许共享账户等合理场景。
+
+    三类命中都走索引，不做两两全比：
+    - 银行账号相同 / 名称归一后相同：精确相等，直接按归一键分组；
+    - 形近名称：排序后只比邻域（见 :func:`_similar_name_pairs`）。
+    同一对供应商的多个原因合并成一条证据，避免同一对出现多行重复提示。
+    """
     by_org: dict[str, list[Supplier]] = defaultdict(list)
     for supplier in snapshot.suppliers:
         by_org[_org_key(supplier.org_id, snapshot)].append(supplier)
@@ -670,33 +789,53 @@ def check_duplicate_supplier_other(
     findings: list[Finding] = []
     for entries in by_org.values():
         by_code = {supplier.code: supplier for supplier in entries}
-        values = list(by_code.values())
+        views = [
+            _SupplierView(
+                supplier=supplier,
+                tax_no=normalize_tax_no(supplier.tax_no),
+                bank=normalize_bank_account(supplier.bank_account),
+                name=normalize_name(supplier.name),
+            )
+            for supplier in by_code.values()
+        ]
+
+        # 每对供应商只落一份原因列表，最后统一展开成双向证据
+        pair_why: dict[tuple[str, str], list[str]] = {}
+
+        by_bank: dict[str, list[_SupplierView]] = defaultdict(list)
+        for view in views:
+            if view.bank:
+                by_bank[view.bank].append(view)
+        for bucket in by_bank.values():
+            for left, right in combinations(bucket, 2):
+                why = ["银行账号相同"]
+                if left.name and left.name == right.name:
+                    why.append("名称归一后相同")
+                _note_supplier_pair(pair_why, left, right, why)
+
+        by_name: dict[str, list[_SupplierView]] = defaultdict(list)
+        for view in views:
+            if view.name:
+                by_name[view.name].append(view)
+        for bucket in by_name.values():
+            for left, right in combinations(bucket, 2):
+                _note_supplier_pair(pair_why, left, right, ["名称归一后相同"])
+
+        for left, right, ratio in _similar_name_pairs(views, options):
+            _note_supplier_pair(
+                pair_why, left, right, [f"名称相似度 {ratio:.2f}"]
+            )
+
+        names_by_code = {view.supplier.code: view.supplier.name for view in views}
         reasons: dict[str, set[str]] = defaultdict(set)
-        for left, right in combinations(values, 2):
-            tax_left = normalize_tax_no(left.tax_no)
-            tax_right = normalize_tax_no(right.tax_no)
-            # 同税号由 DUP-001 阻断，这里不重复报
-            if tax_left and tax_left == tax_right:
-                continue
-            why: list[str] = []
-            bank_left = normalize_bank_account(left.bank_account)
-            bank_right = normalize_bank_account(right.bank_account)
-            if bank_left and bank_left == bank_right:
-                why.append("银行账号相同")
-            name_left = normalize_name(left.name)
-            name_right = normalize_name(right.name)
-            if name_left and name_left == name_right:
-                why.append("名称归一后相同")
-            elif len(name_left) >= 6 and len(name_right) >= 6:
-                ratio = name_similarity(left.name, right.name)
-                if Decimal(str(ratio)) >= options.duplicate_name_threshold:
-                    why.append(f"名称相似度 {ratio:.2f}")
-            if not why:
-                continue
-            for source, target in ((left, right), (right, left)):
-                reasons[source.code].add(
-                    f"与 {target.code}（{target.name}）: {'、'.join(why)}"
-                )
+        for (left_code, right_code), why in pair_why.items():
+            detail = "、".join(why)
+            reasons[left_code].add(
+                f"与 {right_code}（{names_by_code[right_code]}）: {detail}"
+            )
+            reasons[right_code].add(
+                f"与 {left_code}（{names_by_code[left_code]}）: {detail}"
+            )
 
         for code, detail in reasons.items():
             supplier = by_code[code]
