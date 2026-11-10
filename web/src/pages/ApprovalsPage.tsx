@@ -4,9 +4,11 @@ import { useSearchParams } from 'react-router-dom';
 import { api, type ApprovalDecision, type ApprovalPayload } from '../api/client';
 import { useApiConfig, type ApprovalRole } from '../api/config';
 import { ApprovalOpinions } from '../components/ApprovalOpinions';
+import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel } from '../components/ErrorPanel';
 import { LevelBadge, RoleBadge, StateBadge } from '../components/Badges';
 import { amount, dateTime } from '../lib/format';
+import { openSettingsPanel } from '../lib/settings';
 
 export function ApprovalsPage() {
   const config = useApiConfig();
@@ -72,7 +74,9 @@ export function ApprovalsPage() {
         </button>
       </div>
 
-      {tasks.error ? <ErrorPanel error={tasks.error} onRetry={() => void tasks.refetch()} /> : null}
+      {tasks.error ? (
+        <ErrorPanel error={tasks.error} onRetry={() => void tasks.refetch()} onOpenSettings={openSettingsPanel} />
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1.8fr]">
         <section className="card min-w-0">
@@ -83,7 +87,9 @@ export function ApprovalsPage() {
           {tasks.isLoading ? (
             <div className="space-y-2 p-3">{[0, 1, 2].map((key) => <div key={key} className="skeleton h-16 w-full" />)}</div>
           ) : items.length === 0 ? (
-            <p className="px-3 py-8 text-center text-[12px] text-slate-500">没有待办审批。</p>
+            <div className="p-3">
+              <EmptyState variant="no-data" compact description="本期确实无数据：没有待办审批；如需审批请确认当前角色。" />
+            </div>
           ) : (
             <ul className="divide-y divide-slate-100">
               {items.map((task) => {
@@ -120,12 +126,20 @@ export function ApprovalsPage() {
 
         <section className="card min-w-0">
           {!selectedId ? (
-            <p className="px-3 py-10 text-center text-[12px] text-slate-500">选择左侧工单开始审批。</p>
+            <div className="p-3">
+              <EmptyState variant="no-data" compact description="选择左侧工单开始审批。" />
+            </div>
           ) : detail.isLoading ? (
             <div className="space-y-2 p-3">{[0, 1, 2].map((key) => <div key={key} className="skeleton h-20 w-full" />)}</div>
           ) : detail.error ? (
             <div className="p-3">
-              <ErrorPanel error={detail.error} onRetry={() => void detail.refetch()} />
+              <ErrorPanel
+                error={detail.error}
+                onRetry={() => void detail.refetch()}
+                onOpenSettings={openSettingsPanel}
+                notFoundKind="ticket"
+                backTo={{ to: '/approvals', label: '← 返回审批待办' }}
+              />
             </div>
           ) : detail.data ? (
             <div className="min-w-0">
@@ -205,7 +219,7 @@ export function ApprovalsPage() {
 
                 {mutation.error ? (
                   <div className="mt-2">
-                    <ErrorPanel error={mutation.error} compact />
+                    <ErrorPanel error={mutation.error} onOpenSettings={openSettingsPanel} compact />
                   </div>
                 ) : null}
 

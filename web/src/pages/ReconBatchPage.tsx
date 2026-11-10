@@ -5,8 +5,10 @@ import { api } from '../api/client';
 import { DIFF_TYPES } from '../api/types';
 import type { DiffTypeCode } from '../api/types';
 import { DiffTypeBadge } from '../components/Badges';
+import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel } from '../components/ErrorPanel';
 import { amount, dateTime, money, rate } from '../lib/format';
+import { openSettingsPanel } from '../lib/settings';
 
 function Metric({ label, value, hint, tone = '' }: { label: string; value: string | number; hint?: string; tone?: string }) {
   return (
@@ -78,7 +80,15 @@ export function ReconBatchPage() {
         </div>
       </div>
 
-      {batch.error ? <ErrorPanel error={batch.error} onRetry={() => void batch.refetch()} /> : null}
+      {batch.error ? (
+        <ErrorPanel
+          error={batch.error}
+          onRetry={() => void batch.refetch()}
+          onOpenSettings={openSettingsPanel}
+          notFoundKind="batch"
+          backTo={{ to: '/recon', label: '← 返回对账' }}
+        />
+      ) : null}
 
       {batch.isLoading ? (
         <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
@@ -177,14 +187,16 @@ export function ReconBatchPage() {
 
         {diffs.error ? (
           <div className="px-3 pb-3">
-            <ErrorPanel error={diffs.error} onRetry={() => void diffs.refetch()} />
+            <ErrorPanel error={diffs.error} onRetry={() => void diffs.refetch()} onOpenSettings={openSettingsPanel} />
           </div>
         ) : null}
 
         {diffs.isLoading ? (
           <div className="space-y-2 px-3 pb-3">{[0, 1, 2].map((key) => <div key={key} className="skeleton h-14 w-full" />)}</div>
         ) : diffItems.length === 0 ? (
-          <p className="px-3 py-8 text-center text-[12px] text-slate-500">当前筛选下没有差异行。</p>
+          <div className="p-3">
+            <EmptyState variant="no-diff" compact />
+          </div>
         ) : (
           <ul className="divide-y divide-slate-100">
             {diffItems.map((diff) => (

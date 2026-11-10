@@ -4,8 +4,10 @@ import { api } from '../api/client';
 import { useApiConfig } from '../api/config';
 import { TICKET_STATES } from '../api/types';
 import { LevelBadge, StateBadge } from '../components/Badges';
+import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel } from '../components/ErrorPanel';
 import { amount, dateTime, shortId } from '../lib/format';
+import { openSettingsPanel } from '../lib/settings';
 
 function Metric({ label, value, hint, tone = '' }: { label: string; value: string | number; hint?: string; tone?: string }) {
   return (
@@ -57,7 +59,9 @@ export function OverviewPage() {
         </div>
       </div>
 
-      {tickets.error ? <ErrorPanel error={tickets.error} onRetry={() => void tickets.refetch()} /> : null}
+      {tickets.error ? (
+        <ErrorPanel error={tickets.error} onRetry={() => void tickets.refetch()} onOpenSettings={openSettingsPanel} />
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric label="待审批（当前页）" value={pending.length} hint={`共取 ${items.length} 条工单`} tone="text-amber-700" />
@@ -67,7 +71,7 @@ export function OverviewPage() {
       </div>
 
       {approvals.error ? (
-        <ErrorPanel error={approvals.error} onRetry={() => void approvals.refetch()} compact />
+        <ErrorPanel error={approvals.error} onRetry={() => void approvals.refetch()} onOpenSettings={openSettingsPanel} compact />
       ) : null}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">
@@ -82,7 +86,9 @@ export function OverviewPage() {
               {[0, 1, 2, 3].map((key) => <div key={key} className="skeleton h-12 w-full" />)}
             </div>
           ) : items.length === 0 ? (
-            <p className="px-3 py-6 text-center text-[12px] text-slate-500">当前 scope 下没有工单。</p>
+            <div className="p-3">
+              <EmptyState variant="no-data" compact description="当前 scope 下没有工单；确认 org / period / systems 后再看。" />
+            </div>
           ) : (
             <ul className="divide-y divide-slate-100">
               {items.slice(0, 8).map((ticket) => (
@@ -116,7 +122,7 @@ export function OverviewPage() {
             </div>
             <div className="card-body space-y-2">
               {distribution.length === 0 ? (
-                <p className="text-[12px] text-slate-500">暂无数据。</p>
+                <EmptyState variant="no-data" compact description="当前页没有可统计的状态分布。" />
               ) : (
                 distribution.map((item) => (
                   <div key={item.state} className="min-w-0">
@@ -140,7 +146,7 @@ export function OverviewPage() {
             </div>
             <div className="card-body space-y-2">
               {(approvals.data?.items ?? []).length === 0 ? (
-                <p className="text-[12px] text-slate-500">没有待办审批。</p>
+                <EmptyState variant="no-data" compact description="没有待办审批；如需审批请确认当前角色。" />
               ) : (
                 (approvals.data?.items ?? []).slice(0, 4).map((task) => (
                   <Link

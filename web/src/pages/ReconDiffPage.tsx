@@ -4,9 +4,11 @@ import { Link, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { diffTypeMeta, type EvidenceOut } from '../api/types';
 import { DiffTypeBadge } from '../components/Badges';
+import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel } from '../components/ErrorPanel';
 import { FieldDiffTable, type FieldDiffRow } from '../components/FieldDiffTable';
 import { delta, money, rate } from '../lib/format';
+import { openSettingsPanel } from '../lib/settings';
 
 function EvidenceCard({ evidence, onClose }: { evidence: EvidenceOut; onClose?: () => void }) {
   const coord = evidence.coord ?? null;
@@ -44,7 +46,11 @@ function EvidenceCard({ evidence, onClose }: { evidence: EvidenceOut; onClose?: 
 function EvidenceGroup({ evidences, empty }: { evidences: EvidenceOut[]; empty: string }) {
   const [active, setActive] = useState(0);
   if (evidences.length === 0) {
-    return <p className="px-3 py-3 text-[12px] text-slate-500">{empty}</p>;
+    return (
+      <div className="p-3">
+        <EmptyState variant="no-data" compact title={empty} description="本期确实无数据：没有可下钻的原始单据坐标。" />
+      </div>
+    );
   }
   return (
     <div className="min-w-0 px-3 py-2">
@@ -86,10 +92,13 @@ export function ReconDiffPage() {
 
   if (query.error) {
     return (
-      <div className="space-y-3">
-        <Link to={`/recon/${batchId}`} className="link text-[12px]">← 返回差异列表</Link>
-        <ErrorPanel error={query.error} onRetry={() => void query.refetch()} />
-      </div>
+      <ErrorPanel
+        error={query.error}
+        onRetry={() => void query.refetch()}
+        onOpenSettings={openSettingsPanel}
+        notFoundKind="diff"
+        backTo={{ to: `/recon/${batchId}`, label: '← 返回差异列表' }}
+      />
     );
   }
 

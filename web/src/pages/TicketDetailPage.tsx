@@ -9,6 +9,7 @@ import { ErrorPanel } from '../components/ErrorPanel';
 import { StateRail } from '../components/StateRail';
 import { StepTimeline } from '../components/StepTimeline';
 import { amount, dateTime, shortHash, shortId } from '../lib/format';
+import { openSettingsPanel } from '../lib/settings';
 
 const ACTION_LABELS: Record<TicketAction, string> = {
   approve: '审批通过并执行',
@@ -114,10 +115,13 @@ export function TicketDetailPage() {
 
   if (ticket.error) {
     return (
-      <div className="space-y-3">
-        <Link to="/tickets" className="link text-[12px]">← 返回工单列表</Link>
-        <ErrorPanel error={ticket.error} onRetry={() => void ticket.refetch()} />
-      </div>
+      <ErrorPanel
+        error={ticket.error}
+        onRetry={() => void ticket.refetch()}
+        onOpenSettings={openSettingsPanel}
+        notFoundKind="ticket"
+        backTo={{ to: '/tickets', label: '← 返回工单列表' }}
+      />
     );
   }
 
@@ -285,7 +289,7 @@ export function TicketDetailPage() {
 
               {mutation.error ? (
                 <div className="mt-2">
-                  <ErrorPanel error={mutation.error} compact />
+                  <ErrorPanel error={mutation.error} onOpenSettings={openSettingsPanel} compact />
                 </div>
               ) : null}
             </div>
@@ -314,7 +318,7 @@ export function TicketDetailPage() {
               {images.error ? <span className="text-[11px] text-rose-600">审计影像加载失败</span> : null}
             </div>
             {images.error ? (
-              <ErrorPanel error={images.error} compact onRetry={() => void images.refetch()} />
+              <ErrorPanel error={images.error} compact onRetry={() => void images.refetch()} onOpenSettings={openSettingsPanel} />
             ) : images.isLoading ? (
               <div className="space-y-2">{[0, 1].map((key) => <div key={key} className="skeleton h-16 w-full" />)}</div>
             ) : (
@@ -371,7 +375,7 @@ export function TicketDetailPage() {
             </div>
           </div>
 
-          {chain.error ? <ErrorPanel error={chain.error} compact onRetry={() => void chain.refetch()} /> : null}
+          {chain.error ? <ErrorPanel error={chain.error} compact onRetry={() => void chain.refetch()} onOpenSettings={openSettingsPanel} /> : null}
           {auditChain && !auditChain.ok ? (
             <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-800">
               审计链校验失败：{auditChain.detail || '断点未说明'}（broken_at: {auditChain.broken_at ?? '—'}）

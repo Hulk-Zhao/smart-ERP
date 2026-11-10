@@ -4,8 +4,10 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, type ReconRunPayload } from '../api/client';
 import type { ReconDatasetIn } from '../api/generated/contract';
 import { useApiConfig } from '../api/config';
+import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel } from '../components/ErrorPanel';
 import { dateTime, shortId } from '../lib/format';
+import { openSettingsPanel } from '../lib/settings';
 
 const RECENT_KEY = 'smart-erp.web.recon-batches.v1';
 
@@ -158,7 +160,9 @@ export function ReconPage() {
             </details>
 
             {formError ? <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">{formError}</p> : null}
-            {mutation.error ? <ErrorPanel error={mutation.error} compact /> : null}
+            {mutation.error ? (
+              <ErrorPanel error={mutation.error} onRetry={submit} onOpenSettings={openSettingsPanel} compact />
+            ) : null}
 
             <div className="flex flex-wrap justify-end gap-2">
               <button type="button" className="btn btn-secondary" onClick={() => { setSuppliers(''); setDatasetText(''); setFormError(null); mutation.reset(); }}>
@@ -201,7 +205,9 @@ export function ReconPage() {
               <span className="text-[11px] text-slate-400">{recent.length} 条</span>
             </div>
             {recent.length === 0 ? (
-              <p className="px-3 py-6 text-center text-[12px] text-slate-500">还没有发起过对账。</p>
+              <div className="p-3">
+                <EmptyState variant="not-run" compact />
+              </div>
             ) : (
               <ul className="divide-y divide-slate-100">
                 {recent.map((item) => (

@@ -4,8 +4,10 @@ import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { TICKET_STATES } from '../api/types';
 import { LevelBadge, StateBadge } from '../components/Badges';
+import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel } from '../components/ErrorPanel';
 import { amount, dateTime, shortId } from '../lib/format';
+import { openSettingsPanel } from '../lib/settings';
 
 export function TicketsPage() {
   const [state, setState] = useState<string>('');
@@ -88,17 +90,19 @@ export function TicketsPage() {
         </div>
       </div>
 
-      {query.error ? <ErrorPanel error={query.error} onRetry={() => void query.refetch()} /> : null}
+      {query.error ? (
+        <ErrorPanel error={query.error} onRetry={() => void query.refetch()} onOpenSettings={openSettingsPanel} />
+      ) : null}
 
       {query.isLoading ? (
         <div className="space-y-2">
           {[0, 1, 2, 3, 4].map((key) => <div key={key} className="skeleton h-20 w-full" />)}
         </div>
       ) : items.length === 0 ? (
-        <div className="card min-w-0 px-4 py-10 text-center">
-          <p className="text-[13px] font-medium text-slate-700">没有符合条件的工单</p>
-          <p className="mt-1 text-[12px] text-slate-500">检查 scope（org/period/systems）或清空状态筛选。</p>
-        </div>
+        <EmptyState
+          variant="no-data"
+          description="本期在 org / period / systems 范围内没有工单；可清空状态筛选，或确认 scope 是否收得太窄。"
+        />
       ) : (
         <ul className="space-y-2">
           {items.map((ticket) => (

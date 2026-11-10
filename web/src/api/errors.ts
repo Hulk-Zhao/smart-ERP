@@ -56,6 +56,56 @@ export function isScopeDenied(error: unknown): boolean {
   return isApiError(error) && (error.status === 401 || error.status === 403);
 }
 
+/** 错误大类：统一决定界面文案与下一步动作，页面不再各自判断 status/code。 */
+export type ErrorKind = 'forbidden' | 'notfound' | 'conflict' | 'config' | 'network' | 'generic';
+
+export interface ErrorKindOptions {
+  /** 详情页把 422 E-DATA-MISSING（契约口径：含工单/批次不存在）也视为 404。 */
+  notFoundWhenMissing?: boolean;
+}
+
+/** 计量配置缺失：契约文档为 503 E-DATA-MISSING（单行单价未配置）。 */
+const CONFIG_MISSING_PATTERN = /ERP_METERING_UNIT_PRICE|UNIT_PRICE|单价未配置|未配置.*单价/i;
+
+/**
+ * 配置缺失不是故障，界面必须明确「去找管理员配置」，不能让用户反复重试。
+ * 503 E-DATA-MISSING 尚未进入 contracts/errors/codes.v1.json 的注册表，这里按
+ * status + code + 字符串兜底识别，并在台账记录待补。
+ */
+export function isConfigMissing(error: unknown): boolean {
+  if (!isApiError(error)) return false;
+  if (error.code === 'E-DATA-MISSING') {
+    return error.status >= 500 || CONFIG_MISSING_PATTERN.test(error.detail);
+  }
+  if (error.status >= 500 && CONFIG_MISSING_PATTERN.test(error.detail)) return true;
+  // 契约未定义时的字符串兜底
+  return /E-CONFIG|CONFIG-MISSING/i.test(error.code);
+}
+
+/** 网络中断 / 超时：status 0 或 fetch 层抛出的 AbortError/TimeoutError。 */
+export function isNetworkFailure(error: unknown): boolean {
+  if (isApiError(error)) return error.status === 0 || error.code === 'NETWORK';
+  const name = (error as Error | undefined)?.name;
+  return name === 'AbortError' || name === 'TimeoutError' || name === 'NetworkError';
+}
+
+/** 资源不存在：契约未定义 404，按 HTTP 404 / 详情页 422 E-DATA-MISSING 兜底。 */
+export function isNotFoundFailure(error: unknown, options: ErrorKindOptions = {}): boolean {
+  if (!isApiError(error)) return false;
+  if (error.status === 404 || error.status === 410) return true;
+  return Boolean(options.notFoundWhenMissing) && error.status === 422 && error.code === 'E-DATA-MISSING';
+}
+
+export function errorKind(error: unknown, options: ErrorKindOptions = {}): ErrorKind {
+  if (isNetworkFailure(error)) return 'network';
+  if (isConfigMissing(error)) return 'config';
+  if (isNotFoundFailure(error, options)) return 'notfound';
+  if (!isApiError(error)) return 'generic';
+  if (error.status === 401 || error.status === 403) return 'forbidden';
+  if (error.status === 409) return 'conflict';
+  return 'generic';
+}
+
 export const ERROR_HINTS: Record<string, string> = {
   'E-IDEM-CONFLICT': '写接口必须携带 Idempotency-Key；同一键不能复用于不同请求体。',
   'E-AUTHZ-001': '会话缺失/失效或超出授权范围，请重新登录或收窄 scope。',

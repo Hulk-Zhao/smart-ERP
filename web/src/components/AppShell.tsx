@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { configureApi, useApiConfig, type ApprovalRole } from '../api/config';
 import { CONTRACT_PATH_COUNT, CONTRACT_VERSION } from '../api/types';
+import { OPEN_SETTINGS_EVENT } from '../lib/settings';
 
 const NAV = [
   { to: '/', label: '工作台', end: true, hint: '今日待办与范围概览' },
@@ -168,6 +169,13 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 export function AppShell() {
   const config = useApiConfig();
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // 403 等错误态里的「打开连接设置」由统一组件触发，避免逐页传参。
+  useEffect(() => {
+    const open = () => setSettingsOpen(true);
+    window.addEventListener(OPEN_SETTINGS_EVENT, open);
+    return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open);
+  }, []);
 
   return (
     <div className="flex min-h-full w-full min-w-0 flex-col">

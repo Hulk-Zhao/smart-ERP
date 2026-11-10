@@ -1,6 +1,7 @@
 import type { AuditImageOut, TicketStepOut } from '../api/types';
 import { dateTime, shortHash, text } from '../lib/format';
 import { LevelBadge, StepStateBadge } from './Badges';
+import { EmptyState } from './EmptyState';
 import { AuditFieldDiff } from './FieldDiffTable';
 
 const COMPENSATION_STATES = new Set(['compensating', 'compensated', 'unresolved', 'rolled_back']);
@@ -16,9 +17,12 @@ function isCompensation(step: TicketStepOut, images: AuditImageOut[]): boolean {
 export function StepTimeline({ steps, images }: { steps: TicketStepOut[]; images: AuditImageOut[] }) {
   if (steps.length === 0) {
     return (
-      <div className="px-3 py-4 text-[12px] text-slate-500">
-        尚未产生执行步骤。审批通过后，网关会逐步落库；每一步的前像/后像由审计影像回传。
-      </div>
+      <EmptyState
+        variant="no-data"
+        compact
+        title="该工单还没有执行步骤"
+        description="本期确实无数据：审批通过后，网关会逐步落库；每一步的前像/后像由审计影像回传。"
+      />
     );
   }
 

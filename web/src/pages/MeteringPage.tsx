@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { api, downloadText, type MeteringExport } from '../api/client';
-import { ApiError } from '../api/errors';
 import type { MeteringDataGapOut, MeteringStatementOut } from '../api/types';
 import { DiffTypeBadge } from '../components/Badges';
+import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel } from '../components/ErrorPanel';
 import { amount, dateTime, text } from '../lib/format';
+import { openSettingsPanel } from '../lib/settings';
 
 function gapFor(gaps: MeteringDataGapOut[], patterns: string[]): MeteringDataGapOut | undefined {
   return gaps.find((gap) => patterns.some((pattern) => gap.field.toLowerCase().includes(pattern)));
@@ -206,36 +207,14 @@ export function MeteringPage() {
   }
 
   if (statement.error) {
-    const notFound = statement.error instanceof ApiError && statement.error.status === 404;
-    if (notFound) {
-      return (
-        <div className="card min-w-0">
-          <div className="card-body space-y-2">
-            <Link to={`/recon/${batchId}`} className="link inline-flex min-h-[44px] items-center text-[12px]">
-              ← 返回批次
-            </Link>
-            <h1 className="text-[16px] font-semibold text-slate-900">该批次尚未生成计量表</h1>
-            <p className="break-words text-[12px] leading-5 text-slate-600">
-              批次 <span className="break-all font-mono">{batchId}</span> 目前没有计量结论。计量表在对账完成或重跑后生成，可返回批次页查看当前状态。
-            </p>
-            <button
-              type="button"
-              className="btn btn-secondary min-h-[44px]"
-              onClick={() => void statement.refetch()}
-            >
-              重新检查
-            </button>
-          </div>
-        </div>
-      );
-    }
     return (
-      <div className="space-y-3">
-        <Link to={`/recon/${batchId}`} className="link inline-flex min-h-[44px] items-center text-[12px]">
-          ← 返回批次
-        </Link>
-        <ErrorPanel error={statement.error} onRetry={() => void statement.refetch()} />
-      </div>
+      <ErrorPanel
+        error={statement.error}
+        onRetry={() => void statement.refetch()}
+        onOpenSettings={openSettingsPanel}
+        notFoundKind="metering"
+        backTo={{ to: `/recon/${batchId}`, label: '← 返回批次' }}
+      />
     );
   }
 
@@ -276,7 +255,7 @@ export function MeteringPage() {
         </button>
       </div>
 
-      {csv.error ? <ErrorPanel error={csv.error} onRetry={() => csv.mutate()} /> : null}
+      {csv.error ? <ErrorPanel error={csv.error} onRetry={() => csv.mutate()} onOpenSettings={openSettingsPanel} /> : null}
 
       <section className="card min-w-0">
         <div className="card-head">
@@ -464,7 +443,7 @@ export function MeteringPage() {
         </div>
         <div className="card-body space-y-2">
           {(data.lines ?? []).length === 0 ? (
-            <p className="text-[12px] text-slate-500">该批次没有计量行。</p>
+            <EmptyState variant="no-data" compact description="该批次没有计量行：本期确实无数据，不是加载失败。" />
           ) : (
             (data.lines ?? []).map((line) => <LineCard key={`${line.line_no}-${line.side}`} line={line} />)
           )}
