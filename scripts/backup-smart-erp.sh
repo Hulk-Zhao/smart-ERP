@@ -150,7 +150,9 @@ else
   echo "+ tar ${OBJECTS_VOLUME} → ${OUT_DIR}/${OBJ_NAME}（排除 inbox）"
   # --exclude inbox：inbox 是宿主的瞬时收件目录（绑定挂载，见 docker-compose.yml
   # 的 ./inbox:/data/inbox:ro），本不该出现在对象卷里；但万一有人 cp 进去，
-  # 备份也不能把它带走——原始单据会因此被复制到备份机。两种写法都排掉，兼容 busybox tar。
+  # 备份也不能把它带走——原始单据会因此被复制到备份机。两种写法都排掉。
+  # 兼容性：运行时镜像 alpine:3.20 用的是 busybox tar，本写法已在 busybox tar 与
+  # GNU tar 1.35 上实测通过；断言以 busybox（运行时镜像）为准，见 tests/deploy。
   MSYS_NO_PATHCONV=1 docker run --rm \
     -v "${OBJECTS_VOLUME}:/data:ro" -v "${HOST_OUT_DIR}:/backup" \
     "$OBJ_IMAGE" sh -c "cd /data && tar -czf /backup/${OBJ_NAME} --exclude='./inbox' --exclude='inbox' ."

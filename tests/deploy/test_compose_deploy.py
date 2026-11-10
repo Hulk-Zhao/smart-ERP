@@ -503,6 +503,45 @@ class ArtifactsTest(unittest.TestCase):
         self.assertIn("--exclude='./inbox'", text)
         self.assertIn("--exclude='inbox'", text)
 
+    def test_backup_tar_exclude_works_in_runtime_image(self):
+        """运行时镜像 alpine:3.20 是 busybox tar；--exclude 两种写法必须真的排掉 inbox。
+
+        没有 docker 或拉不到镜像时跳过（不把环境缺失当绿，也不当失败）。
+        """
+        text = (SCRIPTS_DIR / "backup-smart-erp.sh").read_text(encoding="utf-8")
+        self.assertIn('OBJ_IMAGE="${ERP_BACKUP_OBJECT_IMAGE:-alpine:3.20}"', text,
+                      "备份镜像必须是 alpine（busybox tar）；换镜像要同时换断言")
+        if not shutil.which("docker"):
+            self.skipTest("本机没有 docker，跳过 busybox tar 行为验证")
+        image = "alpine:3.20"
+        if subprocess.run(
+            ["docker", "image", "inspect", image], capture_output=True, check=False
+        ).returncode != 0:
+            pulled = subprocess.run(
+                ["docker", "pull", "-q", image], capture_output=True, check=False, timeout=180
+            )
+            if pulled.returncode != 0:
+                self.skipTest("拉不到 alpine:3.20，跳过（网络问题不冒充通过）")
+        with tempfile.TemporaryDirectory(prefix="s8-tar-") as tmp:
+            root = Path(tmp)
+            (root / "objects").mkdir()
+            (root / "objects" / "a.txt").write_text("keep\n", encoding="utf-8")
+            (root / "inbox").mkdir()
+            (root / "inbox" / "x.csv").write_text("secret\n", encoding="utf-8")
+            done = subprocess.run(
+                [
+                    "docker", "run", "--rm", "-v", f"{root}:/t", image, "sh", "-c",
+                    (
+                        "cd /t && tar -czf /tmp/o.tgz "
+                        "--exclude='./inbox' --exclude='inbox' ./ && tar -tzf /tmp/o.tgz"
+                    ),
+                ],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertIn("objects/a.txt", done.stdout)
+            self.assertNotIn("inbox", done.stdout, "busybox tar 必须排掉 inbox")
+
     def test_restore_script_never_touches_inbox(self):
         """恢复只写 --target-volume；inbox 只许出现在注释里，不得有任何删除/清空动作。"""
         text = (SCRIPTS_DIR / "restore-smart-erp.sh").read_text(encoding="utf-8")
