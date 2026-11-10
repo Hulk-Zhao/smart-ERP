@@ -80,3 +80,10 @@ source_modules = [
     "apps.platform.policy.registry",
 ]
 forbidden_modules = ["apps.platform.connectors.transport"]
+# 装配层允许边：`apps.main` 是 composition root，必须拿到 `ApiContainer` 里的那一个
+# MetricsRegistry 才能让 `/metrics` 与业务埋点同源（否则端点 200 但永远全 0）。
+# 这条边让 main 间接到达 transport（container -> sdk -> transport），属于「契约缺一条
+# 装配层声明」，不是放宽约束：transport 的**直接**导入仍由
+# tests/platform/test_connector_transport_isolation.py 对 apps/ 做全量 AST 扫描兜底，
+# 其余登记模块的传递依赖判定不变。
+ignore_imports = ["apps.main -> apps.api.container"]
