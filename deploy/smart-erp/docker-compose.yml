@@ -85,7 +85,6 @@ services:
       ERP_LLM_API_KEY: ${ERP_LLM_API_KEY:-}
       ERP_LLM_MODEL: ${ERP_LLM_MODEL:-}
       ERP_LLM_TIMEOUT_SECONDS: ${ERP_LLM_TIMEOUT_SECONDS:-60}
-      ERP_METRICS_PORT: ${ERP_METRICS_PORT:-8011}
     ports:
       # 只绑回环：公网入口只有 hk-web 的 nginx（/erp/api/ → 127.0.0.1:8010），
       # 宿主不再监听 0.0.0.0。4C4G 演示机若确需宿主直连，显式设 ERP_API_BIND=0.0.0.0。
@@ -134,7 +133,6 @@ services:
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
       ERP_WORKER_QUEUES: ${ERP_WORKER_QUEUES:-agent,io}
       ERP_WORKER_CONCURRENCY: ${ERP_WORKER_CONCURRENCY:-4}
-      ERP_WORKER_HEALTH_PORT: ${ERP_WORKER_HEALTH_PORT:-8011}
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
       ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
@@ -147,7 +145,6 @@ services:
       ERP_LLM_API_KEY: ${ERP_LLM_API_KEY:-}
       ERP_LLM_MODEL: ${ERP_LLM_MODEL:-}
       ERP_LLM_TIMEOUT_SECONDS: ${ERP_LLM_TIMEOUT_SECONDS:-60}
-      ERP_METRICS_PORT: ${ERP_METRICS_PORT:-8011}
     volumes:
       - erp_objects:/data/objects
       - erp_logs:/app/logs
@@ -185,7 +182,6 @@ services:
       ERP_SCHEDULER_TICK_SECONDS: ${ERP_SCHEDULER_TICK_SECONDS:-60}
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
-      ERP_METRICS_PORT: ${ERP_METRICS_PORT:-8011}
     volumes:
       - erp_logs:/app/logs
     networks:
@@ -310,7 +306,6 @@ services:
       ERP_S3_BUCKET: ${ERP_S3_BUCKET:-}
       ERP_S3_ACCESS_KEY: ${ERP_S3_ACCESS_KEY:-}
       ERP_S3_SECRET_KEY: ${ERP_S3_SECRET_KEY:-}
-      ERP_METRICS_PORT: ${ERP_METRICS_PORT:-8011}
     volumes:
       - erp_objects:/data/objects
       - ./config:/app/config:ro
@@ -354,7 +349,6 @@ services:
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
       ERP_WORKER_QUEUES: agent
       ERP_WORKER_CONCURRENCY: ${ERP_AGENT_WORKER_CONCURRENCY:-4}
-      ERP_WORKER_HEALTH_PORT: ${ERP_WORKER_HEALTH_PORT:-8011}
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
       ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
@@ -367,7 +361,6 @@ services:
       ERP_LLM_API_KEY: ${ERP_LLM_API_KEY:-}
       ERP_LLM_MODEL: ${ERP_LLM_MODEL:-}
       ERP_LLM_TIMEOUT_SECONDS: ${ERP_LLM_TIMEOUT_SECONDS:-60}
-      ERP_METRICS_PORT: ${ERP_METRICS_PORT:-8011}
     volumes:
       - erp_objects:/data/objects
       - erp_logs:/app/logs
@@ -410,7 +403,6 @@ services:
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
       ERP_WORKER_QUEUES: io
       ERP_WORKER_CONCURRENCY: ${ERP_IO_WORKER_CONCURRENCY:-2}
-      ERP_WORKER_HEALTH_PORT: ${ERP_WORKER_HEALTH_PORT:-8011}
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
       ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
@@ -420,7 +412,6 @@ services:
       ERP_S3_ACCESS_KEY: ${ERP_S3_ACCESS_KEY:-}
       ERP_S3_SECRET_KEY: ${ERP_S3_SECRET_KEY:-}
       ERP_DOC_SERVICE_URL: ${ERP_DOC_SERVICE_URL:-http://doc:8020}
-      ERP_METRICS_PORT: ${ERP_METRICS_PORT:-8011}
     volumes:
       - erp_objects:/data/objects
       - erp_logs:/app/logs
