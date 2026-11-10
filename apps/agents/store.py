@@ -14,13 +14,14 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from apps.agents.events import (
     COMPENSATION_EVENT,
     CREATED_EVENT,
+    RECOVERED_EVENT,
     STEP_EVENT,
     TRANSITION_EVENT,
     EventRecord,
@@ -211,6 +212,36 @@ class TicketStore:
                 )
             ).all()
         return [_record_from_row(row) for row in rows]
+
+    async def list_events_bulk(
+        self, ticket_ids: Sequence[UUID] | None = None
+    ) -> dict[UUID, list[EventRecord]]:
+        """一次查询取多工单的全部事件（全链巡检/出表校验用，避免 N+1）。"""
+
+        stmt = select(TicketEvent).order_by(TicketEvent.ticket_id, TicketEvent.seq)
+        if ticket_ids is not None:
+            ids = list(ticket_ids)
+            if not ids:
+                return {}
+            stmt = stmt.where(TicketEvent.ticket_id.in_(ids))
+        async with self._sf() as session:
+            rows = (await session.scalars(stmt)).all()
+        grouped: dict[UUID, list[EventRecord]] = {}
+        for row in rows:
+            grouped.setdefault(row.ticket_id, []).append(_record_from_row(row))
+        return grouped
+
+    async def count_events(self, ticket_ids: Sequence[UUID] | None = None) -> int:
+        """统计事件条数（出表闸门先估规模，超上限直接拒绝，避免整批加载）。"""
+
+        stmt = select(func.count()).select_from(TicketEvent)
+        if ticket_ids is not None:
+            ids = list(ticket_ids)
+            if not ids:
+                return 0
+            stmt = stmt.where(TicketEvent.ticket_id.in_(ids))
+        async with self._sf() as session:
+            return int((await session.execute(stmt)).scalar_one())
 
     async def rebuild_projection(self, ticket_id: UUID) -> Projection:
         """复算投影（只读）；事件损坏时抛 ``ReplayError``。"""
@@ -433,7 +464,81 @@ class TicketStore:
                 hash=record.hash,
             )
         )
+        # 当日锚点与事件同事务推进：热路径 O(1) 比对链尾用（见 audit_guard）
+        await session.execute(
+            text(
+                "INSERT INTO erp.ticket_event_anchor (ticket_id, seq, hash) "
+                "VALUES (:ticket_id, :seq, :hash) "
+                "ON CONFLICT (ticket_id) DO UPDATE SET seq = EXCLUDED.seq, "
+                "hash = EXCLUDED.hash, updated_at = now()"
+            ),
+            {"ticket_id": ticket.id, "seq": record.seq, "hash": record.hash},
+        )
         return record
+
+    async def record_recovery(
+        self,
+        *,
+        ticket_id: UUID,
+        step_no: int,
+        idem_key: str,
+        verify_observed: Mapping[str, Any] | None,
+        prior_recoveries: int,
+        trace_id: str | None = None,
+    ) -> EventRecord:
+        """确认「本地未提交但外部已成功」时写显式事件，带可追溯的证据坐标。"""
+
+        async with self._sf() as session, session.begin():
+            ticket = await session.scalar(
+                select(Ticket).where(Ticket.id == ticket_id).with_for_update()
+            )
+            if ticket is None:
+                raise TicketNotFound(f"工单不存在: {ticket_id}")
+            return await self._append_locked(
+                session,
+                ticket,
+                event_type=RECOVERED_EVENT,
+                from_state=None,
+                to_state=None,
+                payload={
+                    "step_no": step_no,
+                    "idem_key": idem_key,
+                    "verify_observed": dict(verify_observed or {}),
+                    "prior_recoveries": prior_recoveries,
+                    "evidence": {
+                        "step_no": step_no,
+                        "idem_key": idem_key,
+                        "verify": dict(verify_observed or {}),
+                    },
+                },
+                actor_id=None,
+                trace_id=trace_id,
+            )
+
+    async def count_recoveries(
+        self,
+        ticket_id: UUID,
+        *,
+        step_no: int | None = None,
+        today_only: bool = False,
+    ) -> int:
+        """recovered 指标：按工单（可选按步骤 / 当日）计数，供阈值判断。"""
+
+        sql = (
+            "SELECT count(*) FROM erp.ticket_event "
+            "WHERE ticket_id = :ticket_id AND event_type = :event_type"
+        )
+        params: dict[str, Any] = {
+            "ticket_id": ticket_id,
+            "event_type": RECOVERED_EVENT,
+        }
+        if step_no is not None:
+            sql += " AND payload->>'step_no' = :step_no"
+            params["step_no"] = str(step_no)
+        if today_only:
+            sql += " AND created_at >= date_trunc('day', now())"
+        async with self._sf() as session:
+            return int((await session.execute(text(sql), params)).scalar_one())
 
     async def record_compensation(
         self,

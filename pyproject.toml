@@ -7,18 +7,28 @@ name = "smart-erp"
 version = "0.1.0"
 description = "聚合型 AI ERP —— 可审计业务执行层（Phase 1 / MVP）"
 requires-python = ">=3.12"
+# 依赖版本策略（2026-11-11 定）：
+# 1. 运行时依赖一律写下界 + 上界（`>=x,<y`），上界取「最近一次全量实测通过的次版本 +1」；
+#    不要写 `==`，否则安全补丁进不来。
+# 2. 升级依赖必须单独开 PR，且 CI（Linux + Python 3.12，`pip install -e ".[dev]"`）
+#    与本机各跑一遍全量测试后再合。
+# 3. 不提交 uv.lock：CI 走 `pip install -e ".[dev]"` 根本不读它，入库只会形成
+#    「本机一个真源、CI 另一个真源」的双头，比无锁更难查。
+# 背景：2026-11-10 排查「CI 绿、本机红」时，本机锁 fastapi 0.162.3、CI 装 0.162.4，
+# 靠两边各跑一遍才把它排除出嫌疑人；约束写在 pyproject.toml 里两处都看得见。
 dependencies = [
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.30",
+    "fastapi>=0.115,<0.163",
+    "uvicorn[standard]>=0.30,<0.55",
     "pydantic>=2.7",
     "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29",
     "alembic>=1.13",
     # connector-gw 的 U8 transport / mock 在导入期即依赖 httpx（非仅测试用）
     "httpx>=0.27",
-    # apps/platform/api 的中间件直接继承 starlette；不写版本约束，
-    # 沿用 fastapi 选定的那一版，避免与 fastapi 的依赖区间冲突。
-    "starlette",
+    # apps/platform/api 的中间件与错误处理直接 import starlette（middleware.base /
+    # requests / responses / types / exceptions），属直接依赖而非纯传递依赖，故给区间；
+    # 1.x（当前 1.10.0）与 fastapi 0.162.4 实测解析通过。
+    "starlette>=1.0,<2",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +36,9 @@ dev = [
     "pytest>=8",
     "httpx>=0.27",
     "import-linter>=2.0",
+    # test_runtime_packaging.py 直接用 setuptools.find_packages 复算镜像布局；
+    # Python 3.12 的干净环境不再自带 setuptools，必须显式声明（B-S8-01）。
+    "setuptools>=69",
 ]
 # PDF 文本层抽取：仅 doc 镜像安装，核心安装零 PDF 依赖。
 # 不用 PyMuPDF（AGPL-3.0）；pypdfium2 为 BSD-3-Clause/Apache-2.0，自带 PDFium。
@@ -34,7 +47,9 @@ pdf = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["apps*"]
+# core / tools 是 C15 常驻进程入口（python -m core.runtime.worker 等），
+# 只打 apps* 时即使补了文件镜像里也会 ModuleNotFoundError（B-S8-01）。
+include = ["apps*", "core*", "tools*"]
 namespaces = false
 
 [tool.pytest.ini_options]

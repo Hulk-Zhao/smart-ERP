@@ -48,6 +48,12 @@ BASELINE_TABLES: frozenset[str] = frozenset(
         "erp.recon_line",
         "erp.recon_line_event",
         "erp.recon_line_link",
+        # 0004_audit_chain_anchor
+        "erp.ticket_event_anchor",
+        "erp.audit_guard_state",
+        # 0005_worker_runtime
+        "erp.worker_heartbeat",
+        "erp.scheduler_lease",
     }
 )
 

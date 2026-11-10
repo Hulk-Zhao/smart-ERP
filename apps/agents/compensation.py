@@ -35,7 +35,7 @@ _ENQUEUE_SQL = text(
 _LIST_SQL = text(
     """
     SELECT id, ticket_id, original_step, compensate_seq, action_key,
-           state, attempts, next_retry_at, last_error
+           state, attempts, next_retry_at, last_error, lease_owner, heartbeat_at
       FROM erp.compensation_task
      WHERE ticket_id = :ticket_id
      ORDER BY compensate_seq DESC
@@ -45,7 +45,10 @@ _LIST_SQL = text(
 _CLAIM_SQL = text(
     """
     UPDATE erp.compensation_task
-       SET state = 'running', attempts = attempts + 1
+       SET state = 'running',
+           attempts = attempts + 1,
+           lease_owner = :owner,
+           heartbeat_at = now()
      WHERE id = (
            SELECT id
              FROM erp.compensation_task
@@ -56,14 +59,53 @@ _CLAIM_SQL = text(
             LIMIT 1
             FOR UPDATE SKIP LOCKED
      )
-    RETURNING id, ticket_id, original_step, compensate_seq, action_key, state, attempts
+    RETURNING id, ticket_id, original_step, compensate_seq, action_key, state,
+              attempts, lease_owner, heartbeat_at
+    """
+)
+
+# 崩溃遗留的 running：心跳过期即视为租约失效，重新入队（不靠唯一索引硬撞）
+_RECLAIM_WHERE = """
+    state = 'running'
+      AND (heartbeat_at IS NULL
+           OR heartbeat_at < now() - make_interval(secs => :stale_after))
+"""
+
+_RECLAIM_SQL = text(
+    f"""
+    UPDATE erp.compensation_task
+       SET state = 'queued', lease_owner = NULL, heartbeat_at = NULL,
+           next_retry_at = NULL
+     WHERE ticket_id = :ticket_id AND {_RECLAIM_WHERE}
+    RETURNING id, ticket_id, original_step, compensate_seq, action_key, state,
+              attempts, lease_owner, heartbeat_at
+    """
+)
+
+_RECLAIM_ALL_SQL = text(
+    f"""
+    UPDATE erp.compensation_task
+       SET state = 'queued', lease_owner = NULL, heartbeat_at = NULL,
+           next_retry_at = NULL
+     WHERE {_RECLAIM_WHERE}
+    RETURNING id, ticket_id, original_step, compensate_seq, action_key, state,
+              attempts, lease_owner, heartbeat_at
+    """
+)
+
+_HEARTBEAT_SQL = text(
+    """
+    UPDATE erp.compensation_task
+       SET heartbeat_at = now()
+     WHERE id = :task_id AND state = 'running' AND lease_owner = :owner
     """
 )
 
 _DONE_SQL = text(
     """
     UPDATE erp.compensation_task
-       SET state = 'done', last_error = NULL
+       SET state = 'done', last_error = NULL,
+           lease_owner = NULL, heartbeat_at = NULL
      WHERE id = :task_id AND state = 'running'
     """
 )
@@ -73,6 +115,8 @@ _FAILED_SQL = text(
     UPDATE erp.compensation_task
        SET state = CASE WHEN attempts >= :max_attempts THEN 'failed' ELSE 'queued' END,
            last_error = :error,
+           lease_owner = NULL,
+           heartbeat_at = NULL,
            next_retry_at = CASE
                WHEN attempts >= :max_attempts THEN NULL
                ELSE now() + make_interval(secs => :retry_in)
@@ -100,6 +144,8 @@ class CompensationTaskView:
     action_key: str
     state: str
     attempts: int
+    lease_owner: str | None = None
+    heartbeat_at: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +169,8 @@ def _view(row: Mapping[str, object]) -> CompensationTaskView:
         action_key=str(row["action_key"]),
         state=str(row["state"]),
         attempts=int(row["attempts"]),  # type: ignore[arg-type]
+        lease_owner=str(row["lease_owner"]) if row.get("lease_owner") else None,
+        heartbeat_at=row.get("heartbeat_at"),
     )
 
 
@@ -142,12 +190,63 @@ class CompensationQueue:
             rows = (await session.execute(_LIST_SQL, {"ticket_id": ticket_id})).mappings()
             return [_view(row) for row in rows]
 
-    async def claim_next(self, ticket_id: UUID) -> CompensationTaskView | None:
+    async def claim_next(
+        self,
+        ticket_id: UUID,
+        owner: str = "compensator",
+    ) -> CompensationTaskView | None:
         async with self._sf() as session, session.begin():
             row = (
-                await session.execute(_CLAIM_SQL, {"ticket_id": ticket_id})
+                await session.execute(
+                    _CLAIM_SQL,
+                    {
+                        "ticket_id": ticket_id,
+                        "owner": owner,
+                    },
+                )
             ).mappings().one_or_none()
         return _view(row) if row is not None else None
+
+    async def heartbeat(self, task_id: UUID, owner: str) -> bool:
+        async with self._sf() as session, session.begin():
+            result = await session.execute(
+                _HEARTBEAT_SQL, {"task_id": task_id, "owner": owner}
+            )
+        return bool(result.rowcount)
+
+    async def reclaim_stale(
+        self, ticket_id: UUID, *, stale_after_seconds: float = 60.0
+    ) -> list[CompensationTaskView]:
+        """把心跳过期的 running 重新入队，返回被回收的任务（按 compensate_seq 倒序）。"""
+
+        async with self._sf() as session, session.begin():
+            rows = (
+                await session.execute(
+                    _RECLAIM_SQL,
+                    {
+                        "ticket_id": ticket_id,
+                        "stale_after": float(stale_after_seconds),
+                    },
+                )
+            ).mappings().all()
+        return sorted(
+            (_view(row) for row in rows), key=lambda item: item.compensate_seq, reverse=True
+        )
+
+    async def reclaim_stale_all(
+        self, *, stale_after_seconds: float = 60.0
+    ) -> list[CompensationTaskView]:
+        """启动恢复入口：全库扫描 stale running，重新入队。"""
+
+        async with self._sf() as session, session.begin():
+            rows = (
+                await session.execute(
+                    _RECLAIM_ALL_SQL, {"stale_after": float(stale_after_seconds)}
+                )
+            ).mappings().all()
+        return sorted(
+            (_view(row) for row in rows), key=lambda item: item.compensate_seq, reverse=True
+        )
 
     async def mark_done(self, task_id: UUID) -> None:
         async with self._sf() as session, session.begin():

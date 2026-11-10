@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from itertools import pairwise
 
 import pytest
 
@@ -70,7 +69,7 @@ def test_replay_reconstructs_current_state() -> None:
 def test_hash_chain_links_each_event() -> None:
     events = _chain()
     assert events[0].prev_hash == GENESIS_HASH
-    for previous, current in pairwise(events):
+    for previous, current in zip(events, events[1:]):
         assert current.prev_hash == previous.hash
         assert current.hash == current.computed_hash
 
