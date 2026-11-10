@@ -54,6 +54,8 @@
 5. **worker / scheduler**：四容器按 compose 健康命令 `python -m tools.health <worker|scheduler> --check [--queues …]` 判定，均 `healthy` 且 `RestartCount=0`；插入 5 agent + 3 io 任务后 `agent succeeded 5` / `io succeeded 3`；`erp.worker_heartbeat` 3 行、`age` 为秒级（两次实测 3–9s），`jobs_done` 合计 8（单行分配随抢占而变，不固定为某个值）；`python tests/agents/s8_evidence.py` → `SUMMARY 4/4 passed`（cli_5_jobs 5 succeeded；retry_and_dead 10 succeeded / 4 dead / 6 retries；kill9_reclaim 心跳 3.3s 后回收 1；scheduler_single_point A→B 接管）。
 6. **回归**：`python -m pytest tests/deploy -q` → 38 passed。
 
+> **限定（2026-11-11 补记，勿删）**：第 3 条的四容器探针是**各自 `docker run` 后独立 `GET`**，`web` 只测了 `GET /` 的静态首页，**v0.2.0 从未验证「经 web 容器的 API 路径」**。2026-11-11 在 `c3c662b` 上实测：`/erp/api/*` 全部 404（`web-nginx.conf` 的 `proxy_pass $erp_api_upstream/` 使用了变量，nginx 此时不做 location 前缀替换，请求被压成 `/` 送给 api；`/erp/api/tickets`、`/erp/api/openapi.json` 同样 404）。因此本版「可起」的准确表述是「四容器各自健康 + 静态首页可访问」，**不包含 web→api 转发**；该缺陷自 v0.2.0 起一直存在，修复后须在新 sha 上重跑全链路并补一条经 web 的真实请求证据。
+
 ### 已知缺口（登记时如实记录）
 
 1. `8011` 无服务实现：相关 `expose` 与两枚空 env 键已彻底移除（#39 / #40），8011 **不构成验收项**；worker/scheduler 健康判定唯一口径是 `--check` 进程探针。
