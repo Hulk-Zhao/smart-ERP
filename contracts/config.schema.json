@@ -823,8 +823,8 @@
     },
     "ERP_METRICS_PATH": {
       "type": "string",
-      "scope": "code",
-      "services": [],
+      "scope": "compose",
+      "services": ["api"],
       "required": false,
       "secret": false,
       "phase": "startup",
