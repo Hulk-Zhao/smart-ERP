@@ -94,9 +94,9 @@ pg_restore -l smart_erp-*.dump | head -30
 
 ### G07 hk-web nginx 片段落地 🔴 R3（hk-web 人工，约 5–10 min）
 
-> **当前不可执行（不在本仓库）**：需要 hk-web 维护人把 RUNBOOK §5.2 的片段写进 nginx 并 `nginx -t && nginx -s reload`。要点两条：
-> - `location = /metrics { deny all; }`（或 `return 404;`）；
-> - `location /erp/api/ { proxy_pass http://127.0.0.1:8010; }`，**结尾不带 `/`**，保留 `/erp/api/` 前缀；
+> **当前不可执行（不在本仓库）**：需要 hk-web 维护人把 RUNBOOK §5.2 的片段写进 nginx 并 `nginx -t && nginx -s reload`。要点三条：
+> - `location = /erp/api/metrics { deny all; }`（或 `return 404;`），并保留 `location = /metrics { deny all; }` 兜底；
+> - `location /erp/api/ { proxy_pass http://127.0.0.1:8010/; }`，**结尾必须带 `/`（剥前缀）**：api 以 uvicorn `--root-path=/erp/api` 启动，应用内只认无前缀路径；保留前缀会让全部 `/erp/api/*` 404；
 > - `/demo/smart-erp/*` 去前缀后打到 `127.0.0.1:8088`。
 > 未落地则 G14/G15 的公网验收无法成立。
 
@@ -284,6 +284,9 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8010/healthz
 > **当前不可执行**：与 G14 同源，安全组与 hk-web 未落地前无法判定。
 > 与 RUNBOOK §5.2 同一口径，按 1 → 2 → 3 顺序执行。
 >
+> **前提：nginx 必须已剥掉 `/erp/api/` 前缀**（`proxy_pass .../;`）。先确认 `https://<域名>/erp/api/healthz` 为 **200**，
+> 再执行第 3 行；否则应用只认无前缀路径，`/erp/api/metrics` 的 404 可能来自「前缀未剥」，不是 deny 生效。
+>
 > 判断原则：**只有第 2 行（开启后容器内直连 200）能证明端点存在，第 3 行才有意义。**
 > 跳过第 2 行直接看第 3 行，等于在验一个可能不存在的端点——`#48` 的 deny 规则就是
 > 这样保护了一个不存在的端点，靠 404 通过，属于假通过。
@@ -295,8 +298,8 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8010/healthz
 > | 3 | 保持第 2 行开启状态，`curl -m 3 -o /dev/null -sS -w '%{http_code}\n' https://<域名>/erp/api/metrics` | **403** | nginx 的 deny 生效，不是「端点不存在」 |
 >
 > 第 3 行返回 **404 不算通过**：与第 1 行同码，既可能是 nginx 写成 `return 404`，也可能是没 reload；
-> 返回 200 即指标外泄，立即回滚并收口。站点根路径兜底 `https://<域名>/metrics` 也必须是 **403**。
-> `http://<公网IP>:8010/metrics` 必须连接失败（curl exit 7/28）。容器内探针与完整命令见 RUNBOOK §5.2。
+> 返回 200 即指标外泄，立即回滚并收口。站点根路径兜底 `https://<域名>/metrics` 也不得 **200**（本次按 **404** 验收：
+> hk-web 未配置该路径；写成 `deny all` 得到 403 亦可，但与选定写法保持一致）。`http://<公网IP>:8010/metrics` 必须连接失败（curl exit 7/28）。容器内探针与完整命令见 RUNBOOK §5.2。
 
 ### 4.5 备份产物 `SHA256SUMS` 校验通过 ✅
 
