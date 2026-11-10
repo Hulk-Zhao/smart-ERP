@@ -9,6 +9,7 @@ from __future__ import annotations
 import uvicorn
 from fastapi import FastAPI
 
+from apps.platform.api import install_platform
 from apps.platform.config import Settings, get_settings
 
 SERVICE_NAME = "smart-erp-api"
@@ -23,6 +24,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url="/docs",
         openapi_url="/openapi.json",
     )
+    # 请求 ID / trace_id / 超时 / problem+json 错误处理统一由平台层装配；
+    # 业务路由在各自模块里挂到 apps.platform.api.api_router 即可。
+    install_platform(app)
 
     @app.get("/healthz", tags=["ops"])
     async def healthz() -> dict[str, str]:
