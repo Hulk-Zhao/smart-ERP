@@ -177,6 +177,18 @@ def _format_value(value: float) -> str:
     return f"{number:.12g}"
 
 
+def _finite(value: Any, what: str) -> float:
+    """转成有限浮点；允许负值（时钟偏移这类双向信号用）。"""
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise MetricError(f"{what} 必须是数字，实际 {value!r}") from exc
+    if not math.isfinite(number):
+        raise MetricError(f"{what} 必须是有限数，实际 {value!r}")
+    return number
+
+
 def _validate_metric_name(name: str) -> None:
     if not _METRIC_NAME_RE.match(name):
         raise MetricError(f"非法指标名 {name!r}")
@@ -275,19 +287,35 @@ class Counter:
 
 
 class Gauge:
-    """可增可减的瞬时值。"""
+    """可增可减的瞬时值。
 
-    def __init__(self, name: str, help_text: str, label_names: Sequence[str] = ()) -> None:
+    ``allow_negative=True`` 用于时钟偏移这类双向信号；其余 gauge 仍拒绝负值，
+    因为「工单数 −1」几乎总是计数逻辑写错，而不是合法状态。
+    """
+
+    def __init__(
+        self,
+        name: str,
+        help_text: str,
+        label_names: Sequence[str] = (),
+        *,
+        allow_negative: bool = False,
+    ) -> None:
         _validate_metric_name(name)
         _validate_label_names(label_names)
         self._family = _Family(name, help_text, tuple(label_names), "gauge")
+        self.allow_negative = allow_negative
 
     @property
     def name(self) -> str:
         return self._family.name
 
     def set(self, value: float, **labels: Any) -> None:
-        number = _non_negative(value, "value")
+        number = (
+            _finite(value, "value")
+            if self.allow_negative
+            else _non_negative(value, "value")
+        )
         key = self._family._key(labels)
         with self._family.lock:
             self._family.values[key] = number
@@ -463,6 +491,23 @@ class MetricsRegistry:
             "smart_erp_compensation_backlog",
             "当前待处理补偿任务积压数",
         )
+        self.compensation_overdue = Gauge(
+            "smart_erp_compensation_overdue",
+            "补偿任务已到期却未被领取的条数（抓 claim 停摆，含 next_retry_at 为 NULL 的无闸门行）",
+        )
+        self.compensation_future_retry = Gauge(
+            "smart_erp_compensation_future_retry",
+            "next_retry_at 落在未来 18s 之外的 queued 补偿任务数（只可能由墙钟回拨或错算造成）",
+        )
+        self.db_clock_skew_seconds = Gauge(
+            "smart_erp_db_clock_skew_seconds",
+            "应用单调时钟与墙钟的差值（秒）：Δwall − Δtick，负值表示墙钟回拨",
+            allow_negative=True,
+        )
+        self.db_clock_skew_backwards_seconds_max = Gauge(
+            "smart_erp_db_clock_skew_backwards_seconds_max",
+            "进程启动以来观测到的最大墙钟回拨幅度（秒）",
+        )
         self.audit_chain_broken = Gauge(
             "smart_erp_audit_chain_broken",
             "审计链断链标志：0 正常，1 检测到断链（P0，不计入业务成功率）",
@@ -482,6 +527,10 @@ class MetricsRegistry:
             self.recon_runs_failed_total,
             self.unresolved_tickets,
             self.compensation_backlog,
+            self.compensation_overdue,
+            self.compensation_future_retry,
+            self.db_clock_skew_seconds,
+            self.db_clock_skew_backwards_seconds_max,
             self.audit_chain_broken,
         )
 
@@ -609,6 +658,36 @@ class MetricsRegistry:
 
     def set_compensation_backlog(self, count: int) -> None:
         self.compensation_backlog.set(_count_value(count, "compensation_backlog"))
+
+    def set_compensation_overdue(self, count: int) -> None:
+        """到期未领取条数；SQL 口径见 README §6.1.3，NULL 分支必须计入。"""
+
+        self.compensation_overdue.set(_count_value(count, "compensation_overdue"))
+
+    def set_compensation_future_retry(self, count: int) -> None:
+        self.compensation_future_retry.set(
+            _count_value(count, "compensation_future_retry")
+        )
+
+    def observe_clock_skew(
+        self, *, monotonic_delta_seconds: float, wall_delta_seconds: float
+    ) -> float:
+        """一次成对采样：单调时钟前进 ``tick``、墙钟前进 ``wall``，返回本次 skew。
+
+        单调时钟不会倒退，所以 ``tick > wall`` 就是墙钟回拨——这是**根因信号**，
+        在任务还没卡住之前就能报。``skew = wall − tick``，负值表示回拨；回拨幅度
+        同时并入进程内最大值。调用方只需在采样点把两个增量传进来。
+        """
+
+        tick = _non_negative(monotonic_delta_seconds, "monotonic_delta_seconds")
+        wall = _finite(wall_delta_seconds, "wall_delta_seconds")
+        skew = wall - tick
+        self.db_clock_skew_seconds.set(skew)
+        backwards = -skew if skew < 0 else 0.0
+        current = self.db_clock_skew_backwards_seconds_max.value() or 0.0
+        if backwards > current:
+            self.db_clock_skew_backwards_seconds_max.set(backwards)
+        return skew
 
     def set_audit_chain_broken(self, broken: bool) -> None:
         self.audit_chain_broken.set(1 if broken else 0)
