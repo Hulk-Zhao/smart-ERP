@@ -1,0 +1,68 @@
+# ============================================================
+# 本地保留、不进版本库的内容
+# 约定：调研 / 产品 / AI 开发相关文档只在本地维护，不推送到远端
+# ============================================================
+
+# --- 文档（本地维护） ---
+docs/research/
+docs/product/
+docs/ai/
+docs/planning/
+docs/drafts/
+docs/notes/
+
+# --- AI / Agent 开发痕迹 ---
+.agent/
+.agents/
+.trae/
+agent-logs/
+agent_logs/
+agent-runs/
+experiments/
+playground/
+sandbox/
+prompts/output/
+prompts_output/
+prompt_outputs/
+
+# Jupyter 实验 notebook 与检查点（如需入库请用 ! 显式放行）
+*.ipynb
+.ipynb_checkpoints/
+
+# --- 临时产物与本地草稿 ---
+tmp/
+temp/
+scratch/
+.cache/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.log
+*.out
+
+# --- 环境变量与密钥 ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- 语言运行时 / 依赖（按需保留） ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+node_modules/
+*.tsbuildinfo
+
+# --- 操作系统 / 编辑器 ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
