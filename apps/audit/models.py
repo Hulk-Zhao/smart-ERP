@@ -45,6 +45,8 @@ class AuditImageRow(AuditBase):
     __tablename__ = "audit_image"
     __table_args__ = (
         UniqueConstraint("tenant_id", "chain_seq", name="uq_audit_image_chain_seq"),
+        # 同租户同父只允许一个后继：并发追加退化为写入失败，而不是静默分叉
+        UniqueConstraint("tenant_id", "prev_hash", name="uq_audit_image_parent"),
         CheckConstraint("length(hash) = 64", name="ck_audit_image_hash_sha256"),
         CheckConstraint(
             "length(prev_hash) = 0 OR length(prev_hash) = 64",
