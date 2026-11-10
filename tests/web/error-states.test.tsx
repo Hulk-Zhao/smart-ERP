@@ -37,6 +37,8 @@ interface PageCase {
   interaction?: 'recon-submit';
   emptyVariant: 'no-data' | 'not-run' | 'no-diff';
   emptyText: string;
+  /** 空态格也必须给出可点击的下一步（筛选/刷新/返回/发起对账）。 */
+  emptyAction: { role: 'button' | 'link'; name: string };
 }
 
 const PAGES: PageCase[] = [
@@ -47,6 +49,7 @@ const PAGES: PageCase[] = [
     render: () => <OverviewPage />,
     emptyVariant: 'no-data',
     emptyText: '本期确实无数据',
+    emptyAction: { role: 'button', name: '刷新' },
   },
   {
     name: '工单列表',
@@ -55,6 +58,7 @@ const PAGES: PageCase[] = [
     render: () => <TicketsPage />,
     emptyVariant: 'no-data',
     emptyText: '本期确实无数据',
+    emptyAction: { role: 'button', name: '全部' },
   },
   {
     name: '工单详情',
@@ -63,6 +67,7 @@ const PAGES: PageCase[] = [
     render: () => <TicketDetailPage />,
     emptyVariant: 'no-data',
     emptyText: '本期确实无数据',
+    emptyAction: { role: 'button', name: '刷新' },
   },
   {
     name: '审批待办',
@@ -71,6 +76,7 @@ const PAGES: PageCase[] = [
     render: () => <ApprovalsPage />,
     emptyVariant: 'no-data',
     emptyText: '本期确实无数据',
+    emptyAction: { role: 'button', name: '刷新' },
   },
   {
     name: '对账',
@@ -80,6 +86,7 @@ const PAGES: PageCase[] = [
     interaction: 'recon-submit',
     emptyVariant: 'not-run',
     emptyText: '还没跑过对账',
+    emptyAction: { role: 'button', name: '发起对账' },
   },
   {
     name: '批次详情',
@@ -88,6 +95,7 @@ const PAGES: PageCase[] = [
     render: () => <ReconBatchPage />,
     emptyVariant: 'no-diff',
     emptyText: '当前筛选下没有差异行',
+    emptyAction: { role: 'button', name: '全部类型' },
   },
   {
     name: '差异明细',
@@ -96,6 +104,7 @@ const PAGES: PageCase[] = [
     render: () => <ReconDiffPage />,
     emptyVariant: 'no-data',
     emptyText: '本期确实无数据',
+    emptyAction: { role: 'link', name: '← 返回批次差异列表' },
   },
   {
     name: '计量表',
@@ -104,6 +113,7 @@ const PAGES: PageCase[] = [
     render: () => <MeteringPage />,
     emptyVariant: 'no-data',
     emptyText: '该批次没有计量行',
+    emptyAction: { role: 'link', name: '← 返回批次' },
   },
 ];
 
@@ -243,5 +253,7 @@ describe.each(PAGES)('$name：6 类错误态与空态', (page) => {
       expect(element.className).toContain('max-w-full');
     }
     expect(screen.getAllByText(new RegExp(page.emptyText)).length).toBeGreaterThan(0);
+    // 空态也有可点击的下一步：筛选、刷新、返回或发起对账。
+    expect(screen.getByRole(page.emptyAction.role, { name: page.emptyAction.name })).toBeInTheDocument();
   });
 });
