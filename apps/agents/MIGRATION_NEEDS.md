@@ -219,3 +219,23 @@ worker 被 kill 后行停止更新，`tools.health worker` 在 `--stale-seconds`
 2. `downgrade 0005 → 0004` 后再 upgrade 成功；
 3. `tests/agents/test_schema_parity.py` 双向差集为空（含两新表）；
 4. S8 复验：容器 healthy、8011 探针 200、`job_queue` 有消费、`worker_heartbeat` 有行。
+
+## 9. `ticket_step` 的定位：可变执行投影，不是证据
+
+> 裁定依据：`01-技术架构.md:581`（步骤级真源、状态字段受控 UPDATE）与 `:650`
+> （检查点 = 每步一行终态）。落地见 `0006_audit_image_prev_uniq`。
+
+**不加 append-only 触发器。** `AppStore.mark_step` 必须更新 `state` /
+`response_snapshot` / `error_code` / `latency_ms` / `before_ref` / `after_ref`；
+加触发器会直接打断断点续跑、重试与补偿（补偿依据 `original_step.step_no`）。
+所以 `ticket_step` 是**可变投影**：允许改，但必须留下事件。
+
+替代约束（两者缺一不可）：
+
+1. **授权收窄**：`erp_app` 只有 `SELECT` / `INSERT` 与上述六列的 `UPDATE`，
+   整表 `UPDATE`、`DELETE`、`TRUNCATE` 全部收回（`0006` 迁移执行）；
+2. **变更必须伴随事件**：每次步骤变更在同一事务里追加 `STEP_EVENT`
+   （`tests/agents/test_step_events.py` 断言事件序列与投影终态一致）。
+
+**任何以步骤行为依据的结论，必须回到 `ticket_event` 重放**——投影被绕过改写时
+（例如有更高权限的连接直改库），事件链才是可校验的那一份。

@@ -17,6 +17,8 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
+from sqlalchemy.exc import IntegrityError
+
 from apps.audit.store import (
     AuditAnchor,
     AuditQuery,
@@ -200,28 +202,39 @@ class AuditLedger:
         normalized_diff = _normalize_diff(field_diff)
 
         created = _as_utc(created_at or self._clock())
-        prev_hash = await self._store.last_hash(tenant_id)
-        payload: dict[str, Any] = {
-            "id": image_id or uuid4(),
-            "tenant_id": tenant_id,
-            "ticket_id": ticket_id,
-            "step_id": step_id,
-            "system": system,
-            "object_type": object_type,
-            "object_id": object_id,
-            "before_ref": before_ref,
-            "after_ref": after_ref,
-            "field_diff": normalized_diff,
-            "diff_missing": diff_missing,
-            "prev_hash": prev_hash,
-            "hash": "0" * 64,
-            "created_at": created,
-        }
-        image = AuditImage.model_validate(payload)
-        digest = compute_image_hash(prev_hash, image.model_dump(mode="python"))
-        image = image.model_copy(update={"hash": digest})
-        await self._store.append(image)
-        return image
+        image_id = image_id or uuid4()
+        # 并发追加时两个写入者会读到同一个链尾：唯一约束 (tenant_id, prev_hash)
+        # 让后提交的一方拿到 IntegrityError。这里重读一次链尾再试一次，
+        # 把「分叉」变成「重试后成功」，而不是把并发换成 500。
+        for attempt in range(2):
+            prev_hash = await self._store.last_hash(tenant_id)
+            payload: dict[str, Any] = {
+                "id": image_id,
+                "tenant_id": tenant_id,
+                "ticket_id": ticket_id,
+                "step_id": step_id,
+                "system": system,
+                "object_type": object_type,
+                "object_id": object_id,
+                "before_ref": before_ref,
+                "after_ref": after_ref,
+                "field_diff": normalized_diff,
+                "diff_missing": diff_missing,
+                "prev_hash": prev_hash,
+                "hash": "0" * 64,
+                "created_at": created,
+            }
+            image = AuditImage.model_validate(payload)
+            digest = compute_image_hash(prev_hash, image.model_dump(mode="python"))
+            image = image.model_copy(update={"hash": digest})
+            try:
+                await self._store.append(image)
+            except IntegrityError:
+                if attempt:
+                    raise
+                continue
+            return image
+        raise AssertionError("不可达：重试循环必须以 return 或 raise 结束")
 
     async def list_images(self, query: AuditQuery) -> list[AuditImage]:
         return await self._store.list_images(query)

@@ -259,9 +259,90 @@ jobs:
           ruff check apps tests db observability --statistics
           echo "::endgroup::"
 
-      - name: 测试库迁移（0001→0005 全链）
+      - name: 应用角色 erp_app + 授权（直接执行 00-provision.sql 的 §4/§7）
+        # 「审计表不可改」只有以 erp_app 真实身份连接才测得出来：owner 不受 REVOKE 约束。
+        # 角色必须在跑迁移之前存在，否则 0002/0006 里按角色存在性判断的
+        # REVOKE/GRANT 会被整段跳过，用例只能 skip、等于没有证据。
+        #
+        # 授权不手抄：下面从 deploy/smart-erp/db/00-provision.sql 里**原样截取**
+        # §4（schema）与 §7（权限）两段执行，只把迁移角色名 erp_migrator 换成 CI 的
+        # erp_test。00-provision.sql 是授权的唯一真源（迁移里一条 GRANT 都没有），
+        # 以后有人在那边加表授权/改默认权限，CI 自动跟着变，不会出现两份真源。
+        #
+        # 文件里另外几段**不能**在 CI 执行，原因写在这里而不是留给下一个人猜：
+        #   §1 建角色：用了 psql 的 \gexec + 口令变量，asyncpg 跑不了 → 这里等价手写；
+        #   §5 扩展：vector 非 trusted、需要 SUPERUSER，CI 的 postgres:15 没装 pgvector，
+        #           且测试链不依赖向量检索；
+        #   §8 版本表：CI 由 alembic 建，建表后由 §7 的默认权限自动授给 erp_app。
+        # 解析结果为空会直接失败——不允许「一条都没解析出来还静默零授权」。
+        run: |
+          python - <<'PY'
+          import asyncio
+          import pathlib
+          import re
+
+          import asyncpg
+
+          PROVISION = pathlib.Path("deploy/smart-erp/db/00-provision.sql")
+          MIGRATOR = "erp_test"  # 本 job 跑迁移的角色；生产是 erp_migrator
+          DSN = "postgresql://erp_test:erp_test@127.0.0.1:5432/smart_erp_test"
+
+          def section(text: str, number: int) -> str:
+              """截取 `-- N. xxx` 横幅到下一个编号横幅之间的正文。
+
+              只认行首 ``-- `` + 数字 + ``. ``（恰好一个空格）：文件头部的能力清单
+              写成 ``--   4. ...``（三空格缩进），不能被当成 §4。
+              """
+              match = re.search(
+                  rf"^-- {number}\. .*$([\s\S]*?)(?=^-- \d+\. )",
+                  text,
+                  re.MULTILINE,
+              )
+              if match is None:
+                  raise SystemExit(f"00-provision.sql 里找不到 §{number}，脚本结构变了")
+              return match.group(1)
+
+          def statements(block: str) -> list[str]:
+              body = " ".join(
+                  line for line in block.splitlines()
+                  if not line.lstrip().startswith("--")
+              )
+              return [stmt.strip() for stmt in body.split(";") if stmt.strip()]
+
+          async def main() -> None:
+              source = PROVISION.read_text(encoding="utf-8")
+              sql = [
+                  stmt.replace("erp_migrator", MIGRATOR)
+                  for stmt in statements(section(source, 4) + section(source, 7))
+              ]
+              if not any(
+                  "ALTER DEFAULT PRIVILEGES" in stmt and "ON TABLES" in stmt
+                  for stmt in sql
+              ):
+                  raise SystemExit("§7 未解析出 ALTER DEFAULT PRIVILEGES ... ON TABLES")
+
+              conn = await asyncpg.connect(DSN)
+              try:
+                  exists = await conn.fetchval(
+                      "SELECT 1 FROM pg_roles WHERE rolname = 'erp_app'"
+                  )
+                  if not exists:
+                      await conn.execute(
+                          "CREATE ROLE erp_app LOGIN PASSWORD 'erp_app_test_only' "
+                          "NOSUPERUSER NOCREATEDB NOCREATEROLE"
+                      )
+                  for stmt in sql:
+                      await conn.execute(stmt)
+                  print(f"已执行 00-provision.sql §4/§7 共 {len(sql)} 条语句")
+              finally:
+                  await conn.close()
+
+          asyncio.run(main())
+          PY
+
+      - name: 测试库迁移（0001→0006 全链）
         # service 的 health-check 已保证 PG 就绪；这里跑真实迁移链并用 alembic current
-        # 断言停在 0005_worker_runtime，避免「连上了但表没建」的假绿。
+        # 断言停在 0006_audit_image_prev_uniq，避免「连上了但表没建」的假绿。
         # env.py 的连接串唯一真源是 ERP_DATABASE_URL（C14），不要另造一份。
         env:
           ERP_DATABASE_URL: postgresql+asyncpg://erp_test:erp_test@127.0.0.1:5432/smart_erp_test
@@ -269,7 +350,7 @@ jobs:
           set -euo pipefail
           alembic -c alembic.ini upgrade head
           alembic -c alembic.ini current | tee /tmp/alembic-current.txt
-          grep -q "0005_worker_runtime" /tmp/alembic-current.txt
+          grep -q "0006_audit_image_prev_uniq" /tmp/alembic-current.txt
 
       - name: 预拉部署测试镜像 alpine:3.20（失败即 infra 红）
         # tar 行为用例要求镜像已在手：拉取失败必须是明确的 infra 红，
@@ -316,8 +397,17 @@ jobs:
             # -o addopts="" 覆盖 pyproject 的 -q：否则 -q + -q = -qq 会把
             # "N passed / M skipped" 汇总行吞掉，skip 再次变成静默（本次事故的根因之一）。
             # 只改输出详略，不改退出码语义：任何非 0 仍然失败。
-            if ! python -m pytest "${d}" -q -o addopts="" -rs; then
+            status=0
+            out=$(python -m pytest "${d}" -q -o addopts="" -rs 2>&1) || status=$?
+            echo "$out"
+            if [ "$status" -ne 0 ]; then
               echo "::error::pytest ${d} 失败"
+              rc=1
+            fi
+            # tests/security 是审计表权限证据的唯一来源（以 erp_app 真实身份连接）。
+            # 角色缺失/口令改不了时用例会带原因 skip —— 那种「绿但一条没跑」必须红。
+            if [ "$d" = "tests/security" ] && echo "$out" | grep -Eq '[0-9]+ skipped'; then
+              echo "::error::tests/security 出现 skipped：权限证据被静默跳过，检查 erp_app 角色是否在迁移前创建"
               rc=1
             fi
             echo "::endgroup::"

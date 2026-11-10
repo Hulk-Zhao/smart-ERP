@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from audit_support import TENANT, TICKET, run
+from sqlalchemy.exc import IntegrityError
 
 from apps.audit.ledger import (
     AuditChainError,
@@ -244,3 +245,50 @@ def test_daily_anchor_detects_truncation():
 
     with pytest.raises(AuditChainError):
         run(ledger.anchor_day(TENANT, date(2026, 11, 10)))
+
+
+class RacedOnceStore(InMemoryAuditStore):
+    """模拟并发：第一次追加时链尾已被别人占了（唯一约束触发 IntegrityError）。"""
+
+    def __init__(self, winner_hash: str) -> None:
+        super().__init__()
+        self._winner_hash = winner_hash
+        self._lost = False
+        self.attempts: list[str] = []
+        self.accepted: list[AuditImage] = []
+
+    async def last_hash(self, tenant_id: UUID) -> str:
+        return self._winner_hash if self._lost else ""
+
+    async def append(self, image: AuditImage) -> None:
+        self.attempts.append(image.prev_hash)
+        if not self._lost:
+            self._lost = True
+            raise IntegrityError("INSERT INTO audit_image", {}, Exception("uq_audit_image_parent"))
+        self.accepted.append(image)
+
+
+def test_concurrent_append_retries_once_after_integrity_error():
+    """唯一约束触发后必须重读链尾重试一次，而不是把并发变成 500。"""
+
+    winner = "a" * 64
+    store = RacedOnceStore(winner)
+    ledger = AuditLedger(store=store)
+
+    image = _append(ledger)
+
+    assert store.attempts == ["", winner]
+    assert image.prev_hash == winner
+    assert [row.hash for row in store.accepted] == [image.hash]
+
+
+def test_second_integrity_error_is_not_swallowed():
+    """重试一次仍冲突就必须抛出——不能无限重试掩盖真正的分叉。"""
+
+    class AlwaysConflicts(InMemoryAuditStore):
+        async def append(self, image: AuditImage) -> None:
+            raise IntegrityError("INSERT", {}, Exception("uq_audit_image_parent"))
+
+    ledger = AuditLedger(store=AlwaysConflicts())
+    with pytest.raises(IntegrityError):
+        _append(ledger)
