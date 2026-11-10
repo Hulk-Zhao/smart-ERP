@@ -15,7 +15,9 @@
 3. ``erp_app`` 的 SELECT / INSERT 可用（否则应用写不进价目）；
 4. 跨租户 ``supersedes_id`` 与 ``recon_batch.price_book_id`` 被复合外键拒绝；
 5. ``currency`` 格式、自指 supersede、非正单价被 CHECK 拒绝；
-6. ``downgrade -1`` 后价格表与四个计价列消失（已快照的计价依据随之丢失），
+6. 同一租户同一币种的同一 ``effective_from`` 只能有一行（``23505``）——这是
+   「改价 = 插新行」的唯一防歧义手段（本设计没有 ``EXCLUDE USING gist``）；
+7. ``downgrade -1`` 后价格表与四个计价列消失（已快照的计价依据随之丢失），
    再 ``upgrade head`` 可恢复结构。
 """
 
@@ -365,6 +367,27 @@ def test_invalid_price_rows_are_rejected(provisioned_pg, sql: str) -> None:
     with pytest.raises(IntegrityError) as excinfo:
         run_sql(migrator_url, sql)
     assert "violates check constraint" in str(excinfo.value)
+
+
+def test_duplicate_effective_from_is_rejected(provisioned_pg) -> None:
+    """同一租户同一币种的同一生效时刻只能有一行：改价必须推进 ``effective_from``。
+
+    0008 是纯追加模型（不存 ``effective_to``），因此不存在「区间重叠」，
+    也就没有 ``EXCLUDE USING gist`` 可触发。防歧义的唯一不变量是
+    ``uq_price_book_tenant_currency_from``：若允许同一时刻两行价，
+    「取 ``effective_from <= t`` 的最大者」就会落到未定义顺序，账单不可复现。
+    """
+
+    _, migrator_url, _ = provisioned_pg
+
+    effective_from = "2027-05-01T00:00:00+08:00"
+    run_sql(migrator_url, _price_insert(uuid.uuid4(), TENANT_A, effective_from))
+
+    with pytest.raises(IntegrityError) as excinfo:
+        run_sql(migrator_url, _price_insert(uuid.uuid4(), TENANT_A, effective_from))
+
+    assert "uq_price_book_tenant_currency_from" in str(excinfo.value)
+    assert getattr(excinfo.value.orig, "sqlstate", None) == "23505"
 
 
 def test_self_supersede_is_rejected(provisioned_pg) -> None:
