@@ -62,7 +62,7 @@ class RuleBasedClassifier:
             if any(keyword in line for line in head)
         ]
         if title_hits:
-            doc_type, keyword, _ = max(title_hits, key=lambda item: len(item[1]))
+            doc_type, _keyword, _ = max(title_hits, key=lambda item: len(item[1]))
             # 泛称「发票」不作为标题词，避免把「发票号码」误当标题
             return Classification(doc_type=doc_type, confidence=_TITLE_CONFIDENCE)
 

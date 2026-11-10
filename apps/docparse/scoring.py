@@ -1,9 +1,14 @@
 """置信度打分与复核标记（管线第 5 步）。
 
-映射阶段给出的基础置信度（标签命中 0.98 / 内嵌标签 0.90 / 表格单元 0.92）
-在这里用「行内算术自洽」做校正：
-- 数量 × 单价 ≈ 金额 → 三者各 +0.02；
-- 不相等 → 金额置信度压到 0.70，使其进入低置信清单，且由校验阶段报错。
+映射阶段给出的基础置信度分档见 ``mapping/fields.py`` 的 ``SCORING_RUBRIC``：
+标签行首 0.98 / 内嵌标签 0.90 / 数字写法干净 0.92 / 需归一化的脏数字 0.78 /
+表格错位整行 ×0.80 / 推导金额 0.88。
+
+这里只做「上下文一致性」校正，不改变任何原值：
+- 明细：数量 × 单价 ≈ 金额 → 三者各 +0.02；不相等 → 金额压到 0.70；
+- 表头：小计 + 税额 ≈ 价税合计 → 三者各 +0.02；不等 → 价税合计压到 0.70；
+- 表头价税合计 ≈ 明细金额之和 → 价税合计 +0.02。
+低于 0.85 的字段进入 ``low_confidence_fields``，结果不得自动入账（FR-401）。
 """
 
 from __future__ import annotations
@@ -37,8 +42,58 @@ class ScoredLines:
     issues: tuple[ValidationIssue, ...]
 
 
+@dataclass(frozen=True)
+class ScoredHeader:
+    header: DocHeader
+    issues: tuple[ValidationIssue, ...]
+
+
 def _with_confidence(field: FieldValue, confidence: float) -> FieldValue:
     return field.model_copy(update={"confidence": confidence})
+
+
+def _boost(field: FieldValue) -> FieldValue:
+    return _with_confidence(
+        field, min(CONFIDENCE_CAP, field.confidence + CONFIDENCE_BOOST)
+    )
+
+
+def score_header(header: DocHeader, lines: list[DocLine] | None = None) -> ScoredHeader:
+    """用「小计 + 税额 = 价税合计」与「明细合计 = 价税合计」校正表头置信度。"""
+
+    updates: dict[str, FieldValue] = {}
+    subtotal, tax, total = header.subtotal, header.tax_amount, header.total_amount
+
+    if (
+        subtotal.value is not None
+        and tax.value is not None
+        and total.value is not None
+    ):
+        expected = subtotal.value + tax.value
+        if abs(expected - total.value) <= CENT:
+            for name, field in (
+                ("subtotal", subtotal),
+                ("tax_amount", tax),
+                ("total_amount", total),
+            ):
+                updates[name] = _boost(field)
+        else:
+            # 不一致时是三项里哪一项错了无法判断，只压价税合计并留给人工，
+            # 具体报错由 validation.validate_consistency 输出
+            updates["total_amount"] = _with_confidence(total, MISMATCH_CONFIDENCE)
+    elif total.value is not None and lines:
+        amounts = [line.amount.value for line in lines]
+        if amounts and all(amount is not None for amount in amounts):
+            summed = sum((amount for amount in amounts if amount is not None), Decimal(0))
+            if abs(summed - total.value) <= CENT:
+                updates["total_amount"] = _boost(total)
+
+    if not updates:
+        return ScoredHeader(header=header, issues=())
+    return ScoredHeader(
+        header=header.model_copy(update=updates),
+        issues=(),
+    )
 
 
 def score_lines(lines: list[DocLine]) -> ScoredLines:

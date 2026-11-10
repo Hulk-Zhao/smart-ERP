@@ -14,19 +14,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from .detection import FileKind, detect_file_kind
-from .errors import EmptyDocumentError, ExtractorNotAvailableError, UnsupportedFileTypeError
+from .errors import (
+    EmptyDocumentError,
+    ExtractorNotAvailableError,
+    UnsupportedFileTypeError,
+)
 from .extractors import (
+    CsvExtractor,
     ImageOcrExtractor,
     PdfTextExtractor,
     PlainTextExtractor,
     SpreadsheetExtractor,
     TextExtractor,
+    XmlExtractor,
 )
-from .extractors.base import DocumentText
 from .mapping.classifier import (
     Classification,
     DocClassifier,
@@ -43,20 +48,25 @@ from .models import (
     ParseStatus,
     ValidationIssue,
 )
-from .scoring import collect_low_confidence, collect_missing_fields, score_lines
+from .scoring import (
+    collect_low_confidence,
+    collect_missing_fields,
+    score_header,
+    score_lines,
+)
 from .validation import validate_consistency
 
 PARSER_ID = "docparse.rule.v1"
 
 
 def default_extractors() -> dict[FileKind, TextExtractor]:
-    text_extractor = PlainTextExtractor()
     return {
-        FileKind.TEXT: text_extractor,
-        FileKind.CSV: text_extractor,
+        FileKind.TEXT: PlainTextExtractor(),
+        FileKind.CSV: CsvExtractor(),
         FileKind.PDF: PdfTextExtractor(),
         FileKind.IMAGE: ImageOcrExtractor(),
         FileKind.SPREADSHEET: SpreadsheetExtractor(),
+        FileKind.XML: XmlExtractor(),
     }
 
 
@@ -136,16 +146,19 @@ class DocParsePipeline:
             )
 
         mapped = self._mapper.map(text, classification.doc_type)
+        scored_header = score_header(mapped.header, list(mapped.lines))
+        header = scored_header.header
         scored = score_lines(list(mapped.lines))
         lines = list(scored.lines)
 
         issues: list[ValidationIssue] = [
             *mapped.issues,
+            *scored_header.issues,
             *scored.issues,
-            *validate_consistency(mapped.header, lines),
+            *validate_consistency(header, lines),
         ]
-        missing = collect_missing_fields(mapped.header, lines, classification.doc_type)
-        low_confidence = collect_low_confidence(mapped.header, lines)
+        missing = collect_missing_fields(header, lines, classification.doc_type)
+        low_confidence = collect_low_confidence(header, lines)
 
         status, message = self._decide(missing, low_confidence, issues, lines)
 
@@ -156,7 +169,7 @@ class DocParsePipeline:
             doc_type_confidence=classification.confidence,
             status=status,
             message=message,
-            header=mapped.header,
+            header=header,
             lines=lines,
             missing_fields=missing,
             low_confidence_fields=low_confidence,
@@ -207,4 +220,4 @@ class DocParsePipeline:
         )
 
 
-__all__ = ["DocParsePipeline", "PARSER_ID", "default_extractors"]
+__all__ = ["PARSER_ID", "DocParsePipeline", "default_extractors"]

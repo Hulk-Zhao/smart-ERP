@@ -12,9 +12,9 @@ from apps.docparse.models import (
     Coordinate,
     DecimalField,
     DocHeader,
+    DocType,
     ParseResult,
     ParseStatus,
-    DocType,
 )
 
 
@@ -25,7 +25,7 @@ def test_missing_field_must_have_zero_confidence():
 
 def test_present_field_must_have_positive_confidence():
     with pytest.raises(ValidationError):
-        DecimalField(value=Decimal("1"), confidence=0.0)
+        DecimalField(value=Decimal(1), confidence=0.0)
 
 
 def test_missing_is_none_not_zero():
@@ -34,14 +34,14 @@ def test_missing_is_none_not_zero():
     assert missing.value is None
 
     # 0 是合法值，与「缺失」不同
-    zero = DecimalField(value=Decimal("0"), confidence=0.9)
+    zero = DecimalField(value=Decimal(0), confidence=0.9)
     assert not zero.is_missing
-    assert zero.value == Decimal("0")
+    assert zero.value == Decimal(0)
 
 
 def test_low_confidence_threshold():
-    assert DecimalField(value=Decimal("1"), confidence=0.84).is_low_confidence()
-    assert not DecimalField(value=Decimal("1"), confidence=0.85).is_low_confidence()
+    assert DecimalField(value=Decimal(1), confidence=0.84).is_low_confidence()
+    assert not DecimalField(value=Decimal(1), confidence=0.85).is_low_confidence()
 
 
 @pytest.mark.parametrize(

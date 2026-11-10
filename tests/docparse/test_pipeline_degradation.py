@@ -17,19 +17,6 @@ from apps.docparse.detection import FileKind
 from apps.docparse.extractors import PlainTextExtractor
 
 
-def test_pdf_stub_degrades_to_unrecognized(tmp_path):
-    pdf = tmp_path / "scan.pdf"
-    pdf.write_bytes(b"%PDF-1.4\n% offline stub\n")
-
-    result = DocParsePipeline().parse_file(pdf)
-
-    assert result.status is ParseStatus.UNRECOGNIZED
-    assert result.doc_type is DocType.UNKNOWN
-    assert result.lines == []
-    assert result.header.doc_no.value is None
-    assert result.message and "桩" in result.message
-
-
 def test_image_stub_degrades_to_unrecognized(tmp_path):
     image = tmp_path / "scan.png"
     image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
@@ -63,7 +50,7 @@ def test_custom_extractor_can_replace_stub(tmp_path):
         name = "fake-pdf.v1"
 
         def extract(self, source: bytes, *, filename: str = ""):
-            # 模拟 PyMuPDF 已抽出文本层：复用文本抽取器解析同一份内容
+            # 模拟已接入的 PDF 抽取器抽出文本层：复用文本抽取器解析同一份内容
             return PlainTextExtractor().extract(
                 (tmp_path / "invoice.txt").read_bytes(), filename="invoice.txt"
             )

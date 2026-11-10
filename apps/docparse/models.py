@@ -103,7 +103,11 @@ class Coordinate(ContractModel):
 T = TypeVar("T")
 
 
-class FieldValue(ContractModel, Generic[T]):
+# 写法取舍：3.12 下可写成 class FieldValue[T]（PEP 695），ruff 的 UP046 也就不需要 noqa；
+# 但本机默认解释器是 3.11，实测那种写法会让 tests/docparse 在 3.11 上 12 个模块收集失败。
+# 仓库其它泛型类（apps/api/schemas.py、apps/connectors/canonical/mapping.py）同样是 Generic，
+# 这里保持一致，用 3.11/3.12 都能解析的写法，仅在这一行压 UP046。
+class FieldValue(ContractModel, Generic[T]):  # noqa: UP046
     """单个抽取字段：值、置信度、证据坐标与来源。
 
     缺失（``value is None``）时置信度必须为 0；有值时置信度必须大于 0。
@@ -117,7 +121,7 @@ class FieldValue(ContractModel, Generic[T]):
     source: FieldSource = FieldSource.RULE
 
     @model_validator(mode="after")
-    def _check_missing_consistency(self) -> "FieldValue[T]":
+    def _check_missing_consistency(self) -> FieldValue[T]:
         if self.value is None and self.confidence != 0.0:
             raise ValueError("缺失字段的置信度必须为 0.0，不得伪装成已识别")
         if self.value is not None and self.confidence <= 0.0:

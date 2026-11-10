@@ -8,6 +8,14 @@
 - 空单元格 → ``None``，不写 0；
 - 明细金额仅在「数量 + 单价都有、金额为空」时按乘法推导，并标注 ``source=derived``；
 - 无法解析的原值写成 ``VALUE_UNPARSABLE`` 警告，不猜测。
+
+置信度分档（打分依据见 ``SCORING_RUBRIC``）：
+
+- 数字写法干净（纯数字 / 规范千分位 / 货币符号）→ 0.92；
+- 数字写法需要归一化才能读（全角数字、括号负数、尾随负号、Unicode 负号、
+  不规范千分位）→ 0.78，低于 0.85，直接进人工确认；
+- 表格行单元格数多于表头列数（错位）→ 整行再乘 0.80；
+- 表头标签在行首 → 0.98，嵌在其它文本中间 → 0.90。
 """
 
 from __future__ import annotations
@@ -15,11 +23,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Protocol
 
 from ..detection import is_page_marker
-from ..extractors.base import DocumentText, TextLine, line_bbox
+from ..extractors.base import DocumentText, TextLine, cell_bbox, line_bbox
 from ..models import (
     HEADER_FIELD_LABELS,
     LINE_FIELD_LABELS,
@@ -37,42 +45,129 @@ from ..models import (
 
 CENT = Decimal("0.01")
 
+# 置信度档位：改这里等于改「什么算可信」，必须同步 README 的打分表
+CONF_LABEL_AT_START = 0.98
+CONF_LABEL_EMBEDDED = 0.90
+CONF_CELL_STRICT = 0.92
+CONF_CELL_LENIENT = 0.78
+CONF_MISALIGNED_SCALE = 0.80
+CONF_DERIVED_AMOUNT = 0.88
+
+SCORING_RUBRIC = (
+    ("header.label_at_line_start", CONF_LABEL_AT_START, "标签在行首，独立成字段"),
+    ("header.label_embedded", CONF_LABEL_EMBEDDED, "标签夹在其它文本中"),
+    ("cell.strict_number", CONF_CELL_STRICT, "纯数字/规范千分位/货币符号"),
+    ("cell.lenient_number", CONF_CELL_LENIENT, "全角数字、括号负数、尾随负号等需归一化"),
+    ("cell.misaligned", CONF_MISALIGNED_SCALE, "单元格数多于表头列数，整行打折"),
+    ("cell.derived_amount", CONF_DERIVED_AMOUNT, "金额由数量×单价推导"),
+)
+
 
 # ---------------------------------------------------------------------------
 # 值解析
 # ---------------------------------------------------------------------------
 
-_NUM_CLEAN = re.compile(r"[,\s¥￥$元]")
-_NUM_VALID = re.compile(r"^-?\d+(?:\.\d+)?$")
+# 全角数字/符号 → 半角；全角空格单独处理
+_FULLWIDTH = str.maketrans(
+    "０１２３４５６７８９．，－％＋　", "0123456789.,-%+ "
+)
+_CURRENCY_CHARS = ("¥", "￥", "$", "元")
+_STRICT_NUMBER = re.compile(r"^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$")
+_PLAIN_NUMBER = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
 _DATE_DASHED = re.compile(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$")
 _DATE_CN = re.compile(r"^(\d{4})年(\d{1,2})月(\d{1,2})日$")
 
-_SEPARATORS = ":：|,，\t 　"
+
+@dataclass(frozen=True)
+class ParsedNumber:
+    """数值解析结果：``strict=False`` 表示要经过归一化才读得出来，需降置信。"""
+
+    value: Decimal | None
+    strict: bool
+
+
+def parse_decimal_detailed(raw: str) -> ParsedNumber:
+    """解析金额/数量，并标记写法是否干净。解析不出返回 ``value=None``。"""
+
+    text = raw.strip()
+    if not text:
+        return ParsedNumber(None, False)
+
+    strict = True
+    negative = False
+
+    normalized = text.translate(_FULLWIDTH)
+    if normalized != text:
+        strict = False
+    text = normalized.replace("−", "-")
+    if "−" in normalized:
+        strict = False
+
+    if text.startswith("(") or text.endswith(")"):
+        matched = re.fullmatch(r"\((.*)\)", text)
+        if matched is None:
+            return ParsedNumber(None, False)
+        text = matched.group(1).strip()
+        negative = True
+        strict = False
+
+    if text.endswith("-"):
+        negative = True
+        text = text[:-1].strip()
+        strict = False
+
+    for char in _CURRENCY_CHARS:
+        text = text.replace(char, "")
+    text = text.replace(" ", "")
+    if not text:
+        return ParsedNumber(None, False)
+
+    if _STRICT_NUMBER.match(text):
+        text = text.replace(",", "")
+    else:
+        # 千分位分组不规范（如 1,23）：仍按数字取，但不赌小数含义，降置信
+        candidate = text.replace(",", "")
+        if not _PLAIN_NUMBER.match(candidate):
+            return ParsedNumber(None, False)
+        text = candidate
+        strict = False
+
+    try:
+        value = Decimal(text)
+    except InvalidOperation:
+        return ParsedNumber(None, False)
+    if negative:
+        value = -value
+    return ParsedNumber(value, strict)
 
 
 def parse_decimal(raw: str) -> Decimal | None:
-    """解析金额/数量。只接受纯数字（可带千分位、货币符号），其余返回 None。"""
+    """解析金额/数量。只接受数字（可带千分位、货币符号、括号负数），其余返回 None。"""
 
-    text = _NUM_CLEAN.sub("", raw.strip())
-    if not _NUM_VALID.match(text):
-        return None
-    try:
-        return Decimal(text)
-    except InvalidOperation:
-        return None
+    return parse_decimal_detailed(raw).value
+
+
+def parse_rate_detailed(raw: str) -> ParsedNumber:
+    """税率归一化为小数：``13%`` → ``0.13``；``13`` 视为 13%（推断，降置信）。"""
+
+    text = raw.strip()
+    fullwidth_percent = text.endswith("％")
+    percent = text.endswith(("%", "％"))
+    number = parse_decimal_detailed(text[:-1] if percent else text)
+    if number.value is None:
+        return ParsedNumber(None, False)
+    if percent:
+        return ParsedNumber(
+            (number.value / 100).quantize(Decimal("0.0001")),
+            number.strict and not fullwidth_percent,
+        )
+    if number.value > 1:
+        return ParsedNumber((number.value / 100).quantize(Decimal("0.0001")), False)
+    return ParsedNumber(number.value, number.strict)
 
 
 def parse_rate(raw: str) -> Decimal | None:
-    """税率归一化为小数：``13%`` → ``0.13``，``13`` 视为 13%。"""
-
-    text = raw.strip()
-    percent = text.endswith("%")
-    value = parse_decimal(text[:-1] if percent else text)
-    if value is None:
-        return None
-    if percent or value > 1:
-        return (value / 100).quantize(Decimal("0.0001"))
-    return value
+    return parse_rate_detailed(raw).value
 
 
 def parse_date(raw: str) -> date | None:
@@ -122,6 +217,8 @@ _LABEL_ORDER: tuple[tuple[str, str], ...] = tuple(
 
 _DATE_FIELDS = {"doc_date"}
 _DECIMAL_FIELDS = {"subtotal", "tax_amount", "total_amount", "tax_rate"}
+
+_SEPARATORS = ":：|,，;；\t 　"
 
 
 def _find_label(text: str) -> tuple[str, str, int] | None:
@@ -230,6 +327,8 @@ class Token:
     value: str
     start: int
     end: int
+    # 表格类格式（XLSX/CSV）的列号；纯文本行为 None
+    column: int | None = None
 
 
 def _append_trimmed(tokens: list[Token], text: str, start: int, end: int) -> None:
@@ -241,24 +340,60 @@ def _append_trimmed(tokens: list[Token], text: str, start: int, end: int) -> Non
     tokens.append(Token(value=stripped, start=start + lead, end=start + lead + len(stripped)))
 
 
+def _split_on(text: str, pattern: re.Pattern[str]) -> list[Token]:
+    tokens: list[Token] = []
+    cursor = 0
+    for match in pattern.finditer(text):
+        _append_trimmed(tokens, text, cursor, match.start())
+        cursor = match.end()
+    _append_trimmed(tokens, text, cursor, len(text))
+    return tokens
+
+
 def split_tokens(text: str) -> list[Token]:
-    """按 ``|`` → ``,`` → 空白 的优先级切分，并保留字符偏移用于坐标回链。"""
+    """按列切分纯文本行，并保留字符偏移用于坐标回链。
 
-    for separator in ("|", ","):
-        if separator in text:
-            tokens: list[Token] = []
-            start = 0
-            for index, char in enumerate(text):
-                if char == separator:
-                    _append_trimmed(tokens, text, start, index)
-                    start = index + 1
-            _append_trimmed(tokens, text, start, len(text))
-            return tokens
+    切分优先级：
 
+    1. ``|``（显式竖线，最常见）；
+    2. 制表符 / 连续两个及以上空格（多栏对齐排版：列之间用空白撑开，
+       单元格内部的单个空格不能被当成分隔符，否则「不锈钢 螺钉 M6」会被拆成两列；
+       放在逗号之前，避免千分位 ``1,000`` 被误当列分隔）；
+    3. ``,``（CSV 风格）；
+    4. 兜底按任意空白切分。
+    """
+
+    if "|" in text:
+        return _split_on(text, re.compile(r"\|"))
+
+    aligned = _split_on(text, re.compile(r"(?:\t| {2,}|　+)"))
+    if len(aligned) >= 2:
+        return aligned
+
+    if "," in text:
+        return _split_on(text, re.compile(r","))
     return [
         Token(value=match.group(), start=match.start(), end=match.end())
         for match in re.finditer(r"\S+", text)
     ]
+
+
+def row_tokens(line: TextLine) -> list[Token]:
+    """表格行优先用抽取器给出的单元格（保留列位），否则按分隔符切分文本。"""
+
+    if line.cells is not None:
+        tokens: list[Token] = []
+        for column, cell in enumerate(line.cells):
+            value = cell.strip()
+            tokens.append(Token(value=value, start=0, end=len(value), column=column))
+        return tokens
+    return split_tokens(line.text)
+
+
+def _token_coord(line: TextLine, token: Token):
+    if token.column is not None:
+        return cell_bbox(line, token.column)
+    return line_bbox(line, token.start, token.end)
 
 
 def _canonical_column(token: Token) -> str | None:
@@ -271,7 +406,7 @@ def _canonical_column(token: Token) -> str | None:
 
 def _table_header_map(line: TextLine) -> dict[str, int] | None:
     columns: dict[str, int] = {}
-    for index, token in enumerate(split_tokens(line.text)):
+    for index, token in enumerate(row_tokens(line)):
         field = _canonical_column(token)
         if field and field not in columns:
             columns[field] = index
@@ -310,6 +445,8 @@ def _build_line(
     tokens: list[Token],
     columns: dict[str, int],
     fallback_no: int,
+    *,
+    confidence_scale: float = 1.0,
 ) -> tuple[DocLine, list[ValidationIssue]]:
     issues: list[ValidationIssue] = []
     values: dict[str, FieldValue[Any]] = {}
@@ -332,10 +469,14 @@ def _build_line(
             values[name] = _empty_line_field(name)
             continue
 
-        coords = [line_bbox(line, token.start, token.end)]
+        coords = [_token_coord(line, token)]
         if name in _LINE_NUMERIC_FIELDS:
-            parsed = parse_rate(raw) if name == "tax_rate" else parse_decimal(raw)
-            if parsed is None:
+            parsed = (
+                parse_rate_detailed(raw)
+                if name == "tax_rate"
+                else parse_decimal_detailed(raw)
+            )
+            if parsed.value is None:
                 values[name] = _empty_line_field(name)
                 issues.append(
                     ValidationIssue(
@@ -347,15 +488,16 @@ def _build_line(
                 )
                 continue
             values[name] = DecimalField(
-                value=parsed,
-                confidence=0.92,
+                value=parsed.value,
+                confidence=(CONF_CELL_STRICT if parsed.strict else CONF_CELL_LENIENT)
+                * confidence_scale,
                 coords=coords,
                 raw_text=line.text.strip(),
             )
         else:
             values[name] = StrField(
                 value=raw,
-                confidence=0.92,
+                confidence=CONF_CELL_STRICT * confidence_scale,
                 coords=coords,
                 raw_text=line.text.strip(),
             )
@@ -368,7 +510,7 @@ def _build_line(
         derived = (quantity.value * unit_price.value).quantize(CENT, rounding=ROUND_HALF_UP)
         values["amount"] = DecimalField(
             value=derived,
-            confidence=0.88,
+            confidence=CONF_DERIVED_AMOUNT * confidence_scale,
             coords=[*quantity.coords, *unit_price.coords],
             source=FieldSource.DERIVED,
         )
@@ -451,7 +593,9 @@ class RuleBasedFieldMapper:
                 raw_value,
                 line,
                 value_start,
-                confidence=0.98 if position == 0 else 0.90,
+                confidence=(
+                    CONF_LABEL_AT_START if position == 0 else CONF_LABEL_EMBEDDED
+                ),
             )
             if value is None:
                 issues.append(
@@ -480,6 +624,7 @@ class RuleBasedFieldMapper:
         index = 0
 
         while index < len(lines):
+            header_tokens = row_tokens(lines[index])
             columns = _table_header_map(lines[index])
             if columns is None:
                 index += 1
@@ -494,11 +639,32 @@ class RuleBasedFieldMapper:
                     break
                 if _table_header_map(row) is not None or _table_stop(row_text):
                     break
-                tokens = split_tokens(row.text)
+                tokens = row_tokens(row)
                 if not _row_has_numbers(tokens, columns):
                     break
                 fallback_no += 1
-                doc_line, row_issues = _build_line(row, tokens, columns, fallback_no)
+                # 单元格/词元数多于表头列数 = 列错位，整行降置信并留痕
+                misaligned = len(tokens) > len(header_tokens)
+                doc_line, row_issues = _build_line(
+                    row,
+                    tokens,
+                    columns,
+                    fallback_no,
+                    confidence_scale=CONF_MISALIGNED_SCALE if misaligned else 1.0,
+                )
+                if misaligned:
+                    row_issues = [
+                        *row_issues,
+                        ValidationIssue(
+                            code="ROW_TOKENS_MISALIGNED",
+                            severity=IssueSeverity.WARNING,
+                            message=(
+                                f"明细第 {fallback_no} 行有 {len(tokens)} 列、"
+                                f"表头只有 {len(header_tokens)} 列，按列错位处理并降置信"
+                            ),
+                            field_path=f"lines[{fallback_no}]",
+                        ),
+                    ]
                 mapped.append((doc_line, row_issues))
                 sealed.add((row.page, row.index))
                 cursor += 1
