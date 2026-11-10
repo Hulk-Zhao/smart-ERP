@@ -11,10 +11,13 @@
     应处理行数 = 对账引擎的供应商对账单行数（metrics.supplier_lines）
     自动放行行数 = 引擎状态「已匹配」且无需人工
     争议挂起行数 = 引擎标记需人工（待人工/匹配歧义/候选待人工）
-    有效对账行数 = 自动放行 − 已确认错放行 − 客户原因不计费
-    本期金额 = 有效对账行数 × 单行单价（单价只从配置读）
+    计费行数（billable_lines）= billable 桶计数 = 自动放行 − 已确认错放行 − 客户原因不计费
+    本期金额 = 计费行数 × 单行单价（单价只从配置读）
     累计金额 = 已计金额 + 本期金额
     封顶余额 = 封顶金额 − 累计金额
+
+「有效对账行」是对账引擎的口径（行级自动，含已自动归因的差异行），与本模块的
+``billable_lines`` 不是同一个数；两者不得互相代称（同一批次实测 64 vs 59）。
 """
 
 from __future__ import annotations
@@ -87,7 +90,7 @@ METERING_LINE_COLUMNS = (
 def classify_billing_bucket(*, status: str, needs_manual: bool) -> BillingBucket:
     """计费桶的唯一分类函数：计数、行输出、差异过滤都必须调用它，禁止第二处重算。
 
-    - ``billable``：引擎自动放行且计入有效对账行（当前扣减源未接入，自动放行即计费）；
+    - ``billable``：引擎自动放行且计入计费行（当前扣减源未接入，自动放行即计费）；
     - ``auto_released``：引擎自动放行但被扣减不计费（「已确认错放行 / 客户原因」接入后才会出现）；
     - ``dispute_hold``：需人工（待人工/匹配歧义/候选待人工）；
     - ``other_unbillable``：其余供应商侧行（未匹配/重复计费/不可解析）。
@@ -255,11 +258,11 @@ def build_statement(
             "客户原因不计费行数 = 无数据源（未接入，按 0 扣减）"
         ),
         (
-            f"有效对账行数 = 自动放行 {auto_count} − 已确认错放行 0 "
+            f"计费行数（billable_lines）= 自动放行 {auto_count} − 已确认错放行 0 "
             f"= {billable_count}（上界：确认数据接入后只会下调）"
         ),
         (
-            f"本期金额 = 有效对账行数 {billable_count} × 单行单价 {unit_price} "
+            f"本期金额 = 计费行数 {billable_count} × 单行单价 {unit_price} "
             f"= {period_amount} {policy.currency}"
         ),
         f"累计金额 = 已计金额 {prior_amount} + 本期金额 {period_amount} = {cumulative}",
@@ -319,13 +322,13 @@ def _data_gaps(lines: list[MeteringLineOut]) -> list[MeteringDataGapOut]:
     gaps = [
         MeteringDataGapOut(
             field="confirmed_misrelease_lines",
-            reason="无「已确认错放行」模型/事件，无法扣减有效行；当前按 0 扣减",
+            reason="无「已确认错放行」模型/事件，无法扣减计费行；当前按 0 扣减",
             owner_role="对账运营",
-            action="人工复核结案后回填已确认错放行的行号与凭证，再据此扣减有效行",
+            action="人工复核结案后回填已确认错放行的行号与凭证，再据此扣减计费行",
         ),
         MeteringDataGapOut(
             field="customer_reason_lines",
-            reason="无「客户原因不计费」标记，无法从有效行中剔除",
+            reason="无「客户原因不计费」标记，无法从计费行中剔除",
             owner_role="客户成功/商务",
             action="回填客户原因不计费的对账行、原因码与确认人，供计量剔除",
         ),

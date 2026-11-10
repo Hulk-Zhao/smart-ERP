@@ -3194,7 +3194,7 @@
     },
     "/v1/metering/batches/{batch_id}/statement": {
       "get": {
-        "description": "按对账批次输出结果计费的计量表（W0 只读：不写库、不碰资金、不改状态）。「有效对账行数」只按程序性事实计算：自动放行 − 已确认错放行 − 客户原因；后两项当前无数据源，按 0 扣减并在 calculation/data_gaps 中标注为上界。单行单价只从 ERP_METERING_UNIT_PRICE 读取，未配置直接 503。format=csv 导出逐行明细（UTF-8 BOM，X-Content-SHA256 为内容摘要）。",
+        "description": "按对账批次输出结果计费的计量表（W0 只读：不写库、不碰资金、不改状态）。「计费行数（billable_lines）」只按程序性事实计算：自动放行 − 已确认错放行 − 客户原因；后两项当前无数据源，按 0 扣减并在 calculation/data_gaps 中标注为上界。单行单价只从 ERP_METERING_UNIT_PRICE 读取，未配置直接 503。format=csv 导出逐行明细（UTF-8 BOM，X-Content-SHA256 为内容摘要）。",
         "operationId": "get_statement_v1_metering_batches__batch_id__statement_get",
         "parameters": [
           {

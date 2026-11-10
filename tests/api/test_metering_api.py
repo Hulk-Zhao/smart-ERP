@@ -144,10 +144,15 @@ def test_statement_classifies_lines_and_amounts(env, monkeypatch):
     assert excluded["customer_reason"] is None
     assert excluded["total"] == 3
 
-    # 有效行是「上界」，口径可解释
+    # 计费行是「上界」，口径可解释
     assert "上界" in body["billable_basis"]
     assert "上界" in body["calculation"][-4]
     assert body["line_accounting"].startswith("应处理 4 = 自动放行 1 + 争议挂起 2 + 其他不计费 1")
+
+    # 否定断言（防复制粘贴复发）：billable 桶计数不得再被叫成「有效对账行」。
+    # 「有效对账行」只属于对账引擎口径（行级自动，含已自动归因的差异行）。
+    assert all("有效对账行" not in item for item in body["calculation"])
+    assert "有效对账行" not in body["billable_basis"]
 
     # 按行事实：自动放行 / 人工复核 / 争议挂起 / 其他不计费
     lines = {line["supplier_ref"]: line for line in body["lines"]}
