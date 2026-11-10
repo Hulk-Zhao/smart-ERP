@@ -110,7 +110,23 @@ jobs:
   python-checks:
     name: Python lint 与单元测试
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    services:
+      # 测试库：与部署档一致的 PG15（不用 latest）。
+      # health-check 通过前 GitHub 不会开始执行下面的 steps，迁移不靠 sleep 猜就绪。
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: erp_test
+          POSTGRES_PASSWORD: erp_test
+          POSTGRES_DB: smart_erp_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U erp_test -d smart_erp_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
 
@@ -120,9 +136,12 @@ jobs:
           cache: pip
 
       - name: 安装依赖
+        # [pdf] 必须一起装：pyproject 里 pypdfium2 是独立 extra，
+        # 只装 [dev] 时 tests/docparse/test_pdf_extraction.py 会被 importorskip 整模块跳过，
+        # 「真实 PDF 文本提取 / 扫描件报缺 OCR」两条核心路径在门禁里从没跑过。
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]" ruff pyyaml
+          python -m pip install -e ".[dev,pdf]" ruff pyyaml
 
       - name: 许可证门禁（AGPL / GPL / SSPL 硬拒绝 + 白名单）
         # 制度化的 AGPL 收口（docs/product/tech/01-技术架构.md §2.2）：
@@ -165,7 +184,23 @@ jobs:
           ruff check apps tests db observability --statistics
           echo "::endgroup::"
 
+      - name: 测试库迁移（0001→0005 全链）
+        # service 的 health-check 已保证 PG 就绪；这里跑真实迁移链并用 alembic current
+        # 断言停在 0005_worker_runtime，避免「连上了但表没建」的假绿。
+        # env.py 的连接串唯一真源是 ERP_DATABASE_URL（C14），不要另造一份。
+        env:
+          ERP_DATABASE_URL: postgresql+asyncpg://erp_test:erp_test@127.0.0.1:5432/smart_erp_test
+        run: |
+          set -euo pipefail
+          alembic -c alembic.ini upgrade head
+          alembic -c alembic.ini current | tee /tmp/alembic-current.txt
+          grep -q "0005_worker_runtime" /tmp/alembic-current.txt
+
       - name: pytest（按流分目录执行）
+        # ERP_TEST_DATABASE_URL 让 tests/agents 的 PG 集成用例真正执行；
+        # 未设置时那 45 条会静默 skip（Saga / 状态机 / 租约 / 补偿队列 / 审计链 / intent-verify）。
+        env:
+          ERP_TEST_DATABASE_URL: postgresql+asyncpg://erp_test:erp_test@127.0.0.1:5432/smart_erp_test
         # 为什么不是一次 `pytest tests`：
         #   1) 历史上 tests/connectors 与 tests/platform 有同名 test_errors.py /
         #      test_levels.py（后者已改名 test_connectors_*），且仓库没有
@@ -188,7 +223,10 @@ jobs:
               continue
             fi
             echo "::group::pytest ${d}"
-            if ! python -m pytest "${d}" -q; then
+            # -o addopts="" 覆盖 pyproject 的 -q：否则 -q + -q = -qq 会把
+            # "N passed / M skipped" 汇总行吞掉，skip 再次变成静默（本次事故的根因之一）。
+            # 只改输出详略，不改退出码语义：任何非 0 仍然失败。
+            if ! python -m pytest "${d}" -q -o addopts=""; then
               echo "::error::pytest ${d} 失败"
               rc=1
             fi
