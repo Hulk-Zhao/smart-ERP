@@ -1,0 +1,30 @@
+[
+  {
+    "cInvCode": "M-1001",
+    "cInvName": "法兰盘毛坯",
+    "cInvStd": "DN100 / 20#",
+    "cComUnitName": "件",
+    "cInvType": "外购"
+  },
+  {
+    "cInvCode": "M-1002",
+    "cInvName": "齿轮轴",
+    "cInvStd": "Φ40×120",
+    "cComUnitName": "件",
+    "cInvType": "自制"
+  },
+  {
+    "cInvCode": "M-2001",
+    "cInvName": "毛坯钢锭",
+    "cInvStd": "45#",
+    "cComUnitName": "吨",
+    "cInvType": "外购"
+  },
+  {
+    "cInvCode": "M-3001",
+    "cInvName": "无基本单位物料",
+    "cInvStd": null,
+    "cComUnitName": null,
+    "cInvType": "外购"
+  }
+]
