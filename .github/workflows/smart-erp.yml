@@ -181,7 +181,19 @@ jobs:
           ERP_NGINX_E2E: "1"
           ERP_NGINX_E2E_API_IMAGE: smart-erp/app:ci-nginx-e2e
           ERP_NGINX_E2E_WEB_IMAGE: smart-erp/web:ci-nginx-e2e
-        run: python -m pytest tests/deploy/test_nginx_runtime.py -q -o addopts="" -rs
+        # 失败时把断言原文转成 annotation：Actions 日志需要登录才能看，而
+        # annotation 经公共 API 可读。否则红了只能靠猜（2026-11-11 已吃一次亏）。
+        run: |
+          set -o pipefail
+          status=0
+          python -m pytest tests/deploy/test_nginx_runtime.py -q -o addopts="" -rs \
+            2>&1 | tee /tmp/nginx-e2e.log || status=$?
+          if [ "$status" -ne 0 ]; then
+            grep -E '^(E |FAILED )' /tmp/nginx-e2e.log | head -40 | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+          fi
+          exit "$status"
 
   # ---------------------------------------------------------------------------
   # 2. shell lint：发布脚本是本流的交付物，语法与常见坑必须机器把关
