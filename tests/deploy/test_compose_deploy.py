@@ -7,7 +7,8 @@
   ③ compose 引用的每个 ERP_* 变量都在 deploy/smart-erp/.env.example 登记；
   ④ 每个服务的 healthcheck 指向契约路径（/healthz、/readyz）或 tools.health。
 
-另外校验：日志轮转 20m×5、named volumes、8011/8012 只 expose 不发布、
+另外校验：日志轮转 20m×5、named volumes、8010 只绑回环、8012 只 expose 不发布、
+worker/scheduler 健康判定统一走 `tools.health --check`（不再 expose 8011）、
 Dockerfile 多阶段 + 非 root + 不用 latest、provision SQL 的隔离与红线。
 
 运行：
@@ -250,12 +251,15 @@ class ComposeStaticTest(unittest.TestCase):
         api_ports = self.services["api"].get("ports", [])
         web_ports = self.services["web"].get("ports", [])
         self.assertTrue(any("8010" in p for p in api_ports), "api 必须发布 8010")
+        # 安全收口：8010 只绑回环，公网只经宿主 nginx；出现 0.0.0.0 视为回退
+        self.assertTrue(all("127.0.0.1" in p for p in api_ports), "8010 必须只绑 127.0.0.1")
         self.assertTrue(any("8088" in p for p in web_ports), "web 必须发布 8088")
 
         worker, gw = self.services["worker"], self.services["connector-gw"]
-        self.assertNotIn("ports", worker, "8011 只在内网，不得发布到宿主")
+        self.assertNotIn("ports", worker, "worker 不发布宿主端口")
         self.assertNotIn("ports", gw, "8012 只在内网，不得发布到宿主")
-        self.assertIn("8011", [str(p) for p in worker.get("expose", [])])
+        # 8011 没有常驻进程监听（健康判定走 tools.health --check），不应再声明 expose
+        self.assertNotIn("expose", worker, "worker 不 expose 8011：没有进程监听")
         self.assertIn("8012", [str(p) for p in gw.get("expose", [])])
 
     def test_networks(self):
