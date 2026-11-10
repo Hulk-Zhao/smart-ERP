@@ -235,6 +235,8 @@ services:
       # 与下方 expose 的 8012 对齐；apps/connectors/gateway.py 读这个键
       ERP_CONNECTOR_GW_PORT: ${ERP_CONNECTOR_GW_PORT:-8012}
       ERP_GW_TIMEOUT_SECONDS: ${ERP_GW_TIMEOUT_SECONDS:-30}
+      # U8 连接器基地址：由 compose 下发；缺省值必须与 contracts/config.schema.json 的 default 逐字一致
+      ERP_U8_BASE_URL: ${ERP_U8_BASE_URL:-http://u8.invalid}
       # 出网白名单写在 config 快照里，随仓库版本管理；此处只给路径
       ERP_GW_EGRESS_ALLOWLIST_FILE: ${ERP_GW_EGRESS_ALLOWLIST_FILE:-/app/config/gw-egress.yaml}
       # 文件通道收件箱（apps/connectors/gateway.py 装配）：留空 = 不挂 file 连接器。
