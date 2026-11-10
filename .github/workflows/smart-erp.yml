@@ -437,6 +437,23 @@ jobs:
           fi
           echo "pre-pull ok: ${image} -> ${digest}"
 
+      - name: 预拉价目表迁移镜像 postgres:15-alpine（失败即 infra 红）
+        # tests/platform/test_price_book_migration.py 自己起一次性 PG15 容器做 0008
+        # 升降级（要建角色、要 DROP 库，不能占用 service 提供的共享库）。镜像不在本地
+        # 时该模块整体 skip，而下面 tests/platform 的 skip 门禁会判红——CI 上这条迁移
+        # 用例因此从未真跑过。这里把镜像拉进当前 job（本 job 已有 alpine 预拉先例），
+        # 不挪去 deploy-static：那边没装 SQLAlchemy/alembic，挪过去要另拖一套依赖。
+        run: |
+          set -euo pipefail
+          image="postgres:15-alpine"
+          docker pull "$image"
+          digest="$(docker image inspect "$image" --format '{{index .RepoDigests 0}}')"
+          if [ -z "$digest" ]; then
+            echo "::error::${image} 拉取后 RepoDigests 为空"
+            exit 1
+          fi
+          echo "pre-pull ok: ${image} -> ${digest}"
+
       - name: pytest（按流分目录执行）
         # ERP_TEST_DATABASE_URL 让 tests/agents 的 PG 集成用例真正执行；
         # 未设置时那 45 条会静默 skip（Saga / 状态机 / 租约 / 补偿队列 / 审计链 / intent-verify）。
