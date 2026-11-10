@@ -59,6 +59,17 @@ venv/
 node_modules/
 *.tsbuildinfo
 
+# --- 构建产物（不入库；防止任何 worktree 里一次 git add -A 带进仓库） ---
+dist/
+web/dist/
+*.egg-info/
+
+# --- 锁文件（既定策略：uv.lock 不入库） ---
+uv.lock
+
+# --- 本地时间戳快照（docs/product 无版本控制，靠快照留档） ---
+/20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
+
 # --- 操作系统 / 编辑器 ---
 .DS_Store
 Thumbs.db
