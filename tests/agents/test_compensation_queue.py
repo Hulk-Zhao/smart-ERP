@@ -161,6 +161,47 @@ def test_saga_compensates_in_reverse_and_rolls_back(db: str) -> None:
     asyncio.run(scenario())
 
 
+def test_zero_delay_retry_must_not_depend_on_clock(db: str) -> None:
+    """``retry_in_seconds=0`` 必须落成 NULL，不能写成 ``now()``。
+
+    PG 的 ``now()`` 不保证单调：Docker Desktop / Hyper-V 的时间同步会把容器时钟
+    回拨约 0.8–1.4 秒（本地 60 秒内采样到 4 次）。只要回拨发生在 ``mark_failed``
+    与下一次 ``claim_next`` 之间，``next_retry_at <= now()`` 就为假：
+    claim 返回 None → 补偿循环提前 break → ``failed`` 少一条、``queued`` 多一条，
+    也就是 ``test_compensation_failure_requires_manual_handling`` 偶发的
+    ``failed 1 != 2``。零延迟重试应写 NULL（与 ``reclaim_stale`` 同义），
+    让「可领取」不依赖服务器时钟。
+    """
+
+    async def scenario() -> None:
+        async with db_env(db) as env:
+            ticket = await prepare_executing(env.store)
+            await _succeeded_step(env, ticket.id, 1)
+            await env.queue.enqueue(ticket.id)
+            task = await env.queue.claim_next(ticket.id)
+            assert task is not None
+
+            await env.queue.mark_failed(task.id, "boom", retry_in_seconds=0.0)
+            async with env.sf() as session:
+                row = (
+                    await session.execute(
+                        text(
+                            "SELECT state, next_retry_at FROM erp.compensation_task "
+                            "WHERE ticket_id = :ticket"
+                        ),
+                        {"ticket": ticket.id},
+                    )
+                ).mappings().one()
+            assert row["state"] == "queued"
+            assert row["next_retry_at"] is None, (
+                "retry_in_seconds=0 被写成了 now()：服务器时钟回拨时该任务会暂时不可领取，"
+                "补偿循环会提前结束"
+            )
+            assert await env.queue.claim_next(ticket.id) is not None
+
+    asyncio.run(scenario())
+
+
 def test_compensation_failure_requires_manual_handling(db: str) -> None:
     async def scenario() -> None:
         async with db_env(db) as env:

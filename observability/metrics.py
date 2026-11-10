@@ -72,6 +72,12 @@ RECON_DEGRADATION_REASONS: tuple[str, ...] = (
     "other",
 )
 
+#: 对账失败所在阶段（封闭词表）。失败与「批次结果」分开计数：量变少不等于失败。
+RECON_FAILURE_STAGES: tuple[str, ...] = ("input", "engine", "persist")
+
+#: 无法归类的异常用这个 code；取 ``ErrorCode.value``，自由文本永不进标签。
+RECON_FAILURE_UNCLASSIFIED = "unclassified"
+
 #: 批次自动匹配率桶（0–1）。2 位小数的分母限制下，桶只分辨「差 / 可用 / 接近全自动」。
 RECON_RATIO_BUCKETS: tuple[float, ...] = (0.5, 0.7, 0.8, 0.9, 0.95, 0.99, 1.0)
 
@@ -169,6 +175,18 @@ def _format_value(value: float) -> str:
     if number.is_integer():
         return str(int(number))
     return f"{number:.12g}"
+
+
+def _finite(value: Any, what: str) -> float:
+    """转成有限浮点；允许负值（时钟偏移这类双向信号用）。"""
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise MetricError(f"{what} 必须是数字，实际 {value!r}") from exc
+    if not math.isfinite(number):
+        raise MetricError(f"{what} 必须是有限数，实际 {value!r}")
+    return number
 
 
 def _validate_metric_name(name: str) -> None:
@@ -269,19 +287,35 @@ class Counter:
 
 
 class Gauge:
-    """可增可减的瞬时值。"""
+    """可增可减的瞬时值。
 
-    def __init__(self, name: str, help_text: str, label_names: Sequence[str] = ()) -> None:
+    ``allow_negative=True`` 用于时钟偏移这类双向信号；其余 gauge 仍拒绝负值，
+    因为「工单数 −1」几乎总是计数逻辑写错，而不是合法状态。
+    """
+
+    def __init__(
+        self,
+        name: str,
+        help_text: str,
+        label_names: Sequence[str] = (),
+        *,
+        allow_negative: bool = False,
+    ) -> None:
         _validate_metric_name(name)
         _validate_label_names(label_names)
         self._family = _Family(name, help_text, tuple(label_names), "gauge")
+        self.allow_negative = allow_negative
 
     @property
     def name(self) -> str:
         return self._family.name
 
     def set(self, value: float, **labels: Any) -> None:
-        number = _non_negative(value, "value")
+        number = (
+            _finite(value, "value")
+            if self.allow_negative
+            else _non_negative(value, "value")
+        )
         key = self._family._key(labels)
         with self._family.lock:
             self._family.values[key] = number
@@ -444,6 +478,11 @@ class MetricsRegistry:
             "降级（无法对账）批次计数，按缺失项种类归因",
             ("reason",),
         )
+        self.recon_runs_failed_total = Counter(
+            "smart_erp_recon_runs_failed_total",
+            "对账请求失败次数，按失败阶段与问题码计数（含未归类异常）",
+            ("stage", "code"),
+        )
         self.unresolved_tickets = Gauge(
             "smart_erp_unresolved_tickets",
             "当前未解决工单数（unresolved）",
@@ -451,6 +490,23 @@ class MetricsRegistry:
         self.compensation_backlog = Gauge(
             "smart_erp_compensation_backlog",
             "当前待处理补偿任务积压数",
+        )
+        self.compensation_overdue = Gauge(
+            "smart_erp_compensation_overdue",
+            "补偿任务已到期却未被领取的条数（抓 claim 停摆，含 next_retry_at 为 NULL 的无闸门行）",
+        )
+        self.compensation_future_retry = Gauge(
+            "smart_erp_compensation_future_retry",
+            "next_retry_at 落在未来 18s 之外的 queued 补偿任务数（只可能由墙钟回拨或错算造成）",
+        )
+        self.db_clock_skew_seconds = Gauge(
+            "smart_erp_db_clock_skew_seconds",
+            "应用单调时钟与墙钟的差值（秒）：Δwall − Δtick，负值表示墙钟回拨",
+            allow_negative=True,
+        )
+        self.db_clock_skew_backwards_seconds_max = Gauge(
+            "smart_erp_db_clock_skew_backwards_seconds_max",
+            "进程启动以来观测到的最大墙钟回拨幅度（秒）",
         )
         self.audit_chain_broken = Gauge(
             "smart_erp_audit_chain_broken",
@@ -468,8 +524,13 @@ class MetricsRegistry:
             self.recon_supplier_lines_total,
             self.recon_batch_auto_match_ratio,
             self.recon_degraded_batches_total,
+            self.recon_runs_failed_total,
             self.unresolved_tickets,
             self.compensation_backlog,
+            self.compensation_overdue,
+            self.compensation_future_retry,
+            self.db_clock_skew_seconds,
+            self.db_clock_skew_backwards_seconds_max,
             self.audit_chain_broken,
         )
 
@@ -578,11 +639,55 @@ class MetricsRegistry:
         if label == "unreconcilable":
             self.recon_degraded_batches_total.inc(reason=_degradation_reason(result))
 
+    def record_recon_failure(self, *, stage: str, code: str) -> None:
+        """记一次**失败**的对账请求（异常/中断），与批次结果计数分开。
+
+        ``stage`` 取 ``RECON_FAILURE_STAGES``；``code`` 取 ``ErrorCode.value``，
+        无法归类时用 ``RECON_FAILURE_UNCLASSIFIED``。二者都是封闭/受控词表，
+        不接受自由文本（problem+json 的 detail 永远不进标签）。
+        """
+
+        if stage not in RECON_FAILURE_STAGES:
+            raise MetricError(f"stage 必须是 {RECON_FAILURE_STAGES}，实际 {stage!r}")
+        if not code or not isinstance(code, str) or len(code) > 64:
+            raise MetricLabelError(f"code 必须是 ≤64 字符的非空字符串，实际 {code!r}")
+        self.recon_runs_failed_total.inc(stage=stage, code=code)
+
     def set_unresolved(self, count: int) -> None:
         self.unresolved_tickets.set(_count_value(count, "unresolved"))
 
     def set_compensation_backlog(self, count: int) -> None:
         self.compensation_backlog.set(_count_value(count, "compensation_backlog"))
+
+    def set_compensation_overdue(self, count: int) -> None:
+        """到期未领取条数；SQL 口径见 README §6.1.3，NULL 分支必须计入。"""
+
+        self.compensation_overdue.set(_count_value(count, "compensation_overdue"))
+
+    def set_compensation_future_retry(self, count: int) -> None:
+        self.compensation_future_retry.set(
+            _count_value(count, "compensation_future_retry")
+        )
+
+    def observe_clock_skew(
+        self, *, monotonic_delta_seconds: float, wall_delta_seconds: float
+    ) -> float:
+        """一次成对采样：单调时钟前进 ``tick``、墙钟前进 ``wall``，返回本次 skew。
+
+        单调时钟不会倒退，所以 ``tick > wall`` 就是墙钟回拨——这是**根因信号**，
+        在任务还没卡住之前就能报。``skew = wall − tick``，负值表示回拨；回拨幅度
+        同时并入进程内最大值。调用方只需在采样点把两个增量传进来。
+        """
+
+        tick = _non_negative(monotonic_delta_seconds, "monotonic_delta_seconds")
+        wall = _finite(wall_delta_seconds, "wall_delta_seconds")
+        skew = wall - tick
+        self.db_clock_skew_seconds.set(skew)
+        backwards = -skew if skew < 0 else 0.0
+        current = self.db_clock_skew_backwards_seconds_max.value() or 0.0
+        if backwards > current:
+            self.db_clock_skew_backwards_seconds_max.set(backwards)
+        return skew
 
     def set_audit_chain_broken(self, broken: bool) -> None:
         self.audit_chain_broken.set(1 if broken else 0)
@@ -741,6 +846,10 @@ def install_metrics(
         return False
 
     resolved = path or source.get(METRICS_PATH_VAR) or DEFAULT_METRICS_PATH
+    if any(char.isspace() for char in resolved):
+        # 尾随空格会注册出一个永远匹配不到的路由：运维改 nginx deny 也跟着改，
+        # 而端点静默 404——属于「配了但不生效」，必须在启动期炸掉。
+        raise MetricError(f"metrics 路径不得含空白字符，实际 {resolved!r}")
     if not resolved.startswith("/"):
         raise MetricError(f"metrics 路径必须以 / 开头，实际 {resolved!r}")
 

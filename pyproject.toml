@@ -80,3 +80,8 @@ source_modules = [
     "apps.platform.policy.registry",
 ]
 forbidden_modules = ["apps.platform.connectors.transport"]
+# 契约只约束**直接**导入：穿透经 `apps.platform.connectors.sdk` 是设计内的唯一通路
+# （`main -> container -> sdk -> transport` 每一跳都合法，判定粒度不该把传递依赖算违规）。
+# 直接导入由本契约拦，`tests/platform/test_connector_transport_isolation.py` 对 `apps/`
+# 做全量 AST 扫描兜底；两者互补，不设任何逐模块豁免清单。
+allow_indirect_imports = true

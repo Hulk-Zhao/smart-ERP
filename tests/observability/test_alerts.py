@@ -1,7 +1,8 @@
-"""告警规则文件校验：结构、指标存在性、P0 审计断链的可触发演示。
+"""告警规则文件校验：结构、指标存在性、采集点同批合入、触发演示。
 
 ``promtool`` 未安装（不属于本项目依赖），因此这里用 PyYAML 做语法校验，
-并对规则做结构断言；P0 那条用最小求值器直接在真实 ``/metrics`` 文本上跑一遍。
+并对规则做结构断言；补偿/时钟 6 条规则只允许以注释形态存在（零采集点），
+它们的表达式用最小求值器在真实 ``/metrics`` 文本上各跑一遍。
 """
 
 from __future__ import annotations
@@ -41,8 +42,9 @@ def test_rule_file_parses_and_has_required_groups(rules_doc: dict) -> None:
         assert group["rules"]
 
 
-def test_at_least_five_rules_with_wake_up_rationale(rules: list[dict]) -> None:
-    assert len(rules) >= 5
+def test_every_active_rule_has_wake_up_rationale(rules: list[dict]) -> None:
+    # 当前生效的只有 2 条对账规则；新增规则必须先有采集点才能进生效集合。
+    assert len(rules) == 2
     for rule in rules:
         assert rule["alert"]
         assert rule["expr"].strip()
@@ -54,15 +56,17 @@ def test_at_least_five_rules_with_wake_up_rationale(rules: list[dict]) -> None:
         assert annotations.get("runbook", "").strip()
 
 
-def test_audit_chain_rule_is_p0_and_fast_firing(rules: list[dict]) -> None:
-    audit = [rule for rule in rules if rule["alert"] == "SmartErpAuditChainBroken"]
-    assert len(audit) == 1
-    rule = audit[0]
-    assert rule["labels"]["severity"] == "P0"
-    assert rule["expr"].strip() == "max(smart_erp_audit_chain_broken) > 0"
+def test_audit_chain_rule_is_commented_as_p0_pending_wiring() -> None:
+    """P0 仍在文件里，但采集点为零，只能以注释形态存在并标归属流。"""
+
+    text = RULE_FILE.read_text(encoding="utf-8")
+    assert "# - alert: SmartErpAuditChainBroken" in text
+    assert "#   expr: max(smart_erp_audit_chain_broken) > 0" in text
     # P0 不允许拖长等待时间；1 分钟足够排除采集抖动。
-    assert rule["for"] == "1m"
-    assert rule["labels"]["compliance"] == "audit-chain"
+    assert "#   for: 1m" in text
+    assert "#     severity: P0" in text
+    assert "#     compliance: audit-chain" in text
+    assert "归属流：apps/audit" in _marker_for("SmartErpAuditChainBroken")
 
 
 def test_every_referenced_metric_exists_in_registry(rules: list[dict]) -> None:
@@ -79,14 +83,14 @@ def test_every_referenced_metric_exists_in_registry(rules: list[dict]) -> None:
 
 def test_required_alerts_are_covered(rules: list[dict]) -> None:
     names = {rule["alert"] for rule in rules}
-    for required in (
-        "SmartErpWriteFailureRateHigh",
-        "SmartErpUnresolvedTicketsGrowing",
-        "SmartErpCompensationBacklogHigh",
+    assert names == {
         "SmartErpReconBatchFailureRateHigh",
-        "SmartErpAuditChainBroken",
-    ):
-        assert required in names
+        "SmartErpReconBatchP95Slow",
+    }, names
+    # 其余 9 条依赖零采集点指标，按 README §6.1.2 必须注释掉，不得出现在生效规则里。
+    assert "SmartErpCompensationOverdueP2" not in names
+    assert "SmartErpWriteFailureRateHigh" not in names
+    assert "SmartErpAuditChainBroken" not in names
 
 
 # ---------------------------------------------------------------- P0 触发演示
@@ -145,3 +149,208 @@ def test_audit_chain_p0_alert_fires_on_real_metrics_output(capsys: pytest.Captur
 
     assert firing is True
     assert observed == 1.0
+
+
+# ------------------------------------------------- 补偿 / 时钟规则（A、B、C）
+
+
+#: 指标名 → (severity, for, 归一化后的 expr)。口径与 README §6.1.3 一一对应。
+_COMPENSATION_RULES = {
+    "SmartErpCompensationOverdueP2": ("P2", "5m", "max(smart_erp_compensation_overdue) > 0"),
+    "SmartErpCompensationOverdueP1Volume": (
+        "P1",
+        "5m",
+        "max(smart_erp_compensation_overdue) > 5",
+    ),
+    "SmartErpCompensationOverdueP1Duration": (
+        "P1",
+        "15m",
+        "max(smart_erp_compensation_overdue) > 0",
+    ),
+    "SmartErpCompensationFutureRetry": (
+        "P1",
+        "1m",
+        "max(smart_erp_compensation_future_retry) > 0",
+    ),
+    "SmartErpClockSkewP2": (
+        "P2",
+        "1m",
+        "max(abs(smart_erp_db_clock_skew_seconds)) >= 5",
+    ),
+    "SmartErpClockSkewP1": (
+        "P1",
+        "1m",
+        "max(abs(smart_erp_db_clock_skew_seconds)) >= 30",
+    ),
+}
+
+
+#: 截至 2026-11-11 审计，唯一有生产采集点的指标族（见 README §6.1.3）。
+WIRED_METRICS = {
+    "smart_erp_recon_batches_total",
+    "smart_erp_recon_batch_duration_seconds",
+    "smart_erp_recon_supplier_lines_total",
+    "smart_erp_recon_batch_auto_match_ratio",
+    "smart_erp_recon_degraded_batches_total",
+    "smart_erp_recon_runs_failed_total",
+}
+
+#: 注释态规则的锚点与归属流标记。任何一条被注释的规则都必须二选一：
+#: 「采集点待接线（归属流：…）」或「待真实基线」——不允许无理由地静默停用。
+_COMMENTED_ALERT_RE = re.compile(r"^\s*#\s*-\s*alert:\s*(?P<name>[A-Za-z0-9_]+)\s*$", re.M)
+_MARKER_PREFIXES = ("采集点待接线（归属流：", "待真实基线")
+
+
+def _commented_alert_names() -> list[str]:
+    return [m.group("name") for m in _COMMENTED_ALERT_RE.finditer(RULE_FILE.read_text(encoding="utf-8"))]
+
+
+def _marker_for(name: str) -> str:
+    """取注释规则紧邻上方的非空行，即停用理由 + 归属流。"""
+
+    lines = RULE_FILE.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        if re.fullmatch(rf"\s*#\s*-\s*alert:\s*{re.escape(name)}", line):
+            for previous in reversed(lines[:index]):
+                if previous.strip():
+                    return previous.strip()
+    raise AssertionError(f"未找到被注释的规则 {name}")
+
+
+def test_dead_backlog_alert_is_removed(rules: list[dict]) -> None:
+    """零采集点的 P1 必须删掉；指标定义可以留着等接线，但不得再被规则引用。"""
+
+    assert "SmartErpCompensationBacklogHigh" not in {rule["alert"] for rule in rules}
+    text = RULE_FILE.read_text(encoding="utf-8")
+    for line in text.splitlines():
+        if (
+            "smart_erp_compensation_backlog" in line
+            or "SmartErpCompensationBacklogHigh" in line
+        ):
+            assert line.lstrip().startswith("#"), line
+
+
+def test_pending_wiring_rules_are_commented_out() -> None:
+    """同批合入口径：零采集点的规则只能以注释形态存在（README §6.1.2）。"""
+
+    text = RULE_FILE.read_text(encoding="utf-8")
+    for name, (severity, wait, expr) in _COMPENSATION_RULES.items():
+        assert f"# - alert: {name}" in text, name
+        assert f"#   expr: {expr}" in text, name
+        assert f"#   for: {wait}" in text, name
+        assert f"#     severity: {severity}" in text, name
+
+
+def test_every_commented_rule_states_owner_or_baseline() -> None:
+    """停用不是删除：每条注释规则都必须写清归属流/解锁条件，或「待真实基线」。"""
+
+    names = _commented_alert_names()
+    assert len(names) == len(set(names)), names
+    expected = set(_COMPENSATION_RULES) | {
+        "SmartErpWriteFailureRateHigh",
+        "SmartErpUnresolvedTicketsGrowing",
+        "SmartErpAuditChainBroken",
+        "SmartErpReconRunFailureRateHigh",
+    }
+    assert set(names) == expected, set(names) ^ expected
+    for name in names:
+        marker = _marker_for(name)
+        assert marker.startswith("#"), (name, marker)
+        assert any(prefix in marker for prefix in _MARKER_PREFIXES), (name, marker)
+
+
+def test_active_rules_only_reference_wired_metrics(rules: list[dict]) -> None:
+    """生效规则引用的每个指标都必须有生产采集点；无采集点的只能注释。"""
+
+    for rule in rules:
+        for reference in METRIC_REF_RE.findall(rule["expr"]):
+            base = reference
+            for suffix in _SERIES_SUFFIXES:
+                if base.endswith(suffix):
+                    base = base[: -len(suffix)]
+                    break
+            assert base in WIRED_METRICS, f"{rule['alert']} 引用了无采集点指标 {base}"
+
+
+def _eval_max_abs_at_least(expr: str, text: str) -> tuple[bool, float]:
+    """求值形如 ``max(abs(<metric>)) >= <threshold>`` 的最小求值器。"""
+
+    match = re.fullmatch(
+        r"max\(abs\((?P<metric>smart_erp_[a-zA-Z0-9_]+)\)\)\s*>=\s*(?P<threshold>[0-9.]+)",
+        expr.strip(),
+    )
+    assert match is not None, f"求值器不支持该表达式：{expr!r}"
+    observed = abs(_gauge_value(text, match.group("metric")))
+    return observed >= float(match.group("threshold")), observed
+
+
+def test_compensation_overdue_alert_fires_on_real_metrics_output() -> None:
+    registry = MetricsRegistry()
+    registry.set_compensation_overdue(3)
+    text = render_metrics(registry)
+
+    # 3 条跨过「> 0」，5 分钟内该有 P2；但还不到批量阈值 5，不能升 P1。
+    firing, observed = _eval_max_greater_than(
+        "max(smart_erp_compensation_overdue) > 0", text
+    )
+    assert firing is True
+    assert observed == 3.0
+    firing, _ = _eval_max_greater_than(
+        "max(smart_erp_compensation_overdue) > 5", text
+    )
+    assert firing is False
+
+    registry.set_compensation_overdue(6)
+    firing, observed = _eval_max_greater_than(
+        "max(smart_erp_compensation_overdue) > 5", render_metrics(registry)
+    )
+    assert firing is True
+    assert observed == 6.0
+
+
+def test_future_retry_alert_fires_on_real_metrics_output() -> None:
+    registry = MetricsRegistry()
+    registry.set_compensation_future_retry(1)
+
+    firing, observed = _eval_max_greater_than(
+        "max(smart_erp_compensation_future_retry) > 0", render_metrics(registry)
+    )
+
+    assert firing is True
+    assert observed == 1.0
+
+
+def test_clock_skew_alerts_split_p2_and_p1_on_real_metrics_output() -> None:
+    registry = MetricsRegistry()
+
+    # 今晚实测回拨 0.84～1.43s：属于抖动，两条规则都不该响。
+    registry.observe_clock_skew(monotonic_delta_seconds=10.0, wall_delta_seconds=8.57)
+    text = render_metrics(registry)
+    assert "smart_erp_db_clock_skew_seconds -1.43" in text
+    firing, _ = _eval_max_abs_at_least(
+        "max(abs(smart_erp_db_clock_skew_seconds)) >= 5", text
+    )
+    assert firing is False
+
+    # 回拨 6s：跨过 P2（≥5），不到 P1（≥30）。
+    registry.observe_clock_skew(monotonic_delta_seconds=10.0, wall_delta_seconds=4.0)
+    text = render_metrics(registry)
+    p2, observed = _eval_max_abs_at_least(
+        "max(abs(smart_erp_db_clock_skew_seconds)) >= 5", text
+    )
+    p1, _ = _eval_max_abs_at_least(
+        "max(abs(smart_erp_db_clock_skew_seconds)) >= 30", text
+    )
+    assert p2 is True
+    assert observed == 6.0
+    assert p1 is False
+
+    # 回拨 31s：P1，并且进程内最大回拨被记录下来（只做排查，不单独告警）。
+    registry.observe_clock_skew(monotonic_delta_seconds=10.0, wall_delta_seconds=-21.0)
+    text = render_metrics(registry)
+    p1, observed = _eval_max_abs_at_least(
+        "max(abs(smart_erp_db_clock_skew_seconds)) >= 30", text
+    )
+    assert p1 is True
+    assert observed == 31.0
+    assert "smart_erp_db_clock_skew_backwards_seconds_max 31" in text
