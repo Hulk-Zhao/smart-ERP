@@ -87,8 +87,9 @@ services:
       ERP_LLM_TIMEOUT_SECONDS: ${ERP_LLM_TIMEOUT_SECONDS:-60}
       ERP_METRICS_PORT: ${ERP_METRICS_PORT:-8011}
     ports:
-      # 仅香港反代源 IP；安全组必须限源（§1A.4 端口分配）
-      - "${ERP_API_PORT:-8010}:8010"
+      # 只绑回环：公网入口只有 hk-web 的 nginx（/erp/api/ → 127.0.0.1:8010），
+      # 宿主不再监听 0.0.0.0。4C4G 演示机若确需宿主直连，显式设 ERP_API_BIND=0.0.0.0。
+      - "${ERP_API_BIND:-127.0.0.1}:${ERP_API_PORT:-8010}:8010"
     volumes:
       - erp_objects:/data/objects
       - erp_logs:/app/logs
@@ -154,9 +155,6 @@ services:
     networks:
       - smart-erp-net
       - erp-db-net
-    expose:
-      # 8011 只在内网可达：健康/指标由 api 与运维侧采集，不作宿主发布
-      - "8011"
     mem_limit: 512m
     cpus: 1.5
     healthcheck:
@@ -377,8 +375,6 @@ services:
     networks:
       - smart-erp-net
       - erp-db-net
-    expose:
-      - "8011"
     mem_limit: 2048m
     cpus: 2.0
     healthcheck:
@@ -432,8 +428,6 @@ services:
     networks:
       - smart-erp-net
       - erp-db-net
-    expose:
-      - "8011"
     mem_limit: 1024m
     cpus: 1.0
     healthcheck:
