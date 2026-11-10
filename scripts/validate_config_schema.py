@@ -35,7 +35,7 @@ DEFAULT_COMPOSE = ROOT / "deploy" / "smart-erp" / "docker-compose.yml"
 DEFAULT_ENV = ROOT / "deploy" / "smart-erp" / ".env.example"
 DEFAULT_MATRIX = ROOT / "deploy" / "smart-erp" / "env"
 MATRIX_FILES = ("local.env", "demo.env", "prod.env")
-CODE_DIRS = ("apps", "core", "tools")
+CODE_DIRS = ("apps", "core", "tools", "observability", "db")
 
 _VAR_RE = re.compile(r"\$\{(ERP_[A-Z0-9_]+)(?::([-?]))?([^}]*)\}")
 _CODE_RE = re.compile(r"""["'](ERP_[A-Z0-9_]+)["']""")
@@ -222,7 +222,25 @@ def validate_matrix(matrix: Path, props: dict[str, dict], rep: Report) -> dict[s
     return result
 
 
-def validate_code(props: dict[str, dict], rep: Report) -> set[str]:
+def env_example_keys(path: Path) -> set[str]:
+    keys: set[str] = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        key = s.partition("=")[0].strip()
+        if key.startswith("ERP_"):
+            keys.add(key)
+    return keys
+
+
+def validate_code(props: dict[str, dict], rep: Report, env_example: Path | None = None) -> set[str]:
+    """扫描代码里的 ERP_* 读点：必须已登记进 schema，且必须在 .env.example 有对应项。
+
+    只做静态字面量扫描（`"ERP_XXX"`），不执行代码；这条断言针对的是
+    「键在代码里被读、在 .env.example 里查不到」这类配置面说谎。
+    """
+    registered_in_env = env_example_keys(env_example) if env_example and env_example.exists() else None
     seen: set[str] = set()
     for dirname in CODE_DIRS:
         for path in (ROOT / dirname).rglob("*.py"):
@@ -236,6 +254,8 @@ def validate_code(props: dict[str, dict], rep: Report) -> set[str]:
                 seen.add(key)
                 if key not in props:
                     rep.fail(f"{path.relative_to(ROOT)} 读取了未登记的键 {key}")
+                elif registered_in_env is not None and key not in registered_in_env:
+                    rep.fail(f"{path.relative_to(ROOT)} 读取了未在 .env.example 登记的键 {key}")
     return seen
 
 
@@ -264,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
         validate_env(env_target, props, rep, template=env_target.name == ".env.example")
     matrix = validate_matrix(matrix_target, props, rep) if matrix_target else {}
     if args.scan_code or args.all:
-        validate_code(props, rep)
+        validate_code(props, rep, DEFAULT_ENV)
 
     code = rep.flush()
     if code:

@@ -710,6 +710,47 @@
       "secret": false,
       "phase": "startup",
       "default": "agent,io"
+    },
+    "ERP_TRACE_ENABLED": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "",
+      "description": "1/true/yes/on 才落盘 trace；其它值视为关闭（observability/exporter.py）"
+    },
+    "ERP_TRACE_FILE": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "./logs/traces.jsonl",
+      "description": "trace 追加写文件，每行一个 span（observability/exporter.py）"
+    },
+    "ERP_METRICS_ENABLED": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "",
+      "description": "1/true/yes/on 才挂载 /metrics；缺省不挂载（observability/metrics.py）"
+    },
+    "ERP_METRICS_PATH": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "/metrics",
+      "pattern": "^/.*",
+      "description": "指标端点路径；开启后必须先由反向代理限定内网（RUNBOOK 5.2）"
     }
   }
 }

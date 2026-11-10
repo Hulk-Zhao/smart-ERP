@@ -89,7 +89,7 @@
 
 ```bash
 python scripts/validate_config_schema.py --all
-# PASS: 58 个键 · compose 覆盖一致 · env=ok · matrix=demo.env,local.env,prod.env
+# PASS: 62 个键 · compose 覆盖一致 · env=ok · matrix=demo.env,local.env,prod.env
 ```
 
 `--all` 做四件事：
@@ -98,7 +98,12 @@ python scripts/validate_config_schema.py --all
 2. compose ↔ schema 双向覆盖：`${ERP_*}` 必须登记、登记为 `compose` 的必须真的被引用；
    `${K:?}` 与 `required` 一致；默认值必须与 schema 一致（按服务差异化调参须写 `defaultsByService`）；
 3. 三个 env 文件逐键校验：未知键、整数/布尔类型、枚举、正则、必填非空；
-4. 扫描 `apps/` `core/` `tools/` 里按字面量读取的 `ERP_*`，未登记即报错。
+4. 扫描 `apps/` `core/` `tools/` `observability/` `db/` 里按字面量读取的 `ERP_*`，
+   每个读点必须同时登记在 schema 与 `.env.example`（代码在读、模板里查不到即红）。
+
+> 可观测性四项（`ERP_TRACE_ENABLED` / `ERP_TRACE_FILE` / `ERP_METRICS_ENABLED` / `ERP_METRICS_PATH`）
+> 在三套环境里都不显式设置，取默认值：trace 关闭、metrics 不挂载、路径 `/metrics`。
+> 要临时开启时按 `.env.example` 第 9 节改，且开启后必须按 RUNBOOK 5.2 在反向代理上限定内网。
 
 ## 5. 与发布清单的关系
 

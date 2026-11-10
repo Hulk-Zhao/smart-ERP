@@ -55,7 +55,28 @@ class ConfigSchemaTest(unittest.TestCase):
         code, out, err = run(["--all"])
         self.assertEqual(code, 0, err)
         self.assertIn("PASS", out)
-        self.assertIn("58 个键", out)
+        self.assertIn("62 个键", out)
+
+    def test_observability_keys_are_registered(self):
+        """代码读点必须在 .env.example 有对应项（配置面不许说谎）。"""
+        text = ENV_EXAMPLE.read_text(encoding="utf-8")
+        for key in ("ERP_TRACE_ENABLED", "ERP_TRACE_FILE", "ERP_METRICS_ENABLED", "ERP_METRICS_PATH"):
+            self.assertIn(f"\n{key}=", text, f"{key} 未在 .env.example 登记")
+
+    def test_code_key_missing_from_env_example_fails(self):
+        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+        props = vcs.validate_schema(schema, vcs.Report())
+        tmp_env = self.tmp / ".env.example"
+        # 故意删掉 ERP_TRACE_ENABLED，模拟「代码在读、模板里查不到」
+        body = ENV_EXAMPLE.read_text(encoding="utf-8").replace("ERP_TRACE_ENABLED=", "# removed\n")
+        tmp_env.write_text(body, encoding="utf-8")
+        rep = vcs.Report()
+        vcs.validate_code(props, rep, tmp_env)
+        self.assertEqual(rep.flush(), 1)
+        self.assertTrue(
+            any("未在 .env.example 登记的键 ERP_TRACE_ENABLED" in msg for msg in rep.errors),
+            rep.errors,
+        )
 
     def test_every_compose_key_is_in_env_example(self):
         schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
