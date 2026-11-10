@@ -7,6 +7,45 @@
 > 红线：**不备份、不恢复、不 DROP APS 的任何对象**；所有操作只在自己这一户里。
 > 脚本：`scripts/backup-smart-erp.sh`、`scripts/restore-smart-erp.sh`、`scripts/upgrade-smart-erp.sh`。
 
+## 0. 首次初始化：先 `db/00-provision.sql`，再 `alembic upgrade head`
+
+> **顺序不可颠倒，第 1 步不能省。** `deploy/smart-erp/db/00-provision.sql` 是
+> `erp_migrator` / `erp_app` 两个角色、`erp` schema 与默认权限的**唯一**来源；
+> `db/migrations/` 对 `ticket`、`job_queue`、`compensation_task` 等业务表
+> **一条 `GRANT` 都没有**（只有部分审计 / 运行期表带收紧后的局部授权）。
+
+1. **先**执行 `db/00-provision.sql`：建角色、建 `erp` schema，并设置
+   `ALTER DEFAULT PRIVILEGES FOR ROLE erp_migrator IN SCHEMA erp`（表 4 项、序列、函数）。
+2. **再**以 `erp_migrator` 执行 `alembic upgrade head`。
+   反过来做，`ALTER DEFAULT PRIVILEGES` 只对**之后**创建的对象生效，迁移建出来的表不会
+   自动授予应用角色，而迁移里又没有对应 `GRANT` 兜底。
+
+**跳过第 1 步的表现（不会当场报错）**：库能迁、服务能起、`/healthz` 可能返回 200，
+但应用对 `ticket` / `job_queue` / `compensation_task` 等表没有写权限，直到第一次写入
+才报 `permission denied for table ...`——排查方向容易被带到业务代码上。
+
+**迁移完成后自检**（`psql` 直接粘贴；grantee 用应用角色：生产 `erp_app`，CI 改 `erp_test`）：
+
+```sql
+SELECT c.relname AS table_name,
+       coalesce(string_agg(DISTINCT g.privilege_type, ',' ORDER BY g.privilege_type), '(none)')
+         AS privileges
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  LEFT JOIN information_schema.role_table_grants g
+         ON g.table_schema = 'erp'
+        AND g.table_name = c.relname
+        AND g.grantee = 'erp_app'      -- CI 改成 erp_test
+ WHERE n.nspname = 'erp' AND c.relkind = 'r'
+ GROUP BY c.relname
+ ORDER BY c.relname;
+-- 期望：应用直接读写的业务表各自含 DELETE,INSERT,SELECT,UPDATE；
+-- 出现 (none) 就是第 1 步被跳过（或对象在 provision 之前创建），先补授权再继续。
+-- audit_* / recon_* / worker_* 等只有收紧后的局部权限（如仅 INSERT,SELECT），属设计如此。
+```
+
+角色不要混：生产 / 网关是 `erp_app`，迁移是 `erp_migrator`，CI 是 `erp_test`。
+
 ## 1. 备份
 
 ### 1.1 什么时候必须备份

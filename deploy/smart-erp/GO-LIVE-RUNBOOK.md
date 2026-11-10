@@ -153,6 +153,18 @@ scripts/deploy-images.sh --tag ${NEW_SHA} --no-up
 - **失败判定/动作**：sha 校验失败 → 重传，连续两次失败停止发版；`docker load` 报错 → 检查 tar 是否被截断（回到 G02）。
 - **耗时**：5–20 min。
 
+### G11a 首次初始化顺序：先 `db/00-provision.sql`，再迁移
+
+> **仅首次部署 / 新库需要；顺序不可颠倒。** `db/00-provision.sql` 是角色与默认权限的唯一来源，
+> `db/migrations/` 对 `ticket` / `job_queue` / `compensation_task` 等业务表没有任何 `GRANT`。
+> 跳过这一步：库能迁、服务能起、`/healthz` 可能 200，直到第一次写入才报
+> `permission denied for table ...`。执行方法与自检 SQL 见 [RUNBOOK §0](./RUNBOOK.md)。
+
+- **顺序**：G11a（`00-provision.sql`）→ **G11b（`alembic upgrade head`）** → G12（起栈）。
+- **自检**：迁移完成后按 RUNBOOK §0 的 SQL 查 `information_schema.role_table_grants`，
+  应用直接读写的业务表应各自含 `DELETE,INSERT,SELECT,UPDATE`；出现 `(none)` 即开通顺序漏了。
+- **角色不要混**：生产 / 网关 `erp_app`，迁移 `erp_migrator`，CI `erp_test`。
+
 ### G11b 执行数据库迁移（仅当镜像 head ≠ 库内版本）✅（约 1–5 min）
 
 > **顺序在起 api 之前**：镜像换了、库没迁，是最典型的"看起来起来了、其实是半截"。
