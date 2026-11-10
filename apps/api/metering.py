@@ -171,11 +171,11 @@ def _decimal(name: str, raw: str) -> Decimal:
 def settle_period_amount(batch_amounts: Iterable[Decimal]) -> Decimal:
     """账期应付 = 各批次 4 位金额相加后**一次** ``ROUND_HALF_UP`` 到 2 位。
 
-    批次级金额（``build_statement`` 的 ``period_amount``）始终是 4 位、不取整，
+    批次级金额（``build_statement`` 的 ``amount_unrounded``）始终是 4 位、不取整，
     取整只发生在这一层；两者不一致时**以账期账单为法律口径**。
     算例：20 个批次 × ``0.3333`` = ``6.6666`` → ``6.67``；
-    若逐批次先取整再相加（``0.33 × 20``）= ``6.60``，差 1 分，客户按批次核、
-    按总额付，两边对不上就是争议——这就是「不在批次层取整」的实证。
+    若逐批次先取整再相加（``0.33 × 20``）= ``6.60``，实差 7 分（0.0333 × 20），
+    客户按批次核、按总额付，两边对不上就是争议——这就是「不在批次层取整」的实证。
     """
     return sum(batch_amounts, Decimal(0)).quantize(
         PERIOD_MONEY_EXP, rounding=ROUND_HALF_UP
@@ -219,14 +219,14 @@ def build_statement(
     customer_reason: int | None = None
     billable_count = len(by_bucket[BillingBucket.BILLABLE])
 
-    # 批次级金额：4 位、不取整（``amount`` 之类的名字会被当成本期应付，禁用）。
+    # 批次级金额：4 位、不取整；字段名必须显式写 unrounded，避免被当作应付金额。
     # 单价从配置读入时先归一到 4 位，保证「单价 × 整数行数」可精确表示。
     unit_price = policy.unit_price.quantize(MONEY_EXP, rounding=ROUND_HALF_UP)
-    period_amount = (Decimal(billable_count) * unit_price).quantize(
+    amount_unrounded = (Decimal(billable_count) * unit_price).quantize(
         MONEY_EXP, rounding=ROUND_HALF_UP
     )
     prior_amount = policy.prior_amount.quantize(MONEY_EXP, rounding=ROUND_HALF_UP)
-    cumulative = (prior_amount + period_amount).quantize(
+    cumulative = (prior_amount + amount_unrounded).quantize(
         MONEY_EXP, rounding=ROUND_HALF_UP
     )
     cap_amount = (
@@ -285,10 +285,10 @@ def build_statement(
             f"= {billable_count}（上界：确认数据接入后只会下调）"
         ),
         (
-            f"本期金额 = 有效对账行数 {billable_count} × 单行单价 {unit_price} "
-            f"= {period_amount} {policy.currency}"
+            f"本期金额（未取整）= 有效对账行数 {billable_count} × 单行单价 {unit_price} "
+            f"= {amount_unrounded} {policy.currency}"
         ),
-        f"累计金额 = 已计金额 {prior_amount} + 本期金额 {period_amount} = {cumulative}",
+        f"累计金额 = 已计金额 {prior_amount} + 本期金额 {amount_unrounded} = {cumulative}",
         (
             f"封顶余额 = 封顶金额 {cap_amount} − 累计金额 {cumulative} = {cap_remaining}"
             if cap_amount is not None
@@ -323,7 +323,7 @@ def build_statement(
         unit_price=f"{unit_price:.4f}",
         unit_price_source=UNIT_PRICE_SOURCE,
         currency=policy.currency,
-        period_amount=f"{period_amount:.4f}",
+        amount_unrounded=f"{amount_unrounded:.4f}",
         prior_cumulative_amount=f"{prior_amount:.4f}",
         cumulative_amount=f"{cumulative:.4f}",
         cap_amount=None if cap_amount is None else f"{cap_amount:.4f}",

@@ -332,7 +332,7 @@ export function MeteringPage() {
         </div>
         <div className="card-body space-y-2">
           <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-            <Metric label="本期金额" value={amount(data.period_amount)} unit={data.currency} tone="text-rose-700" />
+            <Metric label="本期金额（未取整，最终以账期账单为准）" value={amount(data.amount_unrounded)} unit={data.currency} tone="text-rose-700" />
             <Metric label="累计金额" value={amount(data.cumulative_amount)} unit={data.currency} hint={`上期累计 ${amount(data.prior_cumulative_amount)}`} />
             <Metric
               label="封顶余额"

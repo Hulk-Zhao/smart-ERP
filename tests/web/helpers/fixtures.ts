@@ -272,7 +272,7 @@ export function meteringStatement(overrides: Partial<MeteringStatementOut> = {})
     unit_price: '0.8000',
     unit_price_source: 'ERP_METERING_UNIT_PRICE',
     currency: 'CNY',
-    period_amount: '47.2000',
+    amount_unrounded: '47.2000',
     prior_cumulative_amount: '120.0000',
     cumulative_amount: '167.2000',
     cap_amount: null,

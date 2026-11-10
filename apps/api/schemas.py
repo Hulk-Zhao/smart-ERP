@@ -456,7 +456,8 @@ class MeteringStatementOut(BaseModel):
     unit_price: str
     unit_price_source: str
     currency: str
-    period_amount: str
+    amount_unrounded: str
+    """批次级金额：4 位小数、**未取整**；最终应付以账期账单（汇总层一次 HALF_UP）为准。"""
     prior_cumulative_amount: str
     cumulative_amount: str
     cap_amount: str | None = None

@@ -128,7 +128,7 @@ def test_statement_classifies_lines_and_amounts(env, monkeypatch):
     assert body["human_reviewed_lines"] is None
     assert body["unit_price"] == "0.3000"
     assert body["unit_price_source"] == "ERP_METERING_UNIT_PRICE"
-    assert body["period_amount"] == "0.3000"
+    assert body["amount_unrounded"] == "0.3000"
     assert body["prior_cumulative_amount"] == "1.0000"
     assert body["cumulative_amount"] == "1.3000"
     assert body["cap_amount"] == "5.0000"

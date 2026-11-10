@@ -125,7 +125,7 @@ def test_statement_survives_container_rebuild(env, monkeypatch):
     assert after["expected_lines"] == 2
     assert after["auto_released_lines"] == 1
     assert after["excluded_lines"]["dispute_hold"] == 1
-    assert after["period_amount"] == "0.3000"
+    assert after["amount_unrounded"] == "0.3000"
 
 
 def test_equivalent_batch_is_rejected_without_explicit_rerun(env, monkeypatch):

@@ -953,6 +953,10 @@
       "MeteringStatementOut": {
         "description": "产品文档 07 §2.2.1 计量表字段；金额一律十进制文本。",
         "properties": {
+          "amount_unrounded": {
+            "title": "Amount Unrounded",
+            "type": "string"
+          },
           "auto_released_lines": {
             "title": "Auto Released Lines",
             "type": "integer"
@@ -1090,10 +1094,6 @@
             "title": "Period",
             "type": "string"
           },
-          "period_amount": {
-            "title": "Period Amount",
-            "type": "string"
-          },
           "prior_cumulative_amount": {
             "title": "Prior Cumulative Amount",
             "type": "string"
@@ -1128,7 +1128,7 @@
           "unit_price",
           "unit_price_source",
           "currency",
-          "period_amount",
+          "amount_unrounded",
           "prior_cumulative_amount",
           "cumulative_amount",
           "cap_exceeded",

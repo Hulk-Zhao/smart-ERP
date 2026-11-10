@@ -1,13 +1,13 @@
 /**
  * 本文件由 `node scripts/gen-api-types.mjs` 从 C16 冻结契约生成，请勿手改。
  * 源文件：contracts/api/product_api.openapi.v1.json
- * 契约 sha256：9f425508216f0f34b4f4d328c8273b2730cab97b829d5a0a40a1bb2efef9104b
+ * 契约 sha256：db3420df7329d405e5c5eb4e146bd0eaaf881fc7853110035cf2c12a6ab0d9f2
  * 契约版本：1.0.0 · C16
  *
  * 契约变更流程：后端重新生成契约 → 执行 `npm run gen:api` → 评审类型差异。
  */
 
-export const CONTRACT_SHA256 = "9f425508216f0f34b4f4d328c8273b2730cab97b829d5a0a40a1bb2efef9104b";
+export const CONTRACT_SHA256 = "db3420df7329d405e5c5eb4e146bd0eaaf881fc7853110035cf2c12a6ab0d9f2";
 export const CONTRACT_VERSION = "1.0.0";
 export const CONTRACT_PATH_COUNT = 17;
 
@@ -200,6 +200,7 @@ export interface MeteringLineOut {
  * 产品文档 07 §2.2.1 计量表字段；金额一律十进制文本。
  */
 export interface MeteringStatementOut {
+  amount_unrounded: string;
   auto_released_lines: number;
   batch_id: string;
   batch_status: string;
@@ -223,7 +224,6 @@ export interface MeteringStatementOut {
   line_count: number;
   lines?: MeteringLineOut[];
   period: string;
-  period_amount: string;
   prior_cumulative_amount: string;
   supplier_scope: string[];
   unit_price: string;
