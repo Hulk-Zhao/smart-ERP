@@ -213,6 +213,53 @@ def test_missing_dataset_still_returns_data_missing(env, monkeypatch):
     assert response.json()["code"] == "E-DATA-MISSING"
 
 
+def test_no_usable_price_uses_one_code_regardless_of_require_switch(env, monkeypatch):
+    """口径 A：错误码表示发生了什么，开关取值只进 context。
+
+    - require=true + 无合同价 → 建批次 503 `E-PRICE-MISSING`，`source=contract`；
+    - require=false + 无合同价 + env 未配置 → 建批次 201，但账单读取仍 503
+      **同一个码**，`source=env`；不得静默出 0 元账单。
+
+    任一支改回 `E-DATA-MISSING`、或按开关给出两个不同码，这条用例都会红。
+    """
+
+    monkeypatch.setenv("ERP_METERING_CURRENCY", "CNY")
+    monkeypatch.delenv("ERP_METERING_UNIT_PRICE", raising=False)
+    monkeypatch.setenv("ERP_METERING_REQUIRE_CONTRACT_PRICE", "true")
+    env.container.price_book = FakePriceBook()
+
+    strict = env.client.post(
+        f"{PREFIX}/recon/runs", json=_body(env), headers=env.headers("initiator", "k-a-strict")
+    )
+    assert strict.status_code == 503, strict.text
+    strict_body = strict.json()
+    assert strict_body["code"] == "E-PRICE-MISSING"
+    assert strict_body["context"]["source"] == "contract"
+    assert strict_body["context"]["require_contract_price"] == "true"
+
+    # 同一根因，仅开关不同：批次可以先建，但出账必须仍用同一个码。
+    monkeypatch.setenv("ERP_METERING_REQUIRE_CONTRACT_PRICE", "false")
+    loose_body = _body(env)
+    loose_body["dataset"]["our_lines"][0]["doc_no"] = "PO-2"
+    loose_body["dataset"]["supplier_lines"][0]["doc_no"] = "PO-2"
+    run = env.client.post(
+        f"{PREFIX}/recon/runs", json=loose_body, headers=env.headers("initiator", "k-a-loose")
+    )
+    assert run.status_code == 201, run.text
+
+    loose = env.client.get(
+        f"{PREFIX}/metering/batches/{run.json()['batch_id']}/statement",
+        params=env.scope_params(system_ids=[SYSTEM, STATEMENT]),
+        headers=env.headers(),
+    )
+    assert loose.status_code == 503, loose.text
+    loose_body_json = loose.json()
+    assert loose_body_json["code"] == "E-PRICE-MISSING"
+    assert loose_body_json["code"] != "E-DATA-MISSING"
+    assert loose_body_json["context"]["source"] == "env"
+    assert loose_body_json["context"]["require_contract_price"] == "false"
+
+
 def test_unit_price_source_is_a_closed_enum() -> None:
     assert UnitPriceSource.parse("contract_price") is UnitPriceSource.CONTRACT_PRICE
     assert UnitPriceSource.parse("env_fallback") is UnitPriceSource.ENV_FALLBACK

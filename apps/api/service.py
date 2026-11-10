@@ -1015,12 +1015,15 @@ async def _price_snapshot(
     - 无价且 ``require=true`` → 不回退 env，返回 ``E-PRICE-MISSING`` /
       ``E-PRICE-CURRENCY``（有价但币种不符）并保持四字段全 NULL；
     - 无价且 ``require=false`` → 显式回落 ``ERP_METERING_UNIT_PRICE``（``env_fallback``）；
-      env 也未配置时同样保持全 NULL（旧批次行为，读取时再按原规则报 503）。
+      env 也未配置时同样保持全 NULL，账单读取时统一报 ``E-PRICE-MISSING``
+      （口径 A：无任何可用单价只用一个码，开关取值放 context）。
     """
 
     context = {
         "tenant_id": str(snapshot.tenant_id),
         "at": snapshot.created_at.isoformat(),
+        "source": "contract",
+        "require_contract_price": str(require_contract_price()).lower(),
     }
     try:
         currency = metering_currency()
@@ -1119,8 +1122,19 @@ def _metering_policy(container: ApiContainer) -> MeteringPolicy:
     try:
         return MeteringPolicy.from_env()
     except MeteringConfigError as exc:
-        # 配置缺失是服务未就绪，不是请求错误；拒绝出账，绝不用默认单价兜底。
-        raise ProblemError(ErrorCode.DATA_MISSING, str(exc), status_code=503) from exc
+        # 口径 A：错误码表示「发生了什么」——无法得到任何可用单价一律 E-PRICE-MISSING。
+        # 开关取值只进 context（source/require_contract_price），不改变错误码，
+        # 否则同一根因会因一个开关给出两个码，运维会当成两件事。
+        # 拒绝出账、绝不用 0 或默认单价兜底。
+        raise ProblemError(
+            ErrorCode.PRICE_MISSING,
+            str(exc),
+            status_code=503,
+            context={
+                "source": "env",
+                "require_contract_price": str(require_contract_price()).lower(),
+            },
+        ) from exc
 
 
 def _recon_store(container: ApiContainer) -> ReconStore:
@@ -1168,6 +1182,8 @@ def _statement_policy(
             context={
                 "tenant_id": str(snapshot.tenant_id),
                 "at": snapshot.created_at.isoformat(),
+                "source": "contract",
+                "require_contract_price": "true",
             },
         )
     return _metering_policy(container)

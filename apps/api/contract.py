@@ -61,8 +61,12 @@ app 装配由平台底座负责：`apps/main.py` 调用 `install_platform(app)`�
   `data_gaps` 写明 `owner_role`（谁负责提供）与 `action`（需要提供什么）。
 - 单价来源是封闭枚举：`contract_price`（合同价目表快照）或 `env_fallback`
   （`ERP_METERING_UNIT_PRICE` 显式回落）。`ERP_METERING_REQUIRE_CONTRACT_PRICE=true`
-  时禁止回落：无生效价返回 503 `E-PRICE-MISSING`，有价但币种不符返回 503
-  `E-PRICE-CURRENCY`；两者都带 `context.currency/tenant_id/at`，**不回显其他币种单价**。
+  时禁止回落。
+- **口径 A**：只要「无法得到任何可用单价」一律 503 `E-PRICE-MISSING`（不论来自
+  合同价目还是 env 配置）；错误码表示发生了什么，开关取值只进
+  `context.require_contract_price` 与 `context.source`（`contract` / `env`）。
+  `E-PRICE-CURRENCY` 只用于「有价但没有该币种的价」，禁止跨币种折算。
+  两者都带 `context.currency/tenant_id/at`，**不回显其他币种单价**。
 
 ## 对账结果留存（append-only）
 - `POST /v1/recon/runs` 成功后，批次头与逐行快照落库，statement 读持久化快照；
@@ -105,13 +109,13 @@ app 装配由平台底座负责：`apps/main.py` 调用 `install_platform(app)`�
 | 422 | E-DATA-MISSING | 缺数据（数据集为空、原因/分类等必填项缺失） |
 | 422 | E-PARSE-FAILED | 入参/游标/金额解析失败 |
 | 503 | E-CONN-UNAVAILABLE | 连接器不可用或凭据交换失败 |
-| 503 | E-DATA-MISSING | 计量配置缺失（未配置 ERP_METERING_UNIT_PRICE） |
-| 503 | E-PRICE-MISSING | 合同价目表无生效价（`ERP_METERING_REQUIRE_CONTRACT_PRICE=true`） |
+| 503 | E-PRICE-MISSING | 无法得到任何可用单价（合同价目无生效价，或 env 单价未配置） |
 | 503 | E-PRICE-CURRENCY | 价目表有价但无批次币种的价，禁止跨币种折算 |
 
-`E-DATA-MISSING` 只表示「数据/配置缺失」（422 请求侧缺必填数据、503 服务侧配置缺失）；
-`E-PRICE-*` 专指「合同价目」这条配置链，处理人是商务/运维（补价格表、核对币种），
-与「输入单据不全」的 `E-DATA-MISSING` 分开；
+`E-DATA-MISSING` 只用于**输入数据缺失**（422：数据集为空、原因/分类等必填项缺失），
+不再用于 503 的计量配置缺失；「没有可用单价」统一用 `E-PRICE-MISSING`，
+`context.source`（`contract` / `env`）与 `context.require_contract_price` 说明是哪条链、
+开关取什么值，运维据此决定找商务补价还是改配置；
 凡「对象不存在」一律 404 `E-RESOURCE-NOTFOUND`，客户端不必再用字符串猜语义。
 """
 
