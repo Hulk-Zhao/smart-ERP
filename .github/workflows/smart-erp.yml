@@ -1,11 +1,13 @@
 ﻿name: smart-erp CI
 
 # 依据 docs/product/tech/02-并发开发路线.md §2.9 S8 与 §4.6：
-#   本流水线只做「静态校验 + lint + 单元测试」，**不含任何部署步骤**
-#   （镜像构建、docker save、scp、docker load、compose up 都在发布序列里人工/发布机执行）。
+#   流水线 = 静态校验 + lint + 单元测试 + 镜像构建门禁；**不含任何部署步骤**
+#   （docker save、scp、docker load、compose up 仍在发布序列里由发布机执行）。
 #
-# 为什么没有镜像构建：2 核构建机之外再在 CI 里 build 一遍会产生「CI 绿但现场包不同」的
-# 双源问题；镜像由 scripts/build-images.sh 在发布机产出并计算 sha256。
+# 关于镜像构建（T806）：只 build、不 push、不产出发布包，目的是挡住
+# 「代码/依赖/契约改了但镜像起不来」这一类回归；发布用的 tar 与 sha256 仍由
+# scripts/build-images.sh 在发布机产出，两套职责不重叠。
+# 触发范围用 changes job 过滤（见下），避免每次 PR 全量构建四镜像。
 
 on:
   push:
@@ -34,6 +36,61 @@ env:
   PYTHON_VERSION: "3.12"
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # 0. 变更范围：决定镜像构建是否需要跑
+  #    `on.paths` 会过滤整条流水线（docs 改动就不跑 lint/测试了），所以路径过滤
+  #    放在 job 级：只有下列路径变化才构建镜像。
+  #    deploy/**                 compose / .env.example / 发布清单
+  #    projects/smart-ERP/docker/**  四个 Dockerfile 与 nginx 配置
+  #    contracts/**              web 构建期要拷进去的契约
+  #    web/**                    web 镜像源码
+  #    apps/**                   三个 Python 镜像的源码
+  #    tests/**                  部署面测试变化往往伴随编排/镜像变化
+  #    pyproject.toml            依赖变更会影响全部 Python 镜像
+  # ---------------------------------------------------------------------------
+  changes:
+    name: 变更范围
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      images: ${{ steps.diff.outputs.images }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: diff
+        name: 判断是否触及镜像相关路径
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          head_sha="${GITHUB_SHA}"
+          if [ "$EVENT" = "pull_request" ]; then
+            base="$PR_BASE"
+          elif [ -n "${PUSH_BEFORE:-}" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            base="$PUSH_BEFORE"
+          else
+            # workflow_dispatch 或新分支：退回上一个 commit
+            base="$(git rev-parse "${head_sha}~1" 2>/dev/null || true)"
+          fi
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "无法确定基线，保守起见执行镜像构建"
+            echo "images=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$base" "$head_sha")"
+          echo "基线：$base"
+          echo "变更文件："
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -Eq '^(deploy/|projects/smart-ERP/docker/|contracts/|web/|apps/|tests/|pyproject\.toml$)'; then
+            echo "images=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "images=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # ---------------------------------------------------------------------------
   # 1. 部署面静态校验：compose 能解析、内存预算不超标、变量齐全、探针路径真实
   # ---------------------------------------------------------------------------
@@ -242,3 +299,40 @@ jobs:
 
       - name: 生产构建
         run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # 5. 镜像构建（T806）：四个镜像都 build，只加载到 runner 本地，不 push 任何仓库
+  #    任一镜像构建失败 => 该 matrix 分支红 => 整个 job 红。
+  #    不推仓库：没有 docker/login-action / push，permissions 也只有 contents: read。
+  # ---------------------------------------------------------------------------
+  image-build:
+    name: 镜像构建（${{ matrix.image }}，不推送）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: changes
+    if: needs.changes.outputs.images == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: app
+            dockerfile: projects/smart-ERP/docker/api.Dockerfile
+          - image: connector-gw
+            dockerfile: projects/smart-ERP/docker/connector-gw.Dockerfile
+          - image: doc
+            dockerfile: projects/smart-ERP/docker/docparse.Dockerfile
+          - image: web
+            dockerfile: projects/smart-ERP/docker/web.Dockerfile
+            extra_args: --build-arg ERP_WEB_BASE=/demo/smart-erp/
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: docker build（${{ matrix.image }}）
+        env:
+          EXTRA_ARGS: ${{ matrix.extra_args }}
+        run: |
+          set -euo pipefail
+          tag="ci-${GITHUB_SHA}"
+          docker build --file "${{ matrix.dockerfile }}" --tag "smart-erp/${{ matrix.image }}:${tag}" ${EXTRA_ARGS} .
+          docker image inspect "smart-erp/${{ matrix.image }}:${tag}" \
+            --format '构建成功：${{ matrix.image }} {{.Id}} {{.Size}} bytes'
