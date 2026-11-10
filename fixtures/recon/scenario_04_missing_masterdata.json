@@ -1,0 +1,72 @@
+{
+  "name": "scenario_04_missing_masterdata",
+  "description": "缺主数据降级：单位换算缺失 + 物料未绑定 → 无法对账（缺失清单），不输出任何匹配/差异结论",
+  "input": {
+    "scope": {
+      "org_id": "ORG-DEMO",
+      "period": "2026-10",
+      "system_ids": ["ERP", "STATEMENT"]
+    },
+    "suppliers": ["SUP-DEMO-03"],
+    "options": {
+      "tolerance": {"amount": "0.01", "price": "0.0001", "qty": "0.0001"}
+    },
+    "master_data": {
+      "suppliers": [
+        {"code": "SUP-DEMO-03", "name": "示例供应商三", "tax_no": "91310000DEMO00003X"}
+      ],
+      "items": [
+        {"code": "IT-3001", "name": "示例注塑件", "base_unit": "PCS"}
+      ],
+      "unit_conversions": []
+    },
+    "our_lines": [
+      {
+        "system": "ERP",
+        "doc_no": "PO-2026-0004",
+        "line_no": 1,
+        "supplier_code": "SUP-DEMO-03",
+        "item_code": "IT-3001",
+        "qty": "1000",
+        "unit": "PCS",
+        "unit_price": "2",
+        "amount": "2000",
+        "period": "2026-10"
+      }
+    ],
+    "supplier_lines": [
+      {
+        "system": "STATEMENT",
+        "doc_no": "INV-S-4001",
+        "line_no": 1,
+        "supplier_code": "SUP-DEMO-03",
+        "item_code": "IT-3001",
+        "qty": "10",
+        "unit": "箱",
+        "unit_price": "200",
+        "amount": "2000",
+        "period": "2026-10"
+      },
+      {
+        "system": "STATEMENT",
+        "doc_no": "INV-S-4001",
+        "line_no": 2,
+        "supplier_code": "SUP-DEMO-03",
+        "item_code": "IT-3099",
+        "qty": "5",
+        "unit": "箱",
+        "unit_price": "100",
+        "amount": "500",
+        "period": "2026-10"
+      }
+    ]
+  },
+  "expected": {
+    "batch_status": "无法对账",
+    "conclusive": false,
+    "matched": 0,
+    "diff_types": [],
+    "diff_amount": "0",
+    "missing_kinds": ["单位换算缺失", "物料未绑定"]
+  }
+}
