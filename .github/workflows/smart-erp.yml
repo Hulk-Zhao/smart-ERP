@@ -29,7 +29,11 @@ on:
 
 concurrency:
   group: smart-erp-ci-${{ github.ref }}
-  cancel-in-progress: true
+  # main 上的每一个合入 sha 都必须各自跑完全量套件：push 到 main 一律不取消。
+  # 「主干随时可构建 / 可起 / 测试绿」是对每个 commit 的要求，被取消的 run
+  # 等于那个 sha 从未验证过；同一个 sha 的重复触发由 GitHub 合并成同一个 run，
+  # 不需要靠 cancel 去重。PR 上仍取消旧 run，只省资源、不影响 main 的完整性。
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
