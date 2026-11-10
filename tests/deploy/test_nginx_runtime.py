@@ -155,14 +155,27 @@ class NginxRuntimeTest(unittest.TestCase):
             "urllib.request.urlopen('http://127.0.0.1:8010/healthz', timeout=2).read()"
         )
         deadline = time.time() + timeout
-        logs = ""
+        last_probe = ""
         while time.time() < deadline:
-            if _docker("exec", cls.api, "python", "-c", script).returncode == 0:
+            probe = _docker("exec", cls.api, "python", "-c", script)
+            if probe.returncode == 0:
                 return
-            logs = _docker("logs", "--tail", "40", cls.api).stdout
+            last_probe = f"rc={probe.returncode} stdout={probe.stdout[-500:]!r} " \
+                         f"stderr={probe.stderr[-500:]!r}"
             time.sleep(1)
+        state = _docker(
+            "inspect", "--format",
+            "{{.State.Status}} exit={{.State.ExitCode}} "
+            "started={{.State.StartedAt}} err={{.State.Error}}",
+            cls.api,
+        )
+        logs = _docker("logs", cls.api)
         cls._cleanup()
-        raise AssertionError(f"api 在 {int(timeout)}s 内未就绪；日志：\n{logs[-2000:]}")
+        raise AssertionError(
+            f"api 在 {int(timeout)}s 内未就绪；最后一次探针：{last_probe}；"
+            f"state={state.stdout.strip()}{state.stderr.strip()}；"
+            f"stdout={logs.stdout[-1500:]!r} stderr={logs.stderr[-1500:]!r}"
+        )
 
     def _api_ipv4(self) -> str:
         inspected = _docker(
