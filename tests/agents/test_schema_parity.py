@@ -65,6 +65,7 @@ def test_runtime_tables_are_in_both_sides() -> None:
         "erp.audit_guard_state",
         "erp.worker_heartbeat",
         "erp.scheduler_lease",
+        "erp.metering_price_book",
     }
     assert expected <= set(table_names())
     assert expected <= _migrated_tables()

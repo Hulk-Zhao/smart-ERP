@@ -85,6 +85,7 @@ def _rebuild_container(store_path) -> tuple[ApiContainer, str]:
         connectors={cf.SYSTEM: cf.FakeConnector()},
         scenes={cf.SCENE: SceneSpec(code=cf.SCENE, max_level=WriteLevel.W2)},
         recon_store=FileReconStore(store_path),
+        price_book=cf.EmptyPriceBook(),
     )
     container.actions.register(cf._reverse_action())
     container.actions.register(cf._forward_action())

@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 
 from apps.api import configure_container, reset_container
 from apps.api.container import ApiContainer
+from apps.api.price_book import PriceLookup
 from apps.api.recon_store import FileReconStore
 from apps.api.store import PendingWrite, TicketRecord
 from apps.main import create_app
@@ -166,6 +167,13 @@ def _principal(user_id: UUID, roles: frozenset[str]) -> UserPrincipal:
     )
 
 
+class EmptyPriceBook:
+    """测试用空价目端口：不连库，等价于「价格表一行都没有」。"""
+
+    async def effective_price(self, *, tenant_id, currency, at):
+        return PriceLookup(quote=None, has_other_currency_price=False)
+
+
 @dataclass
 class ApiEnv:
     client: TestClient
@@ -237,6 +245,8 @@ def env(tmp_path: Path) -> ApiEnv:
         connectors={SYSTEM: connector},
         scenes={SCENE: SceneSpec(code=SCENE, max_level=WriteLevel.W2)},
         recon_store=store,
+        # 不连库：默认价目为空，走 env 回落或全 NULL（需要真价目时用例自行注入）。
+        price_book=EmptyPriceBook(),
     )
     container.actions.register(_reverse_action())
     container.actions.register(_forward_action())

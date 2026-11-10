@@ -1,6 +1,6 @@
 """统一错误响应：所有异常都落成 RFC 9457 ``application/problem+json``，且带 ``trace_id``。
 
-错误码沿用 ``contracts/errors/codes.v1.json`` 的 18 个 ``E-*``（冻结契约，改码必须先改契约）。
+错误码沿用 ``contracts/errors/codes.v1.json`` 的 20 个 ``E-*``（冻结契约，改码必须先改契约）。
 传输层异常（405/500 等）没有专属业务码，按语义就近映射到现有码，响应状态码仍保留
 原始 HTTP 状态，避免为了包装层新增错误码而破坏冻结契约。
 """
@@ -41,11 +41,14 @@ class ProblemError(Exception):
         detail: str,
         *,
         status_code: int | None = None,
+        context: dict[str, str] | None = None,
     ) -> None:
         super().__init__(detail)
         self.code = code
         self.detail = detail
         self.status_code = status_code or ERROR_SPECS[code].http_status
+        # 结构化排障字段（currency / tenant_id / at）；禁止回显他人合同价。
+        self.context = context
 
 
 def _code_for_status(status_code: int) -> ErrorCode:
@@ -61,10 +64,13 @@ def problem_response(
     *,
     status_code: int,
     headers: dict[str, str] | None = None,
+    context: dict[str, str] | None = None,
 ) -> JSONResponse:
     """构造 problem+json 响应；``trace_id`` 取自当前请求上下文。"""
 
-    body = problem(code, detail, trace_id=current_trace_id() or None)
+    body = problem(
+        code, detail, trace_id=current_trace_id() or None, context=context
+    )
     return JSONResponse(
         status_code=status_code,
         content=body.model_dump(mode="json"),
@@ -81,7 +87,12 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(ProblemError)
     async def _handle_problem_error(_: Request, exc: ProblemError) -> JSONResponse:
-        return problem_response(exc.code, exc.detail, status_code=exc.status_code)
+        return problem_response(
+            exc.code,
+            exc.detail,
+            status_code=exc.status_code,
+            context=exc.context,
+        )
 
     @app.exception_handler(RequestValidationError)
     async def _handle_validation(_: Request, exc: RequestValidationError) -> JSONResponse:

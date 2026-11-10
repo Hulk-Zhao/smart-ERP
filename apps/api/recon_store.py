@@ -27,7 +27,7 @@ from uuid import UUID, uuid4
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
-from apps.api.recon_snapshot import BatchSnapshot, SnapshotLine
+from apps.api.recon_snapshot import BatchSnapshot, SnapshotLine, UnitPriceSource
 
 EVENT_WINDOW_SECONDS = 600
 
@@ -90,6 +90,16 @@ def snapshot_to_dict(snapshot: BatchSnapshot) -> dict[str, Any]:
         "created_by": str(snapshot.created_by),
         "created_at": snapshot.created_at.isoformat(),
         "view": snapshot.view,
+        "unit_price": None
+        if snapshot.unit_price is None
+        else f"{snapshot.unit_price:.4f}",
+        "currency": snapshot.currency,
+        "unit_price_source": None
+        if snapshot.unit_price_source is None
+        else snapshot.unit_price_source.value,
+        "price_book_id": None
+        if snapshot.price_book_id is None
+        else str(snapshot.price_book_id),
         "lines": [
             {
                 "line_no": line.line_no,
@@ -131,6 +141,17 @@ def snapshot_from_dict(payload: Mapping[str, Any]) -> BatchSnapshot:
         created_at=datetime.fromisoformat(str(payload["created_at"])),
         lines=tuple(_line_from_dict(item) for item in payload["lines"]),
         view=payload.get("view"),
+        # 旧文件没有这四个键；有键但值非法（未知来源）必须报错，不做 best-effort。
+        unit_price=None
+        if payload.get("unit_price") is None
+        else Decimal(str(payload["unit_price"])),
+        currency=payload.get("currency"),
+        unit_price_source=None
+        if payload.get("unit_price_source") is None
+        else UnitPriceSource.parse(str(payload["unit_price_source"])),
+        price_book_id=None
+        if not payload.get("price_book_id")
+        else UUID(str(payload["price_book_id"])),
     )
 
 
@@ -331,13 +352,17 @@ class SqlReconStore:
                               (id, tenant_id, org_id, period, status, conclusive,
                                status_reason, suppliers, system_ids, metrics,
                                input_fingerprint, rerun_of, rerun_reason,
-                               created_by, created_at, result_view)
+                               created_by, created_at, result_view,
+                               unit_price, currency, unit_price_source,
+                               price_book_id)
                             VALUES
                               (:id, :tenant_id, :org_id, :period, :status, :conclusive,
                                :status_reason, :suppliers, :system_ids,
                                CAST(:metrics AS jsonb), :input_fingerprint,
                                :rerun_of, :rerun_reason, :created_by, :created_at,
-                               CAST(:result_view AS jsonb))
+                               CAST(:result_view AS jsonb),
+                               :unit_price, :currency, :unit_price_source,
+                               :price_book_id)
                             ON CONFLICT (id) DO NOTHING
                             RETURNING id
                             """
@@ -363,6 +388,13 @@ class SqlReconStore:
                             "result_view": None
                             if snapshot.view is None
                             else json.dumps(snapshot.view, ensure_ascii=False),
+                            # 四字段同一条 INSERT 落库；取价失败时为整组 NULL。
+                            "unit_price": snapshot.unit_price,
+                            "currency": snapshot.currency,
+                            "unit_price_source": None
+                            if snapshot.unit_price_source is None
+                            else snapshot.unit_price_source.value,
+                            "price_book_id": snapshot.price_book_id,
                         },
                     )
                 ).first()
@@ -422,7 +454,9 @@ class SqlReconStore:
                         SELECT id, tenant_id, org_id, period, status, conclusive,
                                status_reason, suppliers, system_ids, metrics,
                                input_fingerprint, rerun_of, rerun_reason,
-                               created_by, created_at, result_view
+                               created_by, created_at, result_view,
+                               unit_price, currency, unit_price_source,
+                               price_book_id
                         FROM erp.recon_batch
                         WHERE id = :id AND tenant_id = :tenant_id
                         """
@@ -466,6 +500,12 @@ class SqlReconStore:
             created_at=batch["created_at"],
             lines=lines,
             view=batch["result_view"],
+            unit_price=batch["unit_price"],
+            currency=batch["currency"],
+            unit_price_source=None
+            if batch["unit_price_source"] is None
+            else UnitPriceSource.parse(str(batch["unit_price_source"])),
+            price_book_id=batch["price_book_id"],
         )
 
     async def append_event(

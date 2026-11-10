@@ -30,6 +30,7 @@ MODEL_MODULES: tuple[str, ...] = (
     "apps.security.models",
     "apps.connectors.db.models",
     "apps.recon.db",
+    "apps.api.db",
 )
 
 

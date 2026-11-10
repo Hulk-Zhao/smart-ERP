@@ -127,7 +127,8 @@ def test_statement_classifies_lines_and_amounts(env, monkeypatch):
     assert body["customer_reason_lines"] is None
     assert body["human_reviewed_lines"] is None
     assert body["unit_price"] == "0.3000"
-    assert body["unit_price_source"] == "ERP_METERING_UNIT_PRICE"
+    # 来源是封闭枚举（contract_price / env_fallback），不是自由字符串。
+    assert body["unit_price_source"] == "env_fallback"
     assert body["period_amount"] == "0.3000"
     assert body["prior_cumulative_amount"] == "1.0000"
     assert body["cumulative_amount"] == "1.3000"
@@ -304,6 +305,9 @@ def test_statement_requires_configured_unit_price(env, monkeypatch):
 
     response = _statement(env, batch_id)
     assert response.status_code == 503, response.text
-    assert response.json()["code"] == "E-DATA-MISSING"
+    # 口径 A：「没有可用单价」不因 require 开关换成另一种码。
+    assert response.json()["code"] == "E-PRICE-MISSING"
+    assert response.json()["context"]["source"] == "env"
+    assert response.json()["context"]["require_contract_price"] == "false"
     assert "ERP_METERING_UNIT_PRICE" in response.json()["detail"]
     assert env.connector.writes == []

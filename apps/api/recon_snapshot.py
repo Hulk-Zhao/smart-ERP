@@ -12,11 +12,33 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 from typing import Any
 from uuid import UUID
 
 from apps.api.store import ReconBatchRecord
 from apps.recon.models import LineStatus, MatchResultLine
+
+
+class UnitPriceSource(str, Enum):
+    """单价来源的**封闭枚举**（0008）。
+
+    数据库 ``ck_recon_batch_price_snapshot`` 只接受这两个值；读侧用 :meth:`parse`
+    校验，未知值直接报错，不允许把自由字符串写进快照（否则「来源」会退化成注释）。
+    """
+
+    CONTRACT_PRICE = "contract_price"
+    ENV_FALLBACK = "env_fallback"
+
+    @classmethod
+    def parse(cls, value: str) -> UnitPriceSource:
+        try:
+            return cls(value)
+        except ValueError as exc:
+            allowed = ", ".join(member.value for member in cls)
+            raise ValueError(
+                f"未知的 unit_price_source: {value!r}；只允许 {allowed}"
+            ) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +86,12 @@ class BatchSnapshot:
     # 版本直接报错，不做 best-effort 解析。该字段是批次产物的一部分，不是可丢弃
     # 缓存：diffs 的金额/建议与 missing_items 无法从 recon_line 重建。
     view: Mapping[str, Any] | None = None
+    # 批次取价快照（0008）：四字段**同生共死**。取价失败时全为 None，
+    # 不允许「写了价却没写来源」这种半套快照（DB 侧另有 CHECK 兜底）。
+    unit_price: Decimal | None = None
+    currency: str | None = None
+    unit_price_source: UnitPriceSource | None = None
+    price_book_id: UUID | None = None
 
     def in_scope(self, *, org_id: str, period: str, system_ids: tuple[str, ...]) -> bool:
         if self.org_id != org_id or self.period != period:
@@ -188,5 +216,6 @@ def _num(value: Decimal) -> str:
 __all__ = [
     "BatchSnapshot",
     "SnapshotLine",
+    "UnitPriceSource",
     "snapshot_from_batch",
 ]

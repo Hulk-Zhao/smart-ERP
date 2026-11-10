@@ -22,7 +22,7 @@ describe('C16 契约 → TypeScript 生成链路', () => {
   });
 
   it('生成物 sha256 与契约原文一致', () => {
-    const raw = readFileSync(CONTRACT, 'utf8');
+    const raw = readFileSync(CONTRACT, 'utf8').replace(/\r\n/g, '\n');
     const sha = createHash('sha256').update(raw).digest('hex');
     const generated = readFileSync(GENERATED, 'utf8');
     expect(generated).toContain(`CONTRACT_SHA256 = "${sha}"`);
