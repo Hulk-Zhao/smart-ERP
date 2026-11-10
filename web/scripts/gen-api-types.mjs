@@ -212,10 +212,13 @@ function renderOperations(spec, nameMap) {
 }
 
 export function generate(sourceText) {
-  const spec = JSON.parse(sourceText);
+  // 仓库 blob 为 LF，工作树可能是 CRLF（Windows checkout/复制）；先归一化再解析与取摘要，
+  // 否则同一份契约会因行尾产生「假漂移」，且本地生成的 sha 在 CI 上必然对不上。
+  const normalized = String(sourceText).replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  const spec = JSON.parse(normalized);
   const schemas = spec.components?.schemas ?? {};
   const nameMap = buildNameMap(schemas);
-  const sha256 = createHash('sha256').update(sourceText).digest('hex');
+  const sha256 = createHash('sha256').update(normalized).digest('hex');
   const operations = renderOperations(spec, nameMap);
   const writeOperations = Object.entries(spec.paths)
     .filter(([, item]) => item.post)

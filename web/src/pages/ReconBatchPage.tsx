@@ -20,7 +20,7 @@ function Metric({ label, value, hint, tone = '' }: { label: string; value: strin
 
 export function ReconBatchPage() {
   const { batchId = '' } = useParams();
-  const [diffType, setDiffType] = useState('');
+  const [diffType, setDiffType] = useState<DiffTypeCode | ''>('');
   const [needsManual, setNeedsManual] = useState(false);
   const [supplier, setSupplier] = useState('');
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -35,8 +35,8 @@ export function ReconBatchPage() {
     queryKey: ['recon', batchId, 'diffs', diffType, needsManual, supplier, cursor ?? 'first'],
     queryFn: () =>
       api.listReconDiffs(batchId, {
-        // diffType 只可能来自 DIFF_TYPES 的 code，取值域与契约 DiffTypeCode 一致
-        diff_type: (diffType || undefined) as DiffTypeCode | undefined,
+        // diffType 来自 DIFF_TYPES.code，已是契约 DiffTypeCode，无需断言。
+        diff_type: diffType || undefined,
         needs_manual: needsManual ? true : undefined,
         supplier_code: supplier.trim() || undefined,
         cursor: cursor ?? undefined,

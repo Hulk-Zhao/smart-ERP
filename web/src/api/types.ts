@@ -5,6 +5,8 @@
  * 这里只放 UI 需要的标签、颜色、状态机展示顺序（源自 contracts/ticket/state_machine.v1.json）。
  */
 
+import type { DiffTypeCode } from './generated/contract';
+
 export type {
   ActionIn,
   ActionOut,
@@ -127,7 +129,8 @@ export const WRITE_LEVEL_LABELS: Record<string, string> = {
 };
 
 export interface DiffTypeMeta {
-  code: string;
+  // 直接从契约生成物取联合类型：新增/改名会在编译期报错，避免标签比枚举多一类或少一类。
+  code: DiffTypeCode;
   label: string;
   tone: string;
 }
@@ -147,7 +150,7 @@ export const DIFF_TYPES: DiffTypeMeta[] = [
   { code: 'rounding_tolerance', label: '金额舍入容差', tone: 'bg-lime-50 text-lime-700 ring-lime-200' },
 ];
 
-export function diffTypeMeta(code: string | null | undefined): DiffTypeMeta {
+export function diffTypeMeta(code: string | null | undefined): { code: string; label: string; tone: string } {
   return (
     DIFF_TYPES.find((item) => item.code === code) ?? {
       code: code ?? 'unknown',
