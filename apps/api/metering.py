@@ -21,10 +21,10 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 from apps.api.recon_snapshot import BatchSnapshot, SnapshotLine
@@ -47,6 +47,8 @@ ENV_PRIOR_AMOUNT = "ERP_METERING_PRIOR_AMOUNT"
 
 UNIT_PRICE_SOURCE = ENV_UNIT_PRICE
 MONEY_EXP = Decimal("0.0001")
+#: 账期账单精度：只在汇总层取整一次（见 ``settle_period_amount``）。
+PERIOD_MONEY_EXP = Decimal("0.01")
 DEFAULT_UNIT_LABEL = "行"
 
 #: 供应商侧「非自动放行、也非待人工」的状态 → 对外不计费原因码。
@@ -166,6 +168,20 @@ def _decimal(name: str, raw: str) -> Decimal:
         raise MeteringConfigError(f"{name} 必须是十进制数，实际为 {raw!r}") from exc
 
 
+def settle_period_amount(batch_amounts: Iterable[Decimal]) -> Decimal:
+    """账期应付 = 各批次 4 位金额相加后**一次** ``ROUND_HALF_UP`` 到 2 位。
+
+    批次级金额（``build_statement`` 的 ``period_amount``）始终是 4 位、不取整，
+    取整只发生在这一层；两者不一致时**以账期账单为法律口径**。
+    算例：20 个批次 × ``0.3333`` = ``6.6666`` → ``6.67``；
+    若逐批次先取整再相加（``0.33 × 20``）= ``6.60``，差 1 分，客户按批次核、
+    按总额付，两边对不上就是争议——这就是「不在批次层取整」的实证。
+    """
+    return sum(batch_amounts, Decimal(0)).quantize(
+        PERIOD_MONEY_EXP, rounding=ROUND_HALF_UP
+    )
+
+
 def build_statement(
     snapshot: BatchSnapshot,
     policy: MeteringPolicy,
@@ -203,15 +219,25 @@ def build_statement(
     customer_reason: int | None = None
     billable_count = len(by_bucket[BillingBucket.BILLABLE])
 
-    unit_price = policy.unit_price.quantize(MONEY_EXP)
-    period_amount = (Decimal(billable_count) * unit_price).quantize(MONEY_EXP)
-    prior_amount = policy.prior_amount.quantize(MONEY_EXP)
-    cumulative = (prior_amount + period_amount).quantize(MONEY_EXP)
+    # 批次级金额：4 位、不取整（``amount`` 之类的名字会被当成本期应付，禁用）。
+    # 单价从配置读入时先归一到 4 位，保证「单价 × 整数行数」可精确表示。
+    unit_price = policy.unit_price.quantize(MONEY_EXP, rounding=ROUND_HALF_UP)
+    period_amount = (Decimal(billable_count) * unit_price).quantize(
+        MONEY_EXP, rounding=ROUND_HALF_UP
+    )
+    prior_amount = policy.prior_amount.quantize(MONEY_EXP, rounding=ROUND_HALF_UP)
+    cumulative = (prior_amount + period_amount).quantize(
+        MONEY_EXP, rounding=ROUND_HALF_UP
+    )
     cap_amount = (
-        policy.cap_amount.quantize(MONEY_EXP) if policy.cap_amount is not None else None
+        policy.cap_amount.quantize(MONEY_EXP, rounding=ROUND_HALF_UP)
+        if policy.cap_amount is not None
+        else None
     )
     cap_remaining = (
-        (cap_amount - cumulative).quantize(MONEY_EXP) if cap_amount is not None else None
+        (cap_amount - cumulative).quantize(MONEY_EXP, rounding=ROUND_HALF_UP)
+        if cap_amount is not None
+        else None
     )
     cap_exceeded = cap_remaining is not None and cap_remaining < 0
 
