@@ -22,6 +22,12 @@ AAAA，而 api 只监听 IPv4，于是 502（同日 CI 事故）。所以这里�
   python -m pytest tests/deploy/test_nginx_runtime.py -q -o addopts=""
 
 镜像缺失时失败而不是跳过：跳过会让这条门禁在主干上等于不存在。
+
+边界（不要扩大解读）：本用例只起 api（不带 PG/Redis），验证的是
+「nginx 配置语义 + 上游可达 + 地址族一致」——`/healthz`（含 rewrite 空匹配）与
+`/openapi.json` 能经前缀拿到 200，不代表 api 全量可用。api 若在 CI 里起不来，
+失败信息会带容器 State/ExitCode 与 stdout/stderr；2026-11-11 就是这样发现
+`apps.main` 导入 `observability` 失败（镜像漏包），而不是 nginx 的问题。
 """
 
 from __future__ import annotations

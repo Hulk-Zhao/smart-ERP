@@ -49,7 +49,9 @@ pdf = [
 [tool.setuptools.packages.find]
 # core / tools 是 C15 常驻进程入口（python -m core.runtime.worker 等），
 # 只打 apps* 时即使补了文件镜像里也会 ModuleNotFoundError（B-S8-01）。
-include = ["apps*", "core*", "tools*"]
+# observability 是 apps.main 导入期依赖（2026-11-11：漏打后镜像能 build 成功，
+# api 容器一启动就 ModuleNotFoundError → web 反代 502）。
+include = ["apps*", "core*", "tools*", "observability*"]
 namespaces = false
 
 [tool.pytest.ini_options]
