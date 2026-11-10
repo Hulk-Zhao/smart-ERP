@@ -55,7 +55,7 @@ class ScopeIn(BaseModel):
         return tuple(self.system_ids)
 
 
-class Page(BaseModel, Generic[T]):
+class Page(BaseModel, Generic[T]):  # noqa: UP046 - 运行环境 Python 3.11 不支持下述 PEP 695 语法
     items: list[T]
     next_cursor: str | None = None
 
@@ -111,13 +111,18 @@ class TicketDetailOut(TicketOut):
 
 
 class ActionIn(BaseModel):
-    """工单动作入参；``comment`` 同时承担审批意见 / 终止原因（FR-107）。"""
+    """工单动作入参；``comment`` 同时承担审批意见 / 终止原因（FR-107）。
+
+    ``reason`` 单列：回滚他人工单必须填写理由并留审计（FR-1303 / 权限矩阵 §4.5），
+    不能复用 ``comment``——否则「没填理由」与「填了意见」在审计里无法区分。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     scope: ScopeIn
     role: ApprovalRole | None = None
     comment: str = Field(default="", max_length=2000)
+    reason: str | None = Field(default=None, max_length=2000)
     confirmed_manual: bool = False
     fail_code: Literal["F1", "F2", "F3", "F4", "F5", "F6", "F7"] | None = None
 

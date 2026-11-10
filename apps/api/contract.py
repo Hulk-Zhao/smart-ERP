@@ -5,8 +5,8 @@
     python -m apps.api.contract --write   # 重新生成冻结文件
     python -m apps.api.contract --check   # CI/评审校验，漂移即非零退出
 
-契约文件 = ``FastAPI(openapi_version="3.1.0").openapi()`` 的确定性序列化
-（``sort_keys``），因此任何路由/模型变更都会在 ``--check`` 里暴露。
+契约文件 = ``FastAPI().openapi()`` 的确定性序列化（``sort_keys``；OpenAPI 版本取
+FastAPI 默认的 3.1.0），因此任何路由/模型变更都会在 ``--check`` 里暴露。
 """
 
 from __future__ import annotations
@@ -93,14 +93,18 @@ app 装配由平台底座负责：`apps/main.py` 调用 `install_platform(app)`�
 | 403 | E-AUTHZ-002 | 字段范围越界 |
 | 403 | E-POLICY-W3FORBIDDEN | W3 或需要更高权限 |
 | 403 | E-POLICY-LEVEL | 动作未注册/等级不足 |
+| 404 | E-RESOURCE-NOTFOUND | 对象不存在（工单/对账批次/差异；跨租户同样 404） |
 | 409 | E-POLICY-APPROVAL | 审批未满足、审批意见缺失、重复审批 |
 | 409 | E-IDEM-CONFLICT | 同键不同参 |
 | 409 | E-STATE-ILLEGAL | 状态迁移/重放非法 |
 | 409 | E-VERIFY-MISMATCH | 写入校验或审计链校验不一致 |
-| 422 | E-DATA-MISSING | 缺数据（含工单/批次不存在） |
+| 422 | E-DATA-MISSING | 缺数据（数据集为空、原因/分类等必填项缺失） |
 | 422 | E-PARSE-FAILED | 入参/游标/金额解析失败 |
 | 503 | E-CONN-UNAVAILABLE | 连接器不可用或凭据交换失败 |
 | 503 | E-DATA-MISSING | 计量配置缺失（未配置 ERP_METERING_UNIT_PRICE） |
+
+`E-DATA-MISSING` 只表示「数据/配置缺失」（422 请求侧缺必填数据、503 服务侧配置缺失）；
+凡「对象不存在」一律 404 `E-RESOURCE-NOTFOUND`，客户端不必再用字符串猜语义。
 """
 
 

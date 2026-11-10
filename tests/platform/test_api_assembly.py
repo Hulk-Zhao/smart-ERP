@@ -99,7 +99,7 @@ def test_http_exception_is_wrapped_and_keeps_status() -> None:
     assert response.status_code == 404
     assert response.headers["content-type"].startswith("application/problem+json")
     body = response.json()
-    assert body["code"] == ErrorCode.DATA_MISSING.value
+    assert body["code"] == ErrorCode.RESOURCE_NOT_FOUND.value
     assert body["detail"] == "工单不存在"
     assert body["trace_id"] == response.headers["X-Trace-ID"]
 

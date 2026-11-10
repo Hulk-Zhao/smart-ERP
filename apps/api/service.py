@@ -210,7 +210,7 @@ def _require_ticket(
     ticket = container.tickets.get(tenant_id=session.tenant_id, ticket_id=ticket_id)
     if ticket is None:
         raise ProblemError(
-            ErrorCode.DATA_MISSING, f"工单 {ticket_id} 不存在", status_code=404
+            ErrorCode.RESOURCE_NOT_FOUND, f"工单 {ticket_id} 不存在", status_code=404
         )
     return ticket
 
@@ -919,7 +919,7 @@ def _require_batch(
     batch = container.recon_batches.get(batch_id, tenant_id=session.tenant_id)
     if batch is None:
         raise ProblemError(
-            ErrorCode.DATA_MISSING, f"对账批次 {batch_id} 不存在", status_code=404
+            ErrorCode.RESOURCE_NOT_FOUND, f"对账批次 {batch_id} 不存在", status_code=404
         )
     if batch.org_id != scope.org_id or batch.period != scope.period:
         raise ProblemError(
@@ -966,7 +966,7 @@ async def _load_snapshot(
     snapshot = await _recon_store(container).load(batch_id, session.tenant_id)
     if snapshot is None:
         raise ProblemError(
-            ErrorCode.DATA_MISSING, f"对账批次 {batch_id} 不存在", status_code=404
+            ErrorCode.RESOURCE_NOT_FOUND, f"对账批次 {batch_id} 不存在", status_code=404
         )
     if snapshot.org_id != scope.org_id or snapshot.period != scope.period:
         raise ProblemError(
@@ -1111,10 +1111,14 @@ def get_recon_diff(
 
 def _parse_diff_id(diff_id: str, result: ReconResult) -> int:
     if not diff_id.startswith("d") or not diff_id[1:].isdigit():
-        raise ProblemError(ErrorCode.DATA_MISSING, f"差异编号 {diff_id!r} 非法", status_code=404)
+        raise ProblemError(
+            ErrorCode.RESOURCE_NOT_FOUND, f"差异编号 {diff_id!r} 非法", status_code=404
+        )
     index = int(diff_id[1:])
     if index < 0 or index >= len(result.diffs):
-        raise ProblemError(ErrorCode.DATA_MISSING, f"差异 {diff_id} 不存在", status_code=404)
+        raise ProblemError(
+            ErrorCode.RESOURCE_NOT_FOUND, f"差异 {diff_id} 不存在", status_code=404
+        )
     return index
 
 
