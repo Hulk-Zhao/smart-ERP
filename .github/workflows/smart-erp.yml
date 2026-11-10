@@ -10,29 +10,17 @@
 on:
   push:
     branches: [main]
-    paths:
-      - "deploy/smart-erp/**"
-      - "projects/smart-ERP/**"
-      - "scripts/**"
-      - "observability/**"
-      - "tests/**"
-      - "apps/**"
-      - "db/migrations/**"
-      - "contracts/**"
-      - "pyproject.toml"
-      - ".github/workflows/smart-erp.yml"
+    # 触发规则用「排除法」：除下列确定无关的路径外，任何改动都跑 CI。
+    # 反例：白名单式 paths 每新增一种文件类型就会静默漏跑一次——
+    # .git-blame-ignore-revs、docs/**、*.md 都这样漏过，PR 显示零 checks 却被当成「CI 通过」。
+    # 规约：CI 未触发即视为未验证（docs/product/tech/00-协作规约.md §9 第 5 条）。
+    paths-ignore:
+      - "dist/**"
+      - "**/.import_linter_cache/**"
   pull_request:
-    paths:
-      - "deploy/smart-erp/**"
-      - "projects/smart-ERP/**"
-      - "scripts/**"
-      - "observability/**"
-      - "tests/**"
-      - "apps/**"
-      - "db/migrations/**"
-      - "contracts/**"
-      - "pyproject.toml"
-      - ".github/workflows/smart-erp.yml"
+    paths-ignore:
+      - "dist/**"
+      - "**/.import_linter_cache/**"
   workflow_dispatch:
 
 concurrency:
