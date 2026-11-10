@@ -299,10 +299,25 @@ location /erp/api/ {
 > 例如 `set $erp_api_upstream http://api:8010;` + `proxy_pass $erp_api_upstream/;`。
 > nginx 在 `proxy_pass` 使用变量时**不做 location 前缀替换**，URI 会按指令原样发送，
 > 该 location 下的所有请求都被压成这个 URI，全部 404（与后端是否开 `--root-path` 无关）。
-> 若确需保留变量，必须写成 `proxy_pass $erp_api_upstream;` +
-> `rewrite ^/erp/api/(.*)$ /$1 break;`。仓库内 `web-nginx.conf` 已改为字面量
-> `proxy_pass http://api:8010/;`；`tests/deploy` 有静态断言禁止「变量 + URI」，
-> 并有真容器用例直打 `/erp/api/healthz` 与 `/erp/api/openapi.json`（CI deploy-static 执行）。
+> 若确需保留变量，必须写成 `proxy_pass $erp_api_upstream;`（不带 URI）+
+> `rewrite ^/erp/api/(.*)$ /$1 break;`；`(.*)` 空匹配时 `/erp/api/` 会变成 `/`，
+> 不会产生空 URI。
+>
+> **也不要为了剥前缀改回字面量上游**（2026-11-11 CI 事故）：字面量
+> `proxy_pass http://api:8010/;` 会让 nginx 在启动时用系统解析器解析 `api`，
+> `resolver` 上的 `ipv6=off` 随之失效——Docker DNS 同时返回 A/AAAA 时 nginx 可能
+> 选中 AAAA，而 api 只监听 IPv4，结果是 502；api 尚不可解析时更会直接
+> `host not found in upstream "api"` 退出。
+>
+> 因此仓库内 `web-nginx.conf`（**仅本机预览/compose demo 使用**）保留
+> `resolver 127.0.0.11 valid=10s ipv6=off;` + 变量式 `proxy_pass $erp_api_upstream;`
+> + 上面的 `rewrite`。`tests/deploy` 有两层回归：静态断言禁止「变量 + URI」并要求
+> resolver 带 `ipv6=off`；真容器用例在 CI deploy-static 里用 `nginx -T` 校验运行中
+> 配置，并断言「web 经 Docker DNS 解析到的 api 地址族 == api 实际监听的地址族」，
+> 再直打 `/erp/api/healthz`、`/erp/api/openapi.json`。
+>
+> 云上路径不受这条影响：公网 → hk-web nginx → `proxy_pass http://127.0.0.1:8010/;`
+> → 广州宿主 erp_api，不经过 web 容器。
 
 **指标验收口径（三行矩阵，按 1 → 2 → 3 顺序执行，缺一行都不算通过）：**
 
