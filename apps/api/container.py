@@ -31,6 +31,7 @@ from apps.platform.policy.registry import ActionRegistry
 from apps.security.approvals import ApprovalGateAdapter, ApprovalService, TicketFacts
 from apps.security.gate import AccessGate, AccessGrant, AccessRequest
 from apps.security.identity import SessionToken, TokenBroker, UserPrincipal
+from observability.metrics import MetricsRegistry
 
 SESSION_HEADER = "X-Session-Token"
 
@@ -112,6 +113,8 @@ class ApiContainer:
     metering: MeteringPolicy | None = None
     #: 对账持久化端口；None 时使用 PostgreSQL 实现（测试注入 FileReconStore）。
     recon_store: ReconStore | None = None
+    #: 进程内指标注册表；业务埋点与 ``/metrics`` 必须共用这一个实例。
+    metrics: MetricsRegistry = field(default_factory=MetricsRegistry)
     clock: Callable[[], datetime] = field(
         default=lambda: datetime.now(UTC)
     )
