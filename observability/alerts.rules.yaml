@@ -39,16 +39,17 @@ groups:
       # 指标：smart_erp_unresolved_tickets
       # ------------------------------------------------------------------
       - alert: SmartErpUnresolvedTicketsGrowing
+        # max()：各副本若都上报全局 unresolved，取最大值避免重复计数。
         expr: >-
-          (max_over_time(smart_erp_unresolved_tickets[30m])
-           - min_over_time(smart_erp_unresolved_tickets[30m]) > 5)
-          and smart_erp_unresolved_tickets > 10
-        for: 30m
+          (max(smart_erp_unresolved_tickets)
+           - max(smart_erp_unresolved_tickets offset 30m) > 5)
+          and max(smart_erp_unresolved_tickets) > 10
+        for: 10m
         labels:
           severity: P1
           service: smart-erp
         annotations:
-          summary: "unresolved 工单 30 分钟内增长超过 5 且总量 > 10"
+          summary: "unresolved 工单 30 分钟增量 > 5 且总量 > 10（持续 10 分钟）"
           description: >-
             当前 unresolved={{ $value }}。持续增长说明自动处置链路（重试/补偿/人工队列回填）
             没有消化新增失败，而不是一次性的流量抖动。
@@ -62,7 +63,8 @@ groups:
       # 指标：smart_erp_compensation_backlog
       # ------------------------------------------------------------------
       - alert: SmartErpCompensationBacklogHigh
-        expr: max_over_time(smart_erp_compensation_backlog[10m]) > 20
+        # sum()：每个副本各自持有补偿队列，必须相加才是全局积压。
+        expr: sum(smart_erp_compensation_backlog) > 20
         for: 10m
         labels:
           severity: P1
