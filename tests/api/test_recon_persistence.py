@@ -128,6 +128,93 @@ def test_statement_survives_container_rebuild(env, monkeypatch):
     assert after["period_amount"] == "0.3000"
 
 
+def _get(env, token: str, path: str, params: list[tuple[str, str]] | None = None):
+    return env.client.get(
+        f"{PREFIX}{path}",
+        params=params or env.scope_params(system_ids=[cf.SYSTEM, cf.STATEMENT]),
+        headers={"X-Session-Token": token},
+    )
+
+
+def test_read_paths_survive_container_rebuild(env):
+    """重启后运行详情 / 差异列表 / 差异详情仍可访问（账能算，路也要走通）。"""
+
+    our = _line(system=cf.SYSTEM, doc_no="PO-1", item_code="IT-A", amount="50.00")
+    supplier = {
+        **_line(system=cf.STATEMENT, doc_no="PO-1", item_code="IT-A", amount="55.00"),
+        "unit_price": "5.5",
+    }
+    body = {
+        "scope": env.scope(system_ids=[cf.SYSTEM, cf.STATEMENT]),
+        "suppliers": ["SUP-A"],
+        "dataset": {
+            "our_lines": [our],
+            "supplier_lines": [supplier],
+            "master_data": {
+                "suppliers": [{"code": "SUP-A", "name": "供应商A"}],
+                "items": [{"code": "IT-A", "name": "物料A", "base_unit": "PCS"}],
+            },
+            "tolerance": {},
+        },
+    }
+    run = env.client.post(
+        f"{PREFIX}/recon/runs",
+        json=body,
+        headers=env.headers("initiator", "k-read-durable"),
+    )
+    assert run.status_code == 201, run.text
+    batch_id = run.json()["batch_id"]
+    assert run.json()["diff_count"] == 1
+
+    paths = (
+        f"/recon/runs/{batch_id}",
+        f"/recon/runs/{batch_id}/diffs",
+        f"/recon/runs/{batch_id}/diffs/d0",
+    )
+    before = {}
+    for path in paths:
+        response = _get(env, env.headers()["X-Session-Token"], path)
+        assert response.status_code == 200, response.text
+        before[path] = response.json()
+
+    assert env.recon_store_path is not None
+    container, token = _rebuild_container(env.recon_store_path)
+    assert container.recon_batches.get(UUID(batch_id)) is None
+
+    for path in paths:
+        response = _get(env, token, path)
+        assert response.status_code == 200, response.text
+        assert response.json() == before[path]
+
+
+def test_view_projection_missing_or_unknown_version_is_rejected(env):
+    """投影缺失/版本未知时明确报错，不做 best-effort 解析。"""
+
+    run = env.client.post(
+        f"{PREFIX}/recon/runs",
+        json=_body(env),
+        headers=env.headers("initiator", "k-view-version"),
+    )
+    assert run.status_code == 201, run.text
+    batch_id = run.json()["batch_id"]
+    assert env.recon_store_path is not None
+    token = env.headers()["X-Session-Token"]
+    path = f"/recon/runs/{batch_id}"
+
+    def _mutate_view(value: object) -> None:
+        payload = json.loads(env.recon_store_path.read_text(encoding="utf-8"))
+        payload["batches"][batch_id]["view"] = value
+        env.recon_store_path.write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+    for broken in (None, {}, {"view_version": 99, "batch": {}}):
+        _mutate_view(broken)
+        response = _get(env, token, path)
+        assert response.status_code == 503, response.text
+        assert response.json()["code"] == "E-DATA-MISSING"
+
+
 def test_equivalent_batch_is_rejected_without_explicit_rerun(env, monkeypatch):
     _configure_metering(monkeypatch)
     body = _body(env)

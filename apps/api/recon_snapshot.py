@@ -59,6 +59,11 @@ class BatchSnapshot:
     created_by: UUID
     created_at: datetime
     lines: tuple[SnapshotLine, ...]
+    # 批次视图投影（JSON，见 0007_recon_batch_projection）。
+    # NULL = 旧版本写入、未投影；非 NULL 时必须带 ``view_version``，读侧遇到未知
+    # 版本直接报错，不做 best-effort 解析。该字段是批次产物的一部分，不是可丢弃
+    # 缓存：diffs 的金额/建议与 missing_items 无法从 recon_line 重建。
+    view: Mapping[str, Any] | None = None
 
     def in_scope(self, *, org_id: str, period: str, system_ids: tuple[str, ...]) -> bool:
         if self.org_id != org_id or self.period != period:
@@ -72,6 +77,7 @@ def snapshot_from_batch(
     input_fingerprint: str,
     rerun_of: UUID | None = None,
     rerun_reason: str | None = None,
+    view: Mapping[str, Any] | None = None,
 ) -> BatchSnapshot:
     result = batch.result
     supplier_code_by_ref = {
@@ -99,6 +105,7 @@ def snapshot_from_batch(
         created_by=batch.created_by,
         created_at=batch.created_at,
         lines=lines,
+        view=view,
     )
 
 

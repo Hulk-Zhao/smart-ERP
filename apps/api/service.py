@@ -93,7 +93,6 @@ from apps.recon.models import (
     MissingItem,
     Money,
     ReconMetrics,
-    ReconResult,
 )
 from apps.security.approvals import TicketFacts
 from apps.security.gate import AccessGrant, AccessRequest
@@ -947,6 +946,7 @@ async def run_recon(
                 input_fingerprint=input_fingerprint,
                 rerun_of=body.rerun_of,
                 rerun_reason=body.rerun_reason,
+                view=_batch_view(batch),
             )
         )
     except ReconConflict as exc:
@@ -970,30 +970,14 @@ def _recon_raw(scope: Scope, body: ReconRunIn, dataset: Any) -> dict[str, Any]:
     }
 
 
-def _require_batch(
-    container: ApiContainer, session: SessionToken, scope: Scope, batch_id: UUID
-) -> ReconBatchRecord:
-    batch = container.recon_batches.get(batch_id, tenant_id=session.tenant_id)
-    if batch is None:
-        raise ProblemError(
-            ErrorCode.RESOURCE_NOT_FOUND, f"对账批次 {batch_id} 不存在", status_code=404
-        )
-    if batch.org_id != scope.org_id or batch.period != scope.period:
-        raise ProblemError(
-            ErrorCode.AUTHZ_SCOPE, f"对账批次 {batch_id} 不在请求 scope 内"
-        )
-    if not set(batch.system_ids) <= set(scope.system_ids):
-        raise ProblemError(
-            ErrorCode.AUTHZ_SCOPE, f"对账批次 {batch_id} 涉及系统超出请求 scope"
-        )
-    return batch
-
-
-def get_recon_batch(
+async def get_recon_batch(
     container: ApiContainer, session: SessionToken, *, scope_in: ScopeIn, batch_id: UUID
 ) -> ReconBatchOut:
+    """运行详情：读持久化视图投影，重启后仍可访问。"""
+
     scope = _require_scope(session, build_scope(scope_in))
-    return _batch_out(_require_batch(container, session, scope, batch_id))
+    view = await _load_view(container, session, scope, batch_id)
+    return ReconBatchOut.model_validate(view["batch"])
 
 
 def _metering_policy(container: ApiContainer) -> MeteringPolicy:
@@ -1066,7 +1050,7 @@ async def export_metering_csv(
     return f"metering-{statement.batch_id}.csv", content, digest
 
 
-def list_recon_diffs(
+async def list_recon_diffs(
     container: ApiContainer,
     session: SessionToken,
     *,
@@ -1080,29 +1064,25 @@ def list_recon_diffs(
     limit: int | None,
 ) -> tuple[list[ReconDiffOut], str | None]:
     scope = _require_scope(session, build_scope(scope_in))
-    batch = _require_batch(container, session, scope, batch_id)
+    view = await _load_view(container, session, scope, batch_id)
     _require_diff_type(diff_type)
     _require_billing_bucket(billing_bucket)
     size = page_bounds(limit)
     offset = read_offset(cursor)
-    buckets = _diff_bucket_map(batch)
 
     rows = [
-        (index, diff)
-        for index, diff in enumerate(batch.result.diffs)
-        if _diff_matches(diff, diff_type, needs_manual, supplier_code)
-        and (billing_bucket is None or _bucket_of(buckets, diff).value == billing_bucket)
+        item
+        for item in view["diffs"]
+        if _diff_matches_view(item, diff_type, needs_manual, supplier_code)
+        and (billing_bucket is None or item["billing_bucket"] == billing_bucket)
     ]
     window = rows[offset : offset + size + 1]
     page = window[:size]
     next_cursor = offset_cursor(offset + size) if len(window) > size else None
-    return [
-        _diff_out(batch.batch_id, index, diff, _bucket_of(buckets, diff))
-        for index, diff in page
-    ], next_cursor
+    return [ReconDiffOut.model_validate(item) for item in page], next_cursor
 
 
-def get_recon_diff(
+async def get_recon_diff(
     container: ApiContainer,
     session: SessionToken,
     *,
@@ -1111,85 +1091,44 @@ def get_recon_diff(
     diff_id: str,
 ) -> ReconDiffDetailOut:
     scope = _require_scope(session, build_scope(scope_in))
-    batch = _require_batch(container, session, scope, batch_id)
-    index = _parse_diff_id(diff_id, batch.result)
-    diff = batch.result.diffs[index]
-    base = _diff_out(
-        batch.batch_id, index, diff, _bucket_of(_diff_bucket_map(batch), diff)
-    )
-    draft = next(
-        (
-            item
-            for item in batch.result.discrepancy_drafts
-            if item.refs and diff.ref in item.refs
-        ),
-        None,
-    )
-    unattributed = next(
-        (item for item in batch.result.unattributed if item.ref == diff.ref), None
-    )
-    return ReconDiffDetailOut(
-        **base.model_dump(),
-        batch_id=batch.batch_id,
-        related_lines=[
-            _line_out(line)
-            for line in batch.result.lines
-            if any(item.ref == diff.ref for item in line.diffs)
-        ],
-        draft=(
-            DiscrepancyDraftOut(
-                draft_no=draft.draft_no,
-                supplier_code=draft.supplier_code,
-                period=draft.period,
-                diff_type=draft.diff_type.value,
-                amount=_money_out(draft.amount),
-                owner=draft.owner.value,
-                suggestion=draft.suggestion,
-                confidence=_decimal_text(draft.confidence),
-                needs_manual=draft.needs_manual,
-                refs=list(draft.refs),
-                status=draft.status,
-            )
-            if draft is not None
-            else None
-        ),
-        unattributed=(
-            UnattributedOut(
-                ref=unattributed.ref,
-                amount_diff=_money_out(unattributed.amount_diff),
-                reason=unattributed.reason,
-                evidence=[_evidence_out(item) for item in unattributed.evidence],
-            )
-            if unattributed is not None
-            else None
-        ),
-    )
+    view = await _load_view(container, session, scope, batch_id)
+    _parse_diff_index(diff_id, len(view["diffs"]))
+    detail = view["details"].get(diff_id)
+    if detail is None:
+        raise ProblemError(
+            ErrorCode.DATA_MISSING,
+            f"差异 {diff_id} 的详情投影缺失，无法还原",
+            status_code=503,
+        )
+    return ReconDiffDetailOut.model_validate(detail)
 
 
-def _parse_diff_id(diff_id: str, result: ReconResult) -> int:
+def _parse_diff_index(diff_id: str, count: int) -> int:
     if not diff_id.startswith("d") or not diff_id[1:].isdigit():
         raise ProblemError(
             ErrorCode.RESOURCE_NOT_FOUND, f"差异编号 {diff_id!r} 非法", status_code=404
         )
     index = int(diff_id[1:])
-    if index < 0 or index >= len(result.diffs):
+    if index < 0 or index >= count:
         raise ProblemError(
             ErrorCode.RESOURCE_NOT_FOUND, f"差异 {diff_id} 不存在", status_code=404
         )
     return index
 
 
-def _diff_matches(
-    diff: DiffItem,
+def _diff_matches_view(
+    item: Mapping[str, Any],
     diff_type: str | None,
     needs_manual: bool | None,
     supplier_code: str | None,
 ) -> bool:
-    if diff_type is not None and DIFF_TYPE_CODES[diff.type] != diff_type:
+    """按持久化投影里的已序列化字段过滤，与内存版判定口径一致。"""
+
+    if diff_type is not None and item["type"] != diff_type:
         return False
-    if supplier_code is not None and diff.supplier_code != supplier_code:
+    if supplier_code is not None and item["supplier_code"] != supplier_code:
         return False
-    return not (needs_manual is not None and diff.needs_manual != needs_manual)
+    return not (needs_manual is not None and item["needs_manual"] != needs_manual)
 
 
 def _require_diff_type(code: str | None) -> None:
@@ -1524,6 +1463,114 @@ def _line_out(line: MatchResultLine) -> ReconLineResultOut:
         supplier_ref=line.supplier_ref,
         needs_manual=line.needs_manual,
         note=line.note,
+    )
+
+
+#: 批次视图投影的 schema 版本。读侧只认当前版本，未知版本明确报错，
+#: 不做 best-effort 解析（旧 JSON 的形状半年后没人记得，猜错比报错更贵）。
+VIEW_VERSION = 1
+
+
+def _batch_view(batch: ReconBatchRecord) -> dict[str, Any]:
+    """把运行详情/差异列表/差异详情冻成一份投影，随批次一起持久化。
+
+    投影是批次产物的一部分（真源），不是可丢弃缓存：``related_lines``、
+    ``draft``、``unattributed`` 与计费桶无法只从 ``recon_line`` 重建。
+    """
+
+    buckets = _diff_bucket_map(batch)
+    diffs: list[dict[str, Any]] = []
+    details: dict[str, Any] = {}
+    for index, diff in enumerate(batch.result.diffs):
+        bucket = _bucket_of(buckets, diff)
+        diff_id = f"d{index}"
+        diffs.append(_diff_out(batch.batch_id, index, diff, bucket).model_dump(mode="json"))
+        details[diff_id] = _diff_detail_out(batch, index, diff, bucket).model_dump(
+            mode="json"
+        )
+    return {
+        "view_version": VIEW_VERSION,
+        "batch": _batch_out(batch).model_dump(mode="json"),
+        "diffs": diffs,
+        "details": details,
+    }
+
+
+async def _load_view(
+    container: ApiContainer,
+    session: SessionToken,
+    scope: Scope,
+    batch_id: UUID,
+) -> Mapping[str, Any]:
+    snapshot = await _load_snapshot(container, session, scope, batch_id)
+    view = snapshot.view
+    if view is None:
+        raise ProblemError(
+            ErrorCode.DATA_MISSING,
+            f"对账批次 {batch_id} 未持久化视图投影（旧版本写入），请重跑该批次",
+            status_code=503,
+        )
+    version = view.get("view_version")
+    if version != VIEW_VERSION:
+        raise ProblemError(
+            ErrorCode.DATA_MISSING,
+            f"对账批次 {batch_id} 视图投影版本 {version!r} 非当前支持版本"
+            f" {VIEW_VERSION}，拒绝解析",
+            status_code=503,
+        )
+    return view
+
+
+def _diff_detail_out(
+    batch: ReconBatchRecord, index: int, diff: DiffItem, bucket: BillingBucket
+) -> ReconDiffDetailOut:
+    base = _diff_out(batch.batch_id, index, diff, bucket)
+    draft = next(
+        (
+            item
+            for item in batch.result.discrepancy_drafts
+            if item.refs and diff.ref in item.refs
+        ),
+        None,
+    )
+    unattributed = next(
+        (item for item in batch.result.unattributed if item.ref == diff.ref), None
+    )
+    return ReconDiffDetailOut(
+        **base.model_dump(),
+        batch_id=batch.batch_id,
+        related_lines=[
+            _line_out(line)
+            for line in batch.result.lines
+            if any(item.ref == diff.ref for item in line.diffs)
+        ],
+        draft=(
+            DiscrepancyDraftOut(
+                draft_no=draft.draft_no,
+                supplier_code=draft.supplier_code,
+                period=draft.period,
+                diff_type=draft.diff_type.value,
+                amount=_money_out(draft.amount),
+                owner=draft.owner.value,
+                suggestion=draft.suggestion,
+                confidence=_decimal_text(draft.confidence),
+                needs_manual=draft.needs_manual,
+                refs=list(draft.refs),
+                status=draft.status,
+            )
+            if draft is not None
+            else None
+        ),
+        unattributed=(
+            UnattributedOut(
+                ref=unattributed.ref,
+                amount_diff=_money_out(unattributed.amount_diff),
+                reason=unattributed.reason,
+                evidence=[_evidence_out(item) for item in unattributed.evidence],
+            )
+            if unattributed is not None
+            else None
+        ),
     )
 
 

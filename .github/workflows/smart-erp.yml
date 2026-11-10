@@ -340,9 +340,15 @@ jobs:
           asyncio.run(main())
           PY
 
-      - name: 测试库迁移（0001→0006 全链）
-        # service 的 health-check 已保证 PG 就绪；这里跑真实迁移链并用 alembic current
-        # 断言停在 0006_audit_image_prev_uniq，避免「连上了但表没建」的假绿。
+      - name: 测试库迁移（全链 + 动态 head 断言）
+        # service 的 health-check 已保证 PG 就绪；这里跑真实迁移链，并断言
+        # (a) 恰好一个 head、(b) current 与 head 逐字相等、(c) 版本号长度不超过
+        # alembic_version_erp.version_num 的**实际**列宽（列宽从 information_schema 查，
+        # 不写死 32）。
+        #
+        # 为什么不能用字面量（如 grep "0006_..."）：迁移号每新增一条迁移就会变，
+        # 硬编码会把「迁移正确」判红，也会掩盖真正的分叉（出现两个 head 时字面量
+        # 可能只命中其一，看起来仍然绿）。#77 的 0007 就是被写死的 0006 判红的。
         # env.py 的连接串唯一真源是 ERP_DATABASE_URL（C14），不要另造一份。
         env:
           ERP_DATABASE_URL: postgresql+asyncpg://erp_test:erp_test@127.0.0.1:5432/smart_erp_test
@@ -350,7 +356,56 @@ jobs:
           set -euo pipefail
           alembic -c alembic.ini upgrade head
           alembic -c alembic.ini current | tee /tmp/alembic-current.txt
-          grep -q "0006_audit_image_prev_uniq" /tmp/alembic-current.txt
+          alembic -c alembic.ini heads   | tee /tmp/alembic-heads.txt
+          python - <<'PY'
+          import asyncio
+          import pathlib
+          import re
+          import sys
+
+          import asyncpg
+
+          def revisions(path: str) -> list[str]:
+              out = []
+              for line in pathlib.Path(path).read_text(encoding="utf-8").splitlines():
+                  m = re.match(r"^([0-9A-Za-z_]+)(?: \(head\))?$", line.strip())
+                  if m:
+                      out.append(m.group(1))
+              return out
+
+          heads = revisions("/tmp/alembic-heads.txt")
+          current = revisions("/tmp/alembic-current.txt")
+          if len(heads) != 1:
+              sys.exit(
+                  f"迁移出现 {len(heads)} 个 head：{heads}；"
+                  "分叉必须先在迁移里合并，不能带多 head 上线"
+              )
+          if current != heads:
+              sys.exit(f"alembic current={current} 与 heads={heads} 不一致")
+          rev = heads[0]
+
+
+          async def main() -> None:
+              conn = await asyncpg.connect(
+                  "postgresql://erp_test:erp_test@127.0.0.1:5432/smart_erp_test"
+              )
+              try:
+                  width = await conn.fetchval(
+                      "select character_maximum_length from information_schema.columns "
+                      "where table_name = 'alembic_version_erp' "
+                      "and column_name = 'version_num'"
+                  )
+              finally:
+                  await conn.close()
+              if width is None:
+                  sys.exit("查不到 alembic_version_erp.version_num 列宽：版本表没建，断言无依据")
+              print(f"head={rev} len={len(rev)} column_width={width}")
+              if len(rev) > width:
+                  sys.exit(f"head {rev}（{len(rev)} 字符）超过 version_num 列宽 {width}")
+
+
+          asyncio.run(main())
+          PY
 
       - name: 预拉部署测试镜像 alpine:3.20（失败即 infra 红）
         # tar 行为用例要求镜像已在手：拉取失败必须是明确的 infra 红，
