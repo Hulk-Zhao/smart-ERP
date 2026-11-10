@@ -50,7 +50,7 @@ class DuplicateStep(StoreError):
     """同一工单内 step_no 重复（断点续跑不得重放已存在的步骤）。"""
 
 
-#: 「已解决」口径（README §6.1.3）：``COMPLETED``（业务成功闭合）与
+#: 「已解决」口径（README §6.1.4）：``COMPLETED``（业务成功闭合）与
 #: ``ROLLED_BACK``（补偿成功撤销）必须分开列出——前者外部副作用保留，后者已抵消，
 #: 不能合成一个 ``closed`` 概念。``TERMINATED`` / ``REJECTED`` 是零写入或策略拒绝，
 #: 外部没有残留，同样算解决。其余（含 ``MANUAL_REQUIRED`` 失败没人接住、

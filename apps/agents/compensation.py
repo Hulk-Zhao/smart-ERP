@@ -142,7 +142,7 @@ _COUNTS_SQL = text(
     """
 )
 
-# 观测口径（README §6.1.3）：全库 queued 的「到期未领取」。
+# 观测口径（README §6.1.4）：全库 queued 的「到期未领取」。
 # NULL 分支不能省：零延迟重试写 NULL 后没有闸门，行会一直停在 queued，
 # 只统计 next_retry_at 非空等于把这块变成新的静默面。
 _OVERDUE_SQL = text(

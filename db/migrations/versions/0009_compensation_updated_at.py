@@ -3,18 +3,18 @@
 没有这一列时，``next_retry_at IS NULL`` 的 queued 行只能退回 ``created_at``，
 一条早先创建、刚刚失败回队的任务会被立刻误判为 overdue（假 P1）。
 
-链：``0005_worker_runtime`` → 本迁移。主干上若已有 0006/0007，rebase 时整体后移。
+链：``0007_recon_batch_projection`` → 本迁移。
 
-Revision ID: 0006_compensation_updated_at
-Revises: 0005_worker_runtime
+Revision ID: 0008_compensation_updated_at
+Revises: 0007_recon_batch_projection
 """
 
 from __future__ import annotations
 
 from alembic import op
 
-revision = "0006_compensation_updated_at"
-down_revision = "0005_worker_runtime"
+revision = "0008_compensation_updated_at"
+down_revision = "0007_recon_batch_projection"
 branch_labels = None
 depends_on = None
 
