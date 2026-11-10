@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -914,6 +915,7 @@ async def run_recon(
     )
 
     raw = _recon_raw(scope, body, dataset)
+    started = time.monotonic()
     recon_request = build_request(raw)
     if not recon_request.our_lines and not recon_request.supplier_lines:
         result = empty_result("我们的单据与供应商对账单都没有数据行")
@@ -952,6 +954,10 @@ async def run_recon(
     except ReconConflict as exc:
         raise ProblemError(ErrorCode.IDEM_CONFLICT, str(exc), status_code=409) from exc
     container.recon_batches.add(batch)
+    # 每批次只记一次：observe_recon_result 已含批次计数，不要再叠加 record_recon_batch。
+    container.metrics.observe_recon_result(
+        result, duration_seconds=time.monotonic() - started
+    )
     return _batch_out(batch)
 
 
