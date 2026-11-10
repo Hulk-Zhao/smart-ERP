@@ -1,5 +1,5 @@
-# 统一换行：仓库内一律存为 LF，检出时按平台自动处理
-* text=auto
+# 统一换行：仓库内与检出后一律 LF，避免 Windows 下的 CRLF 转换与警告
+* text=auto eol=lf
 
 # 明确文本类型，避免平台差异导致的换行噪音
 *.md text
