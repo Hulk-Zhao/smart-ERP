@@ -47,10 +47,12 @@ describe('工单详情：真实链路 + W3 403', () => {
 
     expect(await screen.findByText('T-W3')).toBeInTheDocument();
     expect(screen.getByText('12 状态机')).toBeInTheDocument();
-    expect(screen.getAllByText('前像').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('后像').length).toBeGreaterThan(0);
-    expect(screen.getByText('完整')).toBeInTheDocument();
-    expect(screen.getAllByText(/sha256:t/).length).toBeGreaterThan(0);
+    // 审计链与工单详情是两个独立请求，慢机上详情先到、链后到；
+    // 这里等链数据真正渲染出来再断言，避免按到达顺序赌输赢。
+    expect((await screen.findAllByText('前像')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('后像')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('完整')).toBeInTheDocument();
+    expect((await screen.findAllByText(/sha256:t/)).length).toBeGreaterThan(0);
   });
 
   it('W3 审批被拒：界面显示 403 / E-POLICY-W3FORBIDDEN / 连接器零写入', async () => {
