@@ -247,7 +247,7 @@ groups:
       # P0：审计链断链（最高优先级）
       # 指标：smart_erp_audit_chain_broken（0 正常 / 1 断链）
       # ------------------------------------------------------------------
-      # 采集点待接线（归属流：apps/audit；解锁条件：存在周期校验任务（启动 + 定时 ≤10 分钟）调用 set_audit_chain_broken()，且有 0→1 的人为断链演练）
+      # 采集点待接线（归属流：apps/audit；解锁条件：scheduler 进程自己 serve /metrics + 人为断链 0→1 演练；首次写入前序列 absent，必须当未知而非 0。写入点见分支 feat/audit-chain-metric-wiring）
       # - alert: SmartErpAuditChainBroken
       #   expr: max(smart_erp_audit_chain_broken) > 0
       #   for: 1m

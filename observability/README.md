@@ -278,8 +278,9 @@ registry.observe_recon_result(result, duration_seconds=elapsed)  # result 为 ap
 
 只有**存在生产采集点**的指标才允许进告警规则。定义了却没人调用的指标永远返回 0/空，
 挂上去的规则永远不触发——比没有告警更坏，因为它制造「已经监控住了」的假象。
-2026-11-11 一晚撞到三次同类问题：`/metrics` 曾未挂载、`set_compensation_backlog` 零调用，
-以及一份基于过期 main 的「零采集点」审计（本表已按 `2dac800` 重做）。
+2026-11-11 一晚撞到**四次**同一类问题，表面各不相同，实质都是同一条链只在纸面上连通：
+`/metrics` 曾未挂载、`set_compensation_backlog` 零调用、11 条规则零采集点，
+以及采集点终于有了、却写在没有 `/metrics` 监听的那个进程里（`smart_erp_audit_chain_broken`）。
 
 1. **同批合入**：规则里引用的每一个指标，都必须在**同一次 PR** 里有采集点；做不到时，
    显式标注 `# 采集点待接线（<归属流>）` 并**把该条规则注释掉**，同时登记到 §6.1.3。
@@ -288,6 +289,12 @@ registry.observe_recon_result(result, duration_seconds=elapsed)  # result 为 ap
    写成 `文件:行` 的，换行/重构后要同批修正，否则等同过期事实。
 3. 未接线前，该指标/规则的覆盖度记为 **0**，验收里不得写「已覆盖」「已监控」。
 4. 每次增删规则都要重跑 §9 的检查并刷新 §6.1.3；清单里有的指标不允许出现「已验收」。
+5. **写入点存在 ≠ 可观测**：每条规则的解锁条件必须同时回答两个问题，缺一不可——
+   (a) **哪个进程**写这个指标（`文件:行`）？(b) 那个进程**是否 serve `/metrics`**（给出挂载点 `文件:行`）？
+   指标值是进程内内存，只有 serve `/metrics` 的进程才会被 scrape；写在别的进程里的 gauge，
+   抓到的一直是「没有这条序列」，与「一直正常」在告警上看起来完全一样。
+   `smart_erp_audit_chain_broken` 就是反例：写入点在 scheduler，`/metrics` 只挂在 web（`apps/main.py:35`），
+   两边不通，所以这条 P0 继续保持注释——不明就里地取消注释，等于恢复一条哑告警。
 
 ### 6.1.3 采集点审计表（基准 `origin/main` `2dac800`，2026-11-11）
 
@@ -299,6 +306,10 @@ git grep -n -E "\.(record_ticket|record_stage|record_recon_batch|observe_recon_r
 
 命中 4 行：`apps/api/service.py:975`（`observe_recon_result`）、`:983` 与 `:986`（`record_recon_failure`）、
 `apps/main.py:35`（`install_metrics`）。其余写入方法在 `observability/`、`tests/`、`docs/` 之外零命中。
+
+> 注意：`apps/audit/monitor.py` 的 `set_audit_chain_broken()` 只在分支
+> `feat/audit-chain-metric-wiring`（`4473014`）上，未合入 main，故不计入上面的 4 行。
+> 即便合入，它写的是 scheduler 进程的内存，而 `/metrics` 只在 web 进程——见第 5 条判据。
 
 | 指标 | 生产采集点 | 是否仍被 `alerts.rules.yaml` 引用 | 取消注释的前置条件 |
 |---|---|---|---|
@@ -315,19 +326,22 @@ git grep -n -E "\.(record_ticket|record_stage|record_recon_batch|observe_recon_r
 | `smart_erp_write_stage_failures_total` | 无 | **是 → 已注释**（同上） | 同上 |
 | `smart_erp_write_stage_duration_seconds` | 无 | 否（无规则） | 同 `record_stage()`；接线后可直接用于阶段 SLO |
 | `smart_erp_unresolved_tickets` | 无 | **是 → 已注释**（SmartErpUnresolvedTicketsGrowing） | 归属 `apps/tickets`：unresolved 增减处调用 `set_unresolved()`，并积累 30 分钟基线（规则用 `offset 30m`） |
-| `smart_erp_audit_chain_broken` | 无 | **是 → 已注释（P0）**（SmartErpAuditChainBroken） | 归属 `apps/audit`：周期校验任务（启动 + 定时 ≤10 分钟）调用 `set_audit_chain_broken()`，并完成一次 0→1 的人为断链演练 |
+| `smart_erp_audit_chain_broken` | `apps/audit/monitor.py:123`、`:144`（经 `core/runtime/scheduler.py::Scheduler.tick`；**仅在未合入的分支 `feat/audit-chain-metric-wiring` 上，main 无**） | **是 → 已注释（P0）**（SmartErpAuditChainBroken） | ① 该分支合入 main；② **scheduler 进程自己 serve `/metrics`**（当前只有 web 进程 `apps/main.py:35` 有端点，scheduler 内存里的 gauge 抓不到）；③ 完成一次人为断链的 **0→1 演练**：首次写入 0 之前序列是 `absent`，规则必须把它当**未知**、不能当 0（`max(...) > 0` 在 absent 时不触发，≠ 链完好） |
 | `smart_erp_compensation_backlog` | 无 | 否（规则已删：零采集点的 P1 不能留） | 如需恢复，先接 `set_compensation_backlog()` 并有积压基线 |
 | `smart_erp_compensation_overdue` | 无（待 apps/agents） | 是 → **已注释**（3 条） | 归属 `apps/agents`：补偿扫描周期内按 A 的 SQL（含 NULL 分支）调用 `set_compensation_overdue()`，且有 ≥1 个队列周期的基线 |
 | `smart_erp_compensation_future_retry` | 无（待 apps/agents） | 是 → **已注释**（1 条） | 归属 `apps/agents`：同一扫描按 B 的 SQL 调用 `set_compensation_future_retry()`，基线应为 0 |
 | `smart_erp_db_clock_skew_seconds` | 无（待 apps/runtime） | 是 → **已注释**（2 条） | 归属 `apps/runtime`：进程心跳每 ≤10s 成对采样 monotonic/time 并调用 `observe_clock_skew()`，基线 `|skew| < 1s` |
 | `smart_erp_db_clock_skew_backwards_seconds_max` | 无（待 apps/runtime） | 否（不单独告警） | 同 C；只用于看板与排查，不做告警 |
 
-单独盯住的三类：
+单独盯住的四类：
 
 - **有采集点但规则已删**：无。`compensation_backlog` 是先确认无采集点才删规则的，两者不混。
 - **规则引用但无采集点、且仍在启用**：**无**。3 条历史规则（write 失败率 / unresolved / 审计链 P0）
   已与 6 条新规则同样处理——保留完整语义并注释掉，每条上方都有「采集点待接线（归属流：…）」。
   当前生效集合只剩 2 条对账规则，依赖的指标都有 `apps/api/service.py` 的真实采集点。
+- **有写入点、但写入进程不 serve `/metrics`**：`smart_erp_audit_chain_broken`（1 条 P0）。
+  这是最容易误判的一类：`git grep` 能搜到采集点、代码 review 看起来也接上了，但 scrape 永远抓不到。
+  判据同 §6.1.2 第 5 条，只看「哪个进程写」与「那个进程是否暴露 `/metrics`」两件事。
 - **有采集点但无任何规则**：`recon_supplier_lines_total`、`recon_batch_auto_match_ratio`、
   `recon_degraded_batches_total`、`recon_runs_failed_total`。
 
@@ -338,7 +352,8 @@ git grep -n -E "\.(record_ticket|record_stage|record_recon_batch|observe_recon_r
 **5% / 15m 只是候选**，必须等一个结账周期的真实基线再定，不凭猜启用。
 
 > 结论：`/metrics` 已由 `apps/main.py:35` 挂载（仍受 `ERP_METRICS_ENABLED` 控制），
-> 但**只有对账链路真正在产出序列**；其余指标须按此表逐项接线后才能进规则。
+> 但**只有对账链路真正在产出序列且能被 scrape 到**；其余指标须按此表逐项接线后才能进规则。
+> 「接线」= 写入进程 === serve `/metrics` 的进程，二者不一致时视为未接线。
 
 ### 6.1.4 补偿队列与时钟口径
 
