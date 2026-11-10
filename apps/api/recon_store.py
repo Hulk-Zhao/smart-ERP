@@ -89,6 +89,7 @@ def snapshot_to_dict(snapshot: BatchSnapshot) -> dict[str, Any]:
         "rerun_reason": snapshot.rerun_reason,
         "created_by": str(snapshot.created_by),
         "created_at": snapshot.created_at.isoformat(),
+        "view": snapshot.view,
         "lines": [
             {
                 "line_no": line.line_no,
@@ -129,6 +130,7 @@ def snapshot_from_dict(payload: Mapping[str, Any]) -> BatchSnapshot:
         created_by=UUID(str(payload["created_by"])),
         created_at=datetime.fromisoformat(str(payload["created_at"])),
         lines=tuple(_line_from_dict(item) for item in payload["lines"]),
+        view=payload.get("view"),
     )
 
 
@@ -329,12 +331,13 @@ class SqlReconStore:
                               (id, tenant_id, org_id, period, status, conclusive,
                                status_reason, suppliers, system_ids, metrics,
                                input_fingerprint, rerun_of, rerun_reason,
-                               created_by, created_at)
+                               created_by, created_at, result_view)
                             VALUES
                               (:id, :tenant_id, :org_id, :period, :status, :conclusive,
                                :status_reason, :suppliers, :system_ids,
                                CAST(:metrics AS jsonb), :input_fingerprint,
-                               :rerun_of, :rerun_reason, :created_by, :created_at)
+                               :rerun_of, :rerun_reason, :created_by, :created_at,
+                               CAST(:result_view AS jsonb))
                             ON CONFLICT (id) DO NOTHING
                             RETURNING id
                             """
@@ -357,6 +360,9 @@ class SqlReconStore:
                             "rerun_reason": snapshot.rerun_reason,
                             "created_by": snapshot.created_by,
                             "created_at": snapshot.created_at,
+                            "result_view": None
+                            if snapshot.view is None
+                            else json.dumps(snapshot.view, ensure_ascii=False),
                         },
                     )
                 ).first()
@@ -416,7 +422,7 @@ class SqlReconStore:
                         SELECT id, tenant_id, org_id, period, status, conclusive,
                                status_reason, suppliers, system_ids, metrics,
                                input_fingerprint, rerun_of, rerun_reason,
-                               created_by, created_at
+                               created_by, created_at, result_view
                         FROM erp.recon_batch
                         WHERE id = :id AND tenant_id = :tenant_id
                         """
@@ -459,6 +465,7 @@ class SqlReconStore:
             created_by=batch["created_by"],
             created_at=batch["created_at"],
             lines=lines,
+            view=batch["result_view"],
         )
 
     async def append_event(

@@ -87,7 +87,7 @@ def _policy() -> MeteringPolicy:
         unit_price=Decimal("2.00"),
         currency="CNY",
         cap_amount=None,
-        prior_amount=Decimal("0"),
+        prior_amount=Decimal(0),
     )
 
 
@@ -120,7 +120,12 @@ def _line(
     )
 
 
-def _snapshot(lines: tuple[SnapshotLine, ...], *, supplier_lines: int | None = None) -> BatchSnapshot:
+def _snapshot(
+    lines: tuple[SnapshotLine, ...],
+    *,
+    supplier_lines: int | None = None,
+    view: dict | None = None,
+) -> BatchSnapshot:
     return BatchSnapshot(
         batch_id=uuid4(),
         tenant_id=uuid4(),
@@ -138,6 +143,7 @@ def _snapshot(lines: tuple[SnapshotLine, ...], *, supplier_lines: int | None = N
         created_by=uuid4(),
         created_at=datetime.now(UTC),
         lines=lines,
+        view=view,
     )
 
 
@@ -241,6 +247,28 @@ def test_empty_batch_roundtrip(session_factory) -> None:
     assert statement.expected_lines == 0
     assert statement.billable_lines == 0
     assert statement.period_amount == "0.0000"
+
+
+def test_view_projection_roundtrips_through_postgres(session_factory) -> None:
+    """视图投影（jsonb）跨实例读出同形；未投影的旧行保持 NULL，不伪装成 {}。"""
+
+    view = {
+        "view_version": 1,
+        "batch": {"status": "已对账", "diff_count": 1},
+        "diffs": [{"diff_id": "d0", "type": "unit_price", "amount": {"amount": "5.0000"}}],
+        "details": {"d0": {"related_lines": [], "draft": None, "unattributed": None}},
+    }
+    projected = _snapshot((_line(line_no=1, status="已匹配"),), view=view)
+    legacy = _snapshot((_line(line_no=1, status="已匹配"),))
+    store = SqlReconStore(session_factory)
+    asyncio.run(store.save(projected))
+    asyncio.run(store.save(legacy))
+
+    restarted = SqlReconStore(session_factory)
+    loaded = _load(restarted, projected.batch_id, projected.tenant_id)
+    assert loaded is not None
+    assert loaded.view == view
+    assert _load(restarted, legacy.batch_id, legacy.tenant_id).view is None
 
 
 def test_missing_supplier_code_surfaces_as_data_gap(session_factory) -> None:

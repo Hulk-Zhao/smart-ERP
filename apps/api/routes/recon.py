@@ -79,7 +79,7 @@ async def get_run(
     scope: ScopeDep,
 ):
     with translated():
-        return service.get_recon_batch(
+        return await service.get_recon_batch(
             container, session, scope_in=scope.payload, batch_id=batch_id
         )
 
@@ -112,7 +112,7 @@ async def list_diffs(
     limit: PageLimit = None,
 ):
     with translated():
-        items, next_cursor = service.list_recon_diffs(
+        items, next_cursor = await service.list_recon_diffs(
             container,
             session,
             scope_in=scope.payload,
@@ -141,7 +141,7 @@ async def get_diff(
     scope: ScopeDep,
 ):
     with translated():
-        return service.get_recon_diff(
+        return await service.get_recon_diff(
             container,
             session,
             scope_in=scope.payload,
