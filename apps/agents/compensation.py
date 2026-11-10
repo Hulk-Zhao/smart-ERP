@@ -119,6 +119,10 @@ _FAILED_SQL = text(
            heartbeat_at = NULL,
            next_retry_at = CASE
                WHEN attempts >= :max_attempts THEN NULL
+               -- 零延迟重试必须写 NULL：now() 不保证单调（容器/VM 时钟会被同步回拨约 1 秒），
+               -- 写成 now() 会让这条任务在回拨后的下一次 claim 里「不可见」（next_retry_at > now()），
+               -- 出队 SQL 直接返回空。NULL 与 reclaim_stale 同义：没有重试闸门。
+               WHEN :retry_in <= 0 THEN NULL
                ELSE now() + make_interval(secs => :retry_in)
            END
      WHERE id = :task_id
