@@ -44,3 +44,10 @@ doc 镜像冒烟（工作树，tag `smart-erp/doc:dev`）：`/healthz` `{"status
 1. 把 connector-gw 入口修复合入 main，并在 `RELEASE-CHECKLIST.md` 第 0 步用 `git ls-remote` 重新核对 sha；
 2. 合入后再按新 sha 重跑：gw 冒烟、`build-images.sh`、`check_image_contents.py`；
 3. full 档与 doc 镜像合入后，才登记 `v0.2.0-full`（届时 doc 冒烟用该 sha 的镜像重跑）。
+
+### 进展（2026-11-11 后续，未登记新版本）
+
+- 阻塞项已解除：PR #13 热修 gw 入口，main `1c806fc`；用该 sha 构建 gw 镜像并起容器，`GET /healthz` = 200（`registered_actions=2`）。
+- doc 镜像与 full 档已合入：PR #19，main `99afa3e`；`docparse.Dockerfile` 构建成功、容器 `GET /healthz` = 200；compose `--profile demo` 与 `--profile full` 正向解析均 exit 0。
+- 积压清理完毕：S0/S1/S3S4/S7/S8/S5 六批各自独立 PR + 独立 worktree 验证后合并，main 现为 `60ee617`，全部 `tests/*` 目录在 3.12 下 exit 0。
+- **仍未登记 v0.2.0**：清单第 3–7 步（`build-images.sh` 产出镜像包、镜像内容校验、远端 `deploy-images.sh`）尚未按该 sha 完整执行；按第 0 步新门禁，登记前须在该 sha 的只读检出里真跑构建与容器。

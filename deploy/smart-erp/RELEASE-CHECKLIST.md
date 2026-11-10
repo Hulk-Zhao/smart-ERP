@@ -5,7 +5,7 @@
 
 | # | 命令 | 通过标准 |
 |---|---|---|
-| 0 | `git ls-remote origin refs/heads/main` | **硬门禁**：输出的 sha 必须与 RELEASES.md 本次登记的版本 sha 完全一致；不一致立即停止发布（本地 `git rev-parse HEAD` 不作数，它只是本地检出） |
+| 0 | `git ls-remote origin refs/heads/main`，并用该 sha 只读检出（`git worktree add --detach <dir> <sha>` 或 `git archive <sha>`） | **硬门禁**：① 输出的 sha 必须与 RELEASES.md 本次登记的版本 sha 完全一致；② **构建来源必须是该 sha 的检出**，在该检出里执行第 3–5 步并真跑容器拿到 `/healthz` 200；本地 `git rev-parse HEAD` 与任何未提交工作树都不作数。任一不满足立即停止发布 |
 | 1 | `python -m unittest discover -s tests/deploy` | 全绿（离线静态断言：服务清单/内存预算/环境变量/探针路径/gw 入口） |
 | 2 | `uv lock --check`（有 uv.lock 时） | exit 0，锁文件与 pyproject 一致 |
 | 3 | `ERP_IMAGE_TAG=<40 位 sha> scripts/build-images.sh` | 产出 `dist/erp-images-<sha>.tar.gz` 与 `sha256sum.txt` |
