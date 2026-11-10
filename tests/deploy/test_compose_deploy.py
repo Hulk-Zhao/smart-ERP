@@ -331,12 +331,60 @@ class ComposeStaticTest(unittest.TestCase):
         # "host not found in upstream" 直接起不来（实测踩过）
         self.assertIn("resolver 127.0.0.11", nginx_conf)
         self.assertIn("proxy_pass $erp_api_upstream", nginx_conf)
+        # 必须剥前缀：api 以 uvicorn --root-path=/erp/api 启动，应用只认无前缀路径；
+        # 旧写法 proxy_pass .../erp/api/ 会让所有 /erp/api/* 404。
+        self.assertIn("proxy_pass $erp_api_upstream/;", nginx_conf)
         self.assertNotIn("proxy_pass http://api:8010", nginx_conf)
 
         # gw 的 read_only + tmpfs（§1A.2）
         gw = self.services["connector-gw"]
         self.assertTrue(gw.get("read_only"))
         self.assertTrue(gw.get("tmpfs"))
+
+    def test_nginx_prefix_matches_uvicorn_root_path(self):
+        """compose --root-path、nginx location 前缀、proxy_pass 剥前缀三者必须一致。
+
+        uvicorn 的 --root-path 会让应用只认去掉前缀的路径；nginx 若保留前缀转发，
+        所有 /erp/api/* 都会 404（2026-11-11 实测：/erp/api/healthz 与 /erp/api/metrics 均 404）。
+        """
+        command = [str(part) for part in self.services["api"]["command"]]
+        root_path = ""
+        for index, part in enumerate(command):
+            if part.startswith("--root-path="):
+                root_path = part.split("=", 1)[1]
+                break
+            if part == "--root-path" and index + 1 < len(command):
+                root_path = command[index + 1]
+                break
+        default = re.fullmatch(r"\$\{[A-Z0-9_]+:-([^}]*)\}", root_path)
+        if default:
+            root_path = default.group(1)
+
+        nginx_conf = (DOCKER_DIR / "web-nginx.conf").read_text(encoding="utf-8")
+        proxy = re.search(
+            r"location\s+([^\s{]+)\s*\{[^}]*?proxy_pass\s+([^;]+);", nginx_conf, re.S
+        )
+        self.assertIsNotNone(proxy, "web-nginx.conf 未找到含 proxy_pass 的 location 块")
+        location, upstream = proxy.group(1), proxy.group(2).strip()
+
+        self.assertTrue(root_path, "compose api.command 缺少 --root-path，无法校验 nginx 前缀")
+        self.assertEqual(
+            location.rstrip("/"),
+            root_path.rstrip("/"),
+            f"nginx location 前缀 {location!r} 与 compose --root-path {root_path!r} 不一致："
+            "改 --root-path 时必须同步 nginx 的 location 前缀（两者是同一个对外前缀）",
+        )
+        # proxy_pass 的 URI 必须恰好是 "/"：只剩尾斜杠不够（"/erp/api/" 也以 "/" 结尾，
+        # 但会把前缀原样带给上游）。变量式写法先去掉 "$erp_api_upstream"，直连写法去掉 scheme+host。
+        upstream_uri = re.sub(r"^(\$[A-Za-z_][A-Za-z0-9_]*|https?://[^/]+)", "", upstream)
+        self.assertEqual(
+            upstream_uri,
+            "/",
+            f"proxy_pass {upstream!r} 没有剥前缀（URI 部分是 {upstream_uri!r}）："
+            f"--root-path={root_path!r} 时应用只认无前缀路径"
+            f"（{root_path.rstrip('/')}/healthz 对应容器内 /healthz），URI 必须恰好是 '/'，"
+            "否则该前缀下所有请求都会 404",
+        )
 
     def test_healthz_route_really_exists(self):
         """healthcheck 打 /healthz，就必须在源码里真有这条路由，而不是只写在 YAML 里。"""

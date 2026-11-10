@@ -228,8 +228,9 @@ ERP_IMAGE_TAG=<old-sha> docker compose --env-file deploy/smart-erp/.env \
 # 指标有两个暴露面，必须都拦（deny 或直接 404，二选一）：
 #
 # ① /erp/api/metrics —— App 指标的真实公网路径。
-#    api 以 --root-path=/erp/api 启动，下面的 proxy_pass 又保留 /erp/api/ 前缀，
-#    所以容器内 /metrics 对外的实际路径是 https://<域名>/erp/api/metrics。
+#    nginx 必须剥掉 /erp/api/ 前缀再转给 api（见下方 proxy_pass 结尾的 "/"）。
+#    api 以 uvicorn --root-path=/erp/api 启动，应用内只认无前缀路径（/healthz、/metrics），
+#    所以容器内真实端点是 /metrics，公网路径由本 location 命中后拒绝。
 #    只写 location = /metrics 拦不住它（历史写法就是漏在这里）。
 # ② /metrics —— 站点根路径上的同名路径，防御性兜底（不是本应用的转发路径，
 #    同机其它站点或默认 server 若暴露 /metrics 会被它挡住）。
@@ -240,10 +241,12 @@ location = /metrics {
     deny all;          # 或：return 404;
 }
 
-# 业务 API 反代到广州宿主回环地址；注意 proxy_pass 结尾不要带 "/"，
-# 保留 /erp/api/ 前缀（api 以 --root-path=/erp/api 启动）
+# 业务 API 反代到广州宿主回环地址；proxy_pass 结尾**必须带 "/"**（剥掉 /erp/api/ 前缀）。
+# 机制：uvicorn 把 root_path 拼到 scope["path"] 前，Starlette 路由匹配时再剥一次，
+# 净效果是应用只认无前缀路径；保留前缀会让所有 /erp/api/* 返回 404。
+# --root-path 只用于 docs/openapi 的 server 地址，不能既保留前缀又开 root-path。
 location /erp/api/ {
-    proxy_pass http://127.0.0.1:8010;
+    proxy_pass http://127.0.0.1:8010/;
     proxy_set_header Host              $host;
     proxy_set_header X-Real-IP         $remote_addr;
     proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
@@ -253,6 +256,10 @@ location /erp/api/ {
 ```
 
 **nginx 侧验收口径（两条都必须满足，任一 200 即视为指标外泄、发布不通过）：**
+
+> **前提：转发必须已剥掉 `/erp/api/` 前缀**（`proxy_pass .../;`）。若沿用旧写法保留前缀，
+> `/erp/api/metrics` 会因应用只认 `/metrics` 而返回 404——**这种 404 不是拦截生效的证据**。
+> 必须先验 `/erp/api/healthz` 为 200（证明前缀通路与剥前缀都正确），再看 metrics 的 403/404。
 
 ```bash
 # ① App 指标的真实公网路径：必须 403/404，不得 200
