@@ -237,8 +237,14 @@ services:
       ERP_GW_TIMEOUT_SECONDS: ${ERP_GW_TIMEOUT_SECONDS:-30}
       # 出网白名单写在 config 快照里，随仓库版本管理；此处只给路径
       ERP_GW_EGRESS_ALLOWLIST_FILE: ${ERP_GW_EGRESS_ALLOWLIST_FILE:-/app/config/gw-egress.yaml}
+      # 文件通道收件箱（apps/connectors/gateway.py 装配）：留空 = 不挂 file 连接器。
+      # demo 档在 deploy/smart-erp/env/demo.env 里默认给 /data/inbox；
+      # full/prod 保持留空（默认关闭），不要在这里写死默认目录，否则 prod 会被悄悄打开。
+      ERP_FILE_INBOX: ${ERP_FILE_INBOX:-}
     volumes:
       - ./config:/app/config:ro
+      # 供应商对账单/送货单等 CSV 的落盘目录：**只读**挂载，网关只能读不能写
+      - ./inbox:/data/inbox:ro
     networks:
       - smart-erp-net
     expose:

@@ -60,7 +60,7 @@
 | `ERP_OBJECT_STORE_DRIVER` | local | local | minio |
 | `ERP_OBJECT_STORE_PATH` | /data/objects | /data/objects | /data/objects |
 | `ERP_U8_BASE_URL` | http://127.0.0.1:9090 | http://u8-demo.internal:8080 | http://u8.internal:8080 |
-| `ERP_FILE_INBOX` | —（用默认值） | —（用默认值） | —（用默认值） |
+| `ERP_FILE_INBOX` | —（留空=不启用） | /data/inbox | —（留空=不启用） |
 | `ERP_METERING_UNIT_PRICE` | 0.05 | 0.20 | 0.20 |
 | `ERP_METERING_CURRENCY` | CNY | CNY | CNY |
 | `ERP_METERING_UNIT_LABEL` | 行 | 行 | 行 |
@@ -74,9 +74,9 @@
 | `ERP_S3_REGION` | —（用默认值） | —（用默认值） | cn-south-1 |
 | `ERP_METERING_PRIOR_AMOUNT` | —（用默认值） | —（用默认值） | 0 |
 
-> `ERP_FILE_INBOX`（文件通道收件箱）：**demo / full 两档才有部署意义**（本地仅联调时按需），
-> 默认空 = 不挂载 file 连接器；显式设置但目录不存在/不可读时 connector-gw 启动失败，
-> 不静默降级成「少挂一个连接器」。当前 compose 未挂载 inbox 卷，开启前先给 connector-gw 增加卷映射。
+> `ERP_FILE_INBOX`（文件通道收件箱）：**demo 档默认开启**，connector-gw 以
+> `./inbox:/data/inbox:ro` 只读挂载；local / full / prod 留空 = 不启用。
+> 显式设置但目录不存在/不可读时 connector-gw 启动失败，不静默降级成「少挂一个连接器」。
 
 ## 3. 差异点与原因
 

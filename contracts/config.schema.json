@@ -313,8 +313,8 @@
     },
     "ERP_FILE_INBOX": {
       "type": "string",
-      "scope": "code",
-      "services": [],
+      "scope": "compose",
+      "services": ["connector-gw"],
       "required": false,
       "secret": false,
       "phase": "startup",
