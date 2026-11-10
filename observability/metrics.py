@@ -767,6 +767,10 @@ def install_metrics(
         return False
 
     resolved = path or source.get(METRICS_PATH_VAR) or DEFAULT_METRICS_PATH
+    if any(char.isspace() for char in resolved):
+        # 尾随空格会注册出一个永远匹配不到的路由：运维改 nginx deny 也跟着改，
+        # 而端点静默 404——属于「配了但不生效」，必须在启动期炸掉。
+        raise MetricError(f"metrics 路径不得含空白字符，实际 {resolved!r}")
     if not resolved.startswith("/"):
         raise MetricError(f"metrics 路径必须以 / 开头，实际 {resolved!r}")
 

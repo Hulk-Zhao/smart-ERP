@@ -85,6 +85,17 @@ def test_metrics_endpoint_reads_the_container_registry(monkeypatch) -> None:
     assert 'recon_batches_total{result="matched"} 1' in response.text
 
 
+def test_metrics_path_env_reaches_the_app_factory(monkeypatch) -> None:
+    """compose 注入的 ``ERP_METRICS_PATH`` 必须真的生效，否则它就是个死键。"""
+
+    monkeypatch.setenv("ERP_METRICS_ENABLED", "true")
+    monkeypatch.setenv("ERP_METRICS_PATH", "/probe")
+    client = TestClient(create_app(Settings(image_tag="test")))
+
+    assert client.get("/probe").status_code == 200
+    assert client.get("/metrics").status_code == 404
+
+
 def test_recon_run_is_observed_exactly_once(env) -> None:
     response = env.client.post(
         f"{PREFIX}/recon/runs", json=_body(env), headers=env.headers("initiator", "k-metrics")

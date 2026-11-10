@@ -319,6 +319,31 @@ def test_metrics_path_can_be_overridden_by_env() -> None:
     assert client.get("/metrics").status_code == 404
 
 
+@pytest.mark.parametrize("path", ["probe", " /probe", "/probe "])
+def test_metrics_path_rejects_invalid_values(path: str) -> None:
+    # 缺前导 / 与含空白（含尾随）都必须在启动期失败，不能静默落到默认或死路由
+    with pytest.raises(MetricError):
+        install_metrics(
+            FastAPI(),
+            MetricsRegistry(),
+            env={"ERP_METRICS_ENABLED": "on", "ERP_METRICS_PATH": path},
+        )
+
+
+def test_blank_metrics_path_falls_back_to_default() -> None:
+    # 空串按「未配置」处理：compose 的 ${VAR:-/metrics} 不会把空串送进来
+    app = FastAPI()
+    assert (
+        install_metrics(
+            app,
+            MetricsRegistry(),
+            env={"ERP_METRICS_ENABLED": "on", "ERP_METRICS_PATH": ""},
+        )
+        is True
+    )
+    assert TestClient(app).get("/metrics").status_code == 200
+
+
 def test_metrics_enabled_helper_only_accepts_truthy_values() -> None:
     for value in ("1", "true", "TRUE", "yes", "on"):
         assert metrics_enabled({"ERP_METRICS_ENABLED": value}) is True
