@@ -52,14 +52,20 @@ Create Date: 2026-11-11
 - 实现约束：Python ``Decimal`` 必须显式 ``ROUND_HALF_UP``（默认 HALF_EVEN 会在 ``x.xx5`` 少 1 分）。
 
 空价目表（上线当天必然遇到）：
-- ``ERP_METERING_REQUIRE_CONTRACT_PRICE=true`` 且表中无有效价 → 出账必须
-  **503 E-DATA-MISSING**，不得回退 ``ERP_METERING_UNIT_PRICE``；
-- 落地点（0008 实现期）：``apps/api/metering.py`` 的取价快照入口（批次创建与
-  statement 读路径共用同一函数）；用例
-  ``test_empty_price_book_is_503_when_contract_price_required``、
-  ``test_legacy_batch_without_snapshot_is_503_when_contract_price_required``、
-  ``test_snapshot_price_wins_over_current_price_book``（来源）与
-  ``test_statement_amount_is_reproducible_across_price_book_changes``（可复现性）；
+- ``ERP_METERING_REQUIRE_CONTRACT_PRICE=true`` 且表中无有效价 → 出账必须 **503**，
+  且**不复用** ``E-DATA-MISSING``（那会让人分不清「没配价」与「输入缺数据」）：
+  - 无任何生效价 → ``E-PRICE-MISSING``；
+  - 有价但币种不符 → ``E-PRICE-CURRENCY``（fail closed，禁止折算或改用其他币种）；
+  - 两者都带 ``context.currency / context.tenant_id / context.at`` 供排障，
+    但**不回显**价格表里其他币种的单价（那是别家的合同价）；
+- 不得回退 ``ERP_METERING_UNIT_PRICE``（``require=false`` 时才允许显式回落，
+  且快照的 ``unit_price_source`` 写 ``env_fallback``，不是静默）；
+- ``unit_price_source`` 是**封闭枚举** ``contract_price`` / ``env_fallback``，
+  未知值在 Python 读侧直接报错，DB 侧由 ``ck_recon_batch_price_snapshot`` 拒绝；
+- 落地点：``apps/api/price_book.py``（取价端口）与 ``apps/api/service.py``
+  （批次创建/账单读取共用同一取价口径）；用例见
+  ``tests/api/test_price_snapshot.py`` 与
+  ``tests/api/test_recon_store_sql.py::test_new_batch_takes_new_price_while_old_batch_keeps_snapshot``；
 - 上线首条价目（占位值必须替换，否则示例价会真的进账单）::
 
     INSERT INTO erp.metering_price_book
@@ -154,13 +160,11 @@ def upgrade() -> None:
         ALTER TABLE erp.recon_batch
           ADD CONSTRAINT ck_recon_batch_price_snapshot CHECK (
             unit_price_source IS NULL
-            OR (unit_price_source = 'missing'
-                AND unit_price IS NULL AND price_book_id IS NULL)
+            OR (unit_price_source = 'contract_price'
+                AND unit_price IS NOT NULL AND price_book_id IS NOT NULL
+                AND currency IS NOT NULL)
             OR (unit_price_source = 'env_fallback'
                 AND unit_price IS NOT NULL AND price_book_id IS NULL
-                AND currency IS NOT NULL)
-            OR (unit_price_source IN ('snapshot', 'lookback')
-                AND unit_price IS NOT NULL AND price_book_id IS NOT NULL
                 AND currency IS NOT NULL)
           )
         """,

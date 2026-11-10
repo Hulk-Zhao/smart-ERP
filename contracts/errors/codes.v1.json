@@ -168,6 +168,28 @@
       "title": "W3 动作被拒"
     },
     {
+      "code": "E-PRICE-CURRENCY",
+      "fail_code": "F1",
+      "http_status": 503,
+      "http_statuses": [
+        503
+      ],
+      "next_step": "核对 ERP_METERING_CURRENCY 与合同价目币种；禁止跨币种折算",
+      "retriable": true,
+      "title": "价目币种与批次币种不符"
+    },
+    {
+      "code": "E-PRICE-MISSING",
+      "fail_code": "F1",
+      "http_status": 503,
+      "http_statuses": [
+        503
+      ],
+      "next_step": "在合同价目表登记生效价（找商务/运维），不是补业务单据",
+      "retriable": true,
+      "title": "无生效合同价"
+    },
+    {
       "code": "E-RESOURCE-NOTFOUND",
       "fail_code": null,
       "http_status": 404,

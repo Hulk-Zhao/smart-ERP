@@ -58,8 +58,11 @@ app 装配由平台底座负责：`apps/main.py` 调用 `install_platform(app)`�
   与 statement 的四类计数由**同一个分类函数**产出；差异列表同样返回该字段并支持
   `billing_bucket=` 过滤，避免「计数说争议挂起 2、列表却有 3 行」。
 - 缺失字段（已确认错放行/客户原因/是否被人改过/工单号/前像后像）返回 null，并在
-  `data_gaps` 写明 `owner_role`（谁负责提供）与 `action`（需要提供什么）；
-  单行单价只从 `ERP_METERING_UNIT_PRICE` 读取，未配置返回 503。
+  `data_gaps` 写明 `owner_role`（谁负责提供）与 `action`（需要提供什么）。
+- 单价来源是封闭枚举：`contract_price`（合同价目表快照）或 `env_fallback`
+  （`ERP_METERING_UNIT_PRICE` 显式回落）。`ERP_METERING_REQUIRE_CONTRACT_PRICE=true`
+  时禁止回落：无生效价返回 503 `E-PRICE-MISSING`，有价但币种不符返回 503
+  `E-PRICE-CURRENCY`；两者都带 `context.currency/tenant_id/at`，**不回显其他币种单价**。
 
 ## 对账结果留存（append-only）
 - `POST /v1/recon/runs` 成功后，批次头与逐行快照落库，statement 读持久化快照；
@@ -83,7 +86,8 @@ app 装配由平台底座负责：`apps/main.py` 调用 `install_platform(app)`�
 
 ## 错误格式
 `application/problem+json`，字段：`type`、`title`、`status`、`detail`、`code`、
-`trace_id`、`retriable`、`fail_code`。常用映射：
+`trace_id`、`retriable`、`fail_code`、`context`（可选，结构化排障字段，如
+`currency / tenant_id / at`；**不含**任何单价）。常用映射：
 
 | HTTP | code | 含义 |
 | --- | --- | --- |
@@ -102,8 +106,12 @@ app 装配由平台底座负责：`apps/main.py` 调用 `install_platform(app)`�
 | 422 | E-PARSE-FAILED | 入参/游标/金额解析失败 |
 | 503 | E-CONN-UNAVAILABLE | 连接器不可用或凭据交换失败 |
 | 503 | E-DATA-MISSING | 计量配置缺失（未配置 ERP_METERING_UNIT_PRICE） |
+| 503 | E-PRICE-MISSING | 合同价目表无生效价（`ERP_METERING_REQUIRE_CONTRACT_PRICE=true`） |
+| 503 | E-PRICE-CURRENCY | 价目表有价但无批次币种的价，禁止跨币种折算 |
 
 `E-DATA-MISSING` 只表示「数据/配置缺失」（422 请求侧缺必填数据、503 服务侧配置缺失）；
+`E-PRICE-*` 专指「合同价目」这条配置链，处理人是商务/运维（补价格表、核对币种），
+与「输入单据不全」的 `E-DATA-MISSING` 分开；
 凡「对象不存在」一律 404 `E-RESOURCE-NOTFOUND`，客户端不必再用字符串猜语义。
 """
 

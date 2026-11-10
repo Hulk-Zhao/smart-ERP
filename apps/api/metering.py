@@ -27,10 +27,10 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
-from apps.api.recon_snapshot import BatchSnapshot, SnapshotLine
+from apps.api.recon_snapshot import BatchSnapshot, SnapshotLine, UnitPriceSource
 from apps.api.schemas import (
     BillingBucket,
     EvidenceOut,
@@ -48,7 +48,6 @@ ENV_UNIT_LABEL = "ERP_METERING_UNIT_LABEL"
 ENV_CAP_AMOUNT = "ERP_METERING_CAP_AMOUNT"
 ENV_PRIOR_AMOUNT = "ERP_METERING_PRIOR_AMOUNT"
 
-UNIT_PRICE_SOURCE = ENV_UNIT_PRICE
 MONEY_EXP = Decimal("0.0001")
 DEFAULT_UNIT_LABEL = "行"
 
@@ -149,9 +148,13 @@ class MeteringPolicy:
         if unit_price <= 0:
             raise MeteringConfigError(f"{ENV_UNIT_PRICE} 必须大于 0，实际为 {raw_price!r}")
 
-        currency = (source.get(ENV_CURRENCY) or "CNY").strip()
-        if len(currency) < 3 or len(currency) > 8:
-            raise MeteringConfigError(f"{ENV_CURRENCY} 必须是 3-8 位币种代码")
+        # 0008 起批次快照的 currency 是 char(3) 且带 ISO 形状 CHECK；这里提前拒绝
+        # 'USDT' / 'cny' 这类值，避免落库时才失败（也避免「账单币种」与「快照币种」不一致）。
+        currency = (source.get(ENV_CURRENCY) or "CNY").strip().upper()
+        if len(currency) != 3 or not currency.isascii() or not currency.isalpha():
+            raise MeteringConfigError(
+                f"{ENV_CURRENCY} 必须是三位大写 ISO 币种代码，实际为 {currency!r}"
+            )
 
         unit_label = (source.get(ENV_UNIT_LABEL) or DEFAULT_UNIT_LABEL).strip()
 
@@ -226,15 +229,25 @@ def build_statement(
     customer_reason: int | None = None
     billable_count = len(by_bucket[BillingBucket.BILLABLE])
 
-    unit_price = policy.unit_price.quantize(MONEY_EXP)
-    period_amount = (Decimal(billable_count) * unit_price).quantize(MONEY_EXP)
-    prior_amount = policy.prior_amount.quantize(MONEY_EXP)
-    cumulative = (prior_amount + period_amount).quantize(MONEY_EXP)
+    # 显式 ROUND_HALF_UP：Decimal 默认 HALF_EVEN 会在 x.xx5 少 1 分（0008 的取整口径）。
+    # 批次级只保留 4 位、不取整到分；账期汇总层才做唯一一次取整。
+    unit_price = policy.unit_price.quantize(MONEY_EXP, rounding=ROUND_HALF_UP)
+    period_amount = (Decimal(billable_count) * unit_price).quantize(
+        MONEY_EXP, rounding=ROUND_HALF_UP
+    )
+    prior_amount = policy.prior_amount.quantize(MONEY_EXP, rounding=ROUND_HALF_UP)
+    cumulative = (prior_amount + period_amount).quantize(
+        MONEY_EXP, rounding=ROUND_HALF_UP
+    )
     cap_amount = (
-        policy.cap_amount.quantize(MONEY_EXP) if policy.cap_amount is not None else None
+        policy.cap_amount.quantize(MONEY_EXP, rounding=ROUND_HALF_UP)
+        if policy.cap_amount is not None
+        else None
     )
     cap_remaining = (
-        (cap_amount - cumulative).quantize(MONEY_EXP) if cap_amount is not None else None
+        (cap_amount - cumulative).quantize(MONEY_EXP, rounding=ROUND_HALF_UP)
+        if cap_amount is not None
+        else None
     )
     cap_exceeded = cap_remaining is not None and cap_remaining < 0
 
@@ -318,7 +331,10 @@ def build_statement(
             other_reasons=other_reasons,
         ),
         unit_price=f"{unit_price:.4f}",
-        unit_price_source=UNIT_PRICE_SOURCE,
+        # 封闭枚举，不使用自由字符串：旧快照/旧路径一律视为 env 回落。
+        unit_price_source=(
+            snapshot.unit_price_source or UnitPriceSource.ENV_FALLBACK
+        ).value,
         currency=policy.currency,
         period_amount=f"{period_amount:.4f}",
         prior_cumulative_amount=f"{prior_amount:.4f}",
@@ -490,7 +506,6 @@ __all__ = [
     "ENV_UNIT_LABEL",
     "ENV_UNIT_PRICE",
     "METERING_LINE_COLUMNS",
-    "UNIT_PRICE_SOURCE",
     "MeteringConfigError",
     "MeteringPolicy",
     "build_statement",

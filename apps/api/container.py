@@ -15,6 +15,7 @@ from typing import Any
 
 from apps.api.errors import IdemConflict
 from apps.api.metering import MeteringPolicy
+from apps.api.price_book import PriceBookLookup
 from apps.api.recon_store import ReconStore
 from apps.api.store import (
     ReconBatchRepository,
@@ -115,6 +116,8 @@ class ApiContainer:
     recon_store: ReconStore | None = None
     #: 进程内指标注册表；业务埋点与 ``/metrics`` 必须共用这一个实例。
     metrics: MetricsRegistry = field(default_factory=MetricsRegistry)
+    #: 合同价目取价端口；None 时使用 PostgreSQL 实现（测试注入假实现，不连库）。
+    price_book: PriceBookLookup | None = None
     clock: Callable[[], datetime] = field(
         default=lambda: datetime.now(UTC)
     )

@@ -33,6 +33,9 @@ class ErrorCode(str, Enum):
     VERIFY_MISMATCH = "E-VERIFY-MISMATCH"
     CONFLICT_VERSION = "E-CONFLICT-VERSION"
     EXTERNAL_EFFECTIVE = "E-EXTERNAL-EFFECTIVE"
+    # 合同价目取价失败：与 E-DATA-MISSING 分开，运维才能分清「没配价」和「输入缺数据」。
+    PRICE_MISSING = "E-PRICE-MISSING"
+    PRICE_CURRENCY = "E-PRICE-CURRENCY"
 
 
 FailCode = Literal["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8"]
@@ -116,6 +119,24 @@ ERROR_SPECS: dict[ErrorCode, ErrorSpec] = {
     ErrorCode.EXTERNAL_EFFECTIVE: ErrorSpec(
         ErrorCode.EXTERNAL_EFFECTIVE, 409, "F8", False, "外部已生效", "生成处置任务（不可回滚）"
     ),
+    # 取价失败是「服务侧配置缺失」，不是请求数据缺失：不限流、可重试（补价后）。
+    # 两个码必须分开：无任何生效价 → 找商务/运维补价格表；有价但币种不符 → 核对配置币种。
+    ErrorCode.PRICE_MISSING: ErrorSpec(
+        ErrorCode.PRICE_MISSING,
+        503,
+        "F1",
+        True,
+        "无生效合同价",
+        "在合同价目表登记生效价（找商务/运维），不是补业务单据",
+    ),
+    ErrorCode.PRICE_CURRENCY: ErrorSpec(
+        ErrorCode.PRICE_CURRENCY,
+        503,
+        "F1",
+        True,
+        "价目币种与批次币种不符",
+        "核对 ERP_METERING_CURRENCY 与合同价目币种；禁止跨币种折算",
+    ),
 }
 
 
@@ -131,9 +152,18 @@ class ProblemDetail(BaseModel):
     trace_id: str | None = None
     retriable: bool = False
     fail_code: FailCode | None = None
+    # 排障上下文（如 currency / tenant_id / at）。只放「定位问题所需的最小事实」，
+    # 严禁把价格表里其他币种的单价塞进来——那是别人的合同价。
+    context: dict[str, str] | None = None
 
 
-def problem(code: ErrorCode, detail: str, *, trace_id: str | None = None) -> ProblemDetail:
+def problem(
+    code: ErrorCode,
+    detail: str,
+    *,
+    trace_id: str | None = None,
+    context: dict[str, str] | None = None,
+) -> ProblemDetail:
     spec = ERROR_SPECS[code]
     return ProblemDetail(
         code=code,
@@ -142,6 +172,7 @@ def problem(code: ErrorCode, detail: str, *, trace_id: str | None = None) -> Pro
         trace_id=trace_id,
         retriable=spec.retriable,
         fail_code=spec.fail_code,
+        context=context,
     )
 
 

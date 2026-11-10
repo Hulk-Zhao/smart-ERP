@@ -34,16 +34,23 @@ import time
 import uuid
 from collections.abc import Iterator
 from datetime import datetime
+from decimal import Decimal
+from uuid import UUID
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from apps.api import service as api_service
+from apps.api.container import ApiContainer
 from apps.api.metering import PRICE_LOOKUP_SQL
+from apps.api.price_book import SqlPriceBook
+from apps.api.recon_snapshot import BatchSnapshot, UnitPriceSource
+from apps.api.recon_store import SqlReconStore
 from apps.platform.contracts.export_contracts import ROOT
 
 IMAGE = os.environ.get("ERP_PG_TEST_IMAGE", "postgres:15-alpine")
@@ -61,6 +68,8 @@ PRICE_COLUMNS = (
 TENANT_A = "11111111-1111-1111-1111-111111111111"
 TENANT_B = "22222222-2222-2222-2222-222222222222"
 APPROVER = "33333333-3333-3333-3333-333333333333"
+#: 「同一段取价代码在不同时刻」用例专用租户，避免与其他用例的价目行互相干扰。
+TENANT_C = str(uuid.uuid4())
 
 # 还原 00-provision.sql 的关键部分：没有这段默认授权，REVOKE 就是空操作。
 PROVISION_SQL = """
@@ -255,6 +264,7 @@ def _batch_insert(
     fingerprint: str = "fp-price-book",
     unit_price: str = "0.3000",
     currency: str = "CNY",
+    unit_price_source: str = "contract_price",
 ) -> str:
     batch_id = batch_id or uuid.uuid4()
     return f"""
@@ -265,7 +275,7 @@ def _batch_insert(
       VALUES
         ('{batch_id}', '{tenant_id}', 'org-1', '2026-10', 'conclusive', true, 'ok',
          ARRAY[]::text[], ARRAY[]::text[], '{fingerprint}', '{APPROVER}',
-         {unit_price}, '{currency}', 'snapshot', '{price_book_id}')
+         {unit_price}, '{currency}', '{unit_price_source}', '{price_book_id}')
     """
 
 
@@ -314,6 +324,37 @@ def test_app_role_can_select_and_insert(provisioned_pg) -> None:
     )
     assert str(rows[0][0]) == "0.3000"
     assert str(rows[0][1]).strip() == "CNY"
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["snapshot", "lookback", "missing", "CONTRACT_PRICE", ""],
+    ids=["snapshot", "lookback", "missing", "upper-case", "empty"],
+)
+def test_unit_price_source_closed_enum_is_enforced_by_check(
+    provisioned_pg, source: str
+) -> None:
+    """``unit_price_source`` 是封闭枚举：自由字符串在 DB 层就必须被 CHECK 拒绝。"""
+
+    _, migrator_url, _ = provisioned_pg
+    tenant = str(uuid.uuid4())  # 每个参数化分支独立租户，避免撞 unique 区间
+    price_id = uuid.uuid4()
+    run_sql(
+        migrator_url,
+        _price_insert(price_id, tenant, "2026-07-01T00:00:00+08:00", contract_ref="HT-ENUM"),
+    )
+
+    with pytest.raises(DBAPIError) as excinfo:
+        run_sql(
+            migrator_url,
+            _batch_insert(
+                tenant,
+                price_id,
+                fingerprint=f"fp-enum-{source or 'empty'}",
+                unit_price_source=source,
+            ),
+        )
+    assert "ck_recon_batch_price_snapshot" in str(excinfo.value)
 
 
 def test_cross_tenant_supersedes_is_rejected(provisioned_pg) -> None:
@@ -373,7 +414,7 @@ def test_same_tenant_batch_snapshot_is_accepted(provisioned_pg) -> None:
         "SELECT unit_price_source, price_book_id, currency FROM erp.recon_batch"
         f" WHERE id = '{batch_id}'",
     )
-    assert rows[0][0] == "snapshot"
+    assert rows[0][0] == "contract_price"
     assert str(rows[0][1]) == str(own_price)
     assert str(rows[0][2]).strip() == "CNY"
 
@@ -548,6 +589,107 @@ def test_batch_snapshot_is_not_rewritten_by_price_correction(provisioned_pg) -> 
         f"WHERE id = '{batch_id}'",
     )
     assert [(str(rows[0][0]), str(rows[0][1]))] == [("2.0000", str(wrong))]
+
+
+def _snapshot(tenant_id: str, at: str, fingerprint: str) -> BatchSnapshot:
+    return BatchSnapshot(
+        batch_id=uuid.uuid4(),
+        tenant_id=UUID(tenant_id),
+        org_id="org-1",
+        period="2026-10",
+        system_ids=(),
+        suppliers=(),
+        status="conclusive",
+        conclusive=True,
+        status_reason="ok",
+        metrics=None,
+        input_fingerprint=fingerprint,
+        rerun_of=None,
+        rerun_reason=None,
+        created_by=UUID(APPROVER),
+        created_at=datetime.fromisoformat(at),
+        lines=(),
+    )
+
+
+def test_new_batch_takes_new_price_while_old_batch_keeps_snapshot(
+    provisioned_pg, monkeypatch
+) -> None:
+    """成对断言：同一段取价代码，纠错前后各建一个批次，各自拿到**当时**的价。
+
+    只证明「旧批次不变」不够——整段取价逻辑没生效时旧批次当然也不变。
+    必须同时证明「新批次会变」，否则这两个断言各自都能假绿。
+    """
+
+    _, _, app_url = provisioned_pg
+    monkeypatch.setenv("ERP_METERING_CURRENCY", "CNY")
+    monkeypatch.delenv("ERP_METERING_REQUIRE_CONTRACT_PRICE", raising=False)
+
+    old_price = uuid.uuid4()
+    fixed_price = uuid.uuid4()
+    engine = create_async_engine(app_url, poolclass=NullPool)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def _flow() -> tuple[BatchSnapshot | None, BatchSnapshot | None]:
+        async with factory() as session:
+            await session.execute(
+                text(
+                    _price_insert(
+                        old_price, TENANT_C, "2030-01-01T00:00:00+08:00",
+                        unit_price="2.0000", contract_ref="HT-OLD",
+                    )
+                )
+            )
+            await session.commit()
+
+        container = ApiContainer(price_book=SqlPriceBook(factory))
+        store = SqlReconStore(factory)
+        batch_a, error_a = await api_service._price_snapshot(
+            container, _snapshot(TENANT_C, "2030-01-15T00:00:00+08:00", "fp-a")
+        )
+        assert error_a is None
+        await store.save(batch_a)
+
+        # 纠错：2.0000 是错价，新行 1.5000 从 2030-02-01 起成为生效价。
+        async with factory() as session:
+            await session.execute(
+                text(
+                    _price_insert(
+                        fixed_price, TENANT_C, "2030-02-01T00:00:00+08:00",
+                        unit_price="1.5000", contract_ref="HT-FIX",
+                        supersedes=old_price,
+                    )
+                )
+            )
+            await session.commit()
+
+        batch_b, error_b = await api_service._price_snapshot(
+            container, _snapshot(TENANT_C, "2030-02-15T00:00:00+08:00", "fp-b")
+        )
+        assert error_b is None
+        await store.save(batch_b)
+
+        loaded_a = await SqlReconStore(factory).load(batch_a.batch_id, batch_a.tenant_id)
+        loaded_b = await SqlReconStore(factory).load(batch_b.batch_id, batch_b.tenant_id)
+        return loaded_a, loaded_b
+
+    try:
+        loaded_a, loaded_b = asyncio.run(_flow())
+    finally:
+        asyncio.run(engine.dispose())
+
+    assert loaded_a is not None and loaded_b is not None
+    # 同一条用例里的成对断言：A 停在旧价，B 取到新价。
+    assert (
+        loaded_a.unit_price,
+        loaded_a.unit_price_source,
+        loaded_a.price_book_id,
+    ) == (Decimal("2.0000"), UnitPriceSource.CONTRACT_PRICE, old_price)
+    assert (
+        loaded_b.unit_price,
+        loaded_b.unit_price_source,
+        loaded_b.price_book_id,
+    ) == (Decimal("1.5000"), UnitPriceSource.CONTRACT_PRICE, fixed_price)
 
 
 def test_downgrade_drops_price_snapshot_and_upgrade_restores(provisioned_pg) -> None:

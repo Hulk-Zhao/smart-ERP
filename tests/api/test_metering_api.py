@@ -127,7 +127,8 @@ def test_statement_classifies_lines_and_amounts(env, monkeypatch):
     assert body["customer_reason_lines"] is None
     assert body["human_reviewed_lines"] is None
     assert body["unit_price"] == "0.3000"
-    assert body["unit_price_source"] == "ERP_METERING_UNIT_PRICE"
+    # 来源是封闭枚举（contract_price / env_fallback），不是自由字符串。
+    assert body["unit_price_source"] == "env_fallback"
     assert body["period_amount"] == "0.3000"
     assert body["prior_cumulative_amount"] == "1.0000"
     assert body["cumulative_amount"] == "1.3000"

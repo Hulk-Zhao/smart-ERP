@@ -16,8 +16,9 @@ import hashlib
 import json
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import replace
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -29,6 +30,7 @@ from apps.agents.state_machine import (
 )
 from apps.api.container import ApiContainer
 from apps.api.metering import (
+    MONEY_EXP,
     MeteringConfigError,
     MeteringPolicy,
     build_statement,
@@ -36,7 +38,17 @@ from apps.api.metering import (
     statement_csv,
 )
 from apps.api.pagination import offset_cursor, page_bounds, read_offset
-from apps.api.recon_snapshot import BatchSnapshot, snapshot_from_batch
+from apps.api.price_book import (
+    PriceBookLookup,
+    SqlPriceBook,
+    metering_currency,
+    require_contract_price,
+)
+from apps.api.recon_snapshot import (
+    BatchSnapshot,
+    UnitPriceSource,
+    snapshot_from_batch,
+)
 from apps.api.recon_store import ReconConflict, ReconStore, SqlReconStore
 from apps.api.schemas import (
     ActionIn,
@@ -955,21 +967,25 @@ async def run_recon(
             created_at=datetime.now(UTC),
         )
         input_fingerprint = request_fingerprint(body.model_dump(mode="json"))
+        snapshot = snapshot_from_batch(
+            batch,
+            input_fingerprint=input_fingerprint,
+            rerun_of=body.rerun_of,
+            rerun_reason=body.rerun_reason,
+            view=_batch_view(batch),
+        )
+        # 取价属于 persist 阶段的准备动作：stage 游标已推进到 persist，失败由
+        # E-PRICE-* 标明原因（stage 表示走到哪，code 表示为什么）。
         stage = "persist"
+        snapshot, price_error = await _price_snapshot(container, snapshot)
         try:
-            await _recon_store(container).save(
-                snapshot_from_batch(
-                    batch,
-                    input_fingerprint=input_fingerprint,
-                    rerun_of=body.rerun_of,
-                    rerun_reason=body.rerun_reason,
-                    view=_batch_view(batch),
-                )
-            )
+            # 取价失败也先落库：批次是审计对象，失败原因要看得到。四字段要么全有、要么全 NULL。
+            await _recon_store(container).save(snapshot)
         except ReconConflict as exc:
-            raise ProblemError(
-                ErrorCode.IDEM_CONFLICT, str(exc), status_code=409
-            ) from exc
+            raise ProblemError(ErrorCode.IDEM_CONFLICT, str(exc), status_code=409) from exc
+        if price_error is not None:
+            # 已落库的失败批次不再进入内存「成功批次」列表；调用方拿到的是可区分原因的 503。
+            raise price_error
         container.recon_batches.add(batch)
         # 每批次只记一次：observe_recon_result 已含批次计数，不要再叠加 record_recon_batch。
         container.metrics.observe_recon_result(
@@ -987,6 +1003,79 @@ async def run_recon(
             stage=stage, code=RECON_FAILURE_UNCLASSIFIED
         )
         raise
+
+
+async def _price_snapshot(
+    container: ApiContainer, snapshot: BatchSnapshot
+) -> tuple[BatchSnapshot, ProblemError | None]:
+    """按创建时刻取一次价并写进快照；失败时返回**四字段全 NULL** 的快照 + 待抛错误。
+
+    口径：
+    - 有生效价 → ``contract_price`` + ``price_book_id``；
+    - 无价且 ``require=true`` → 不回退 env，返回 ``E-PRICE-MISSING`` /
+      ``E-PRICE-CURRENCY``（有价但币种不符）并保持四字段全 NULL；
+    - 无价且 ``require=false`` → 显式回落 ``ERP_METERING_UNIT_PRICE``（``env_fallback``）；
+      env 也未配置时同样保持全 NULL（旧批次行为，读取时再按原规则报 503）。
+    """
+
+    context = {
+        "tenant_id": str(snapshot.tenant_id),
+        "at": snapshot.created_at.isoformat(),
+    }
+    try:
+        currency = metering_currency()
+    except ValueError as exc:
+        # 币种配置非法同样是「价格链配置问题」，不能退化成输入数据缺失。
+        return snapshot, ProblemError(
+            ErrorCode.PRICE_CURRENCY, str(exc), context=context
+        )
+    context["currency"] = currency
+
+    lookup = await _price_book(container).effective_price(
+        tenant_id=snapshot.tenant_id, currency=currency, at=snapshot.created_at
+    )
+    quote = lookup.quote
+    if quote is not None:
+        return (
+            replace(
+                snapshot,
+                unit_price=quote.unit_price,
+                currency=quote.currency,
+                unit_price_source=UnitPriceSource.CONTRACT_PRICE,
+                price_book_id=quote.price_book_id,
+            ),
+            None,
+        )
+
+    if require_contract_price():
+        if lookup.has_other_currency_price:
+            return snapshot, ProblemError(
+                ErrorCode.PRICE_CURRENCY,
+                f"价目表有生效价但没有 {currency} 币种的价；禁止跨币种折算，"
+                "请登记该币种价或核对 ERP_METERING_CURRENCY",
+                context=context,
+            )
+        return snapshot, ProblemError(
+            ErrorCode.PRICE_MISSING,
+            f"合同价目表在 {snapshot.created_at.isoformat()} 没有生效价，"
+            "且 ERP_METERING_REQUIRE_CONTRACT_PRICE=true 禁止回退环境单价",
+            context=context,
+        )
+
+    policy = _try_metering_policy(container)
+    if policy is None:
+        # 没有合同价、也没有 env 单价：保持全 NULL；账单读取时沿用原有的
+        # E-DATA-MISSING 503（这是既有部署语义，不在 0008 里改动）。
+        return snapshot, None
+    return (
+        replace(
+            snapshot,
+            unit_price=policy.unit_price.quantize(MONEY_EXP, rounding=ROUND_HALF_UP),
+            currency=policy.currency,
+            unit_price_source=UnitPriceSource.ENV_FALLBACK,
+        ),
+        None,
+    )
 
 
 def _recon_raw(scope: Scope, body: ReconRunIn, dataset: Any) -> dict[str, Any]:
@@ -1014,9 +1103,19 @@ async def get_recon_batch(
     return ReconBatchOut.model_validate(view["batch"])
 
 
-def _metering_policy(container: ApiContainer) -> MeteringPolicy:
+def _try_metering_policy(container: ApiContainer) -> MeteringPolicy | None:
     if container.metering is not None:
         return container.metering
+    try:
+        return MeteringPolicy.from_env()
+    except MeteringConfigError:
+        return None
+
+
+def _metering_policy(container: ApiContainer) -> MeteringPolicy:
+    policy = _try_metering_policy(container)
+    if policy is not None:
+        return policy
     try:
         return MeteringPolicy.from_env()
     except MeteringConfigError as exc:
@@ -1030,6 +1129,48 @@ def _recon_store(container: ApiContainer) -> ReconStore:
     store = SqlReconStore()
     container.recon_store = store
     return store
+
+
+def _price_book(container: ApiContainer) -> PriceBookLookup:
+    if container.price_book is not None:
+        return container.price_book
+    book = SqlPriceBook()
+    container.price_book = book
+    return book
+
+
+def _statement_policy(
+    container: ApiContainer, snapshot: BatchSnapshot
+) -> MeteringPolicy:
+    """账单单价：批次快照优先；没有快照的旧批次才走 env 配置。
+
+    单价一旦随批次落快照，后续改价/补价都不会改写历史账单；封顶与已计金额
+    仍按当前配置（它们是期间口径，不是批次事实）。
+    """
+
+    if snapshot.unit_price is not None:
+        base = _try_metering_policy(container) or MeteringPolicy(
+            unit_price=snapshot.unit_price,
+            currency=snapshot.currency or "CNY",
+        )
+        return replace(
+            base,
+            unit_price=snapshot.unit_price,
+            currency=snapshot.currency or base.currency,
+        )
+
+    if require_contract_price():
+        raise ProblemError(
+            ErrorCode.PRICE_MISSING,
+            f"对账批次 {snapshot.batch_id} 没有单价快照（创建于合同价要求之前）；"
+            "请重跑该批次以生成快照",
+            status_code=503,
+            context={
+                "tenant_id": str(snapshot.tenant_id),
+                "at": snapshot.created_at.isoformat(),
+            },
+        )
+    return _metering_policy(container)
 
 
 async def _load_snapshot(
@@ -1065,7 +1206,7 @@ async def get_metering_statement(
 
     scope = _require_scope(session, build_scope(scope_in))
     snapshot = await _load_snapshot(container, session, scope, batch_id)
-    return build_statement(snapshot, _metering_policy(container))
+    return build_statement(snapshot, _statement_policy(container, snapshot))
 
 
 async def export_metering_csv(

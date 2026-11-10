@@ -55,7 +55,8 @@ class ConfigSchemaTest(unittest.TestCase):
         code, out, err = run(["--all"])
         self.assertEqual(code, 0, err)
         self.assertIn("PASS", out)
-        self.assertIn("63 个键", out)
+        # 0008 新增 ERP_METERING_REQUIRE_CONTRACT_PRICE（63 -> 64）。
+        self.assertIn("64 个键", out)
 
     def test_observability_keys_are_registered(self):
         """代码读点必须在 .env.example 有对应项（配置面不许说谎）。"""

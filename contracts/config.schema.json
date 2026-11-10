@@ -511,7 +511,7 @@
       "secret": false,
       "phase": "startup",
       "default": "CNY",
-      "description": "计量币种（3-8 位代码）"
+      "description": "计量币种（三位大写 ISO 代码，如 CNY）"
     },
     "ERP_METERING_PRIOR_AMOUNT": {
       "type": "string",
@@ -522,6 +522,16 @@
       "phase": "startup",
       "default": null,
       "description": "历史已计金额，未配置按 0"
+    },
+    "ERP_METERING_REQUIRE_CONTRACT_PRICE": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": null,
+      "description": "true 时禁止回落到 ERP_METERING_UNIT_PRICE：无生效合同价返回 503 E-PRICE-MISSING，有价但币种不符返回 503 E-PRICE-CURRENCY"
     },
     "ERP_METERING_UNIT_LABEL": {
       "type": "string",
