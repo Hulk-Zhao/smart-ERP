@@ -67,6 +67,21 @@ class AuditStore(Protocol):
 
     async def chain(self, tenant_id: UUID) -> list[AuditImage]: ...
 
+    async def chain_page(
+        self, tenant_id: UUID, *, cursor: int, limit: int
+    ) -> tuple[list[AuditImage], int]:
+        """按追加顺序取 ``cursor`` 之后最多 ``limit`` 条，返回 ``(rows, next_cursor)``。
+
+        巡检用：一次只把一页读进内存，避免全链加载把 scheduler（96MiB）撑爆。
+        ``cursor`` 是实现内部的单调位置（PG 为 ``chain_seq``，内存为下标），
+        只由本方法返回、不跨实现复用。
+        """
+        ...
+
+    async def tenant_ids(self) -> list[UUID]:
+        """存在审计影像的租户列表（巡检轮转用）。"""
+        ...
+
     async def last_hash(self, tenant_id: UUID) -> str: ...
 
     async def record_anchor(self, anchor: AuditAnchor) -> None: ...
@@ -97,6 +112,17 @@ class InMemoryAuditStore:
 
     async def chain(self, tenant_id: UUID) -> list[AuditImage]:
         return list(self._rows.get(tenant_id, []))
+
+    async def chain_page(
+        self, tenant_id: UUID, *, cursor: int, limit: int
+    ) -> tuple[list[AuditImage], int]:
+        _check_page_args(cursor, limit)
+        rows = self._rows.get(tenant_id, [])
+        page = rows[cursor : cursor + limit]
+        return list(page), cursor + len(page)
+
+    async def tenant_ids(self) -> list[UUID]:
+        return sorted(tenant for tenant, rows in self._rows.items() if rows)
 
     async def last_hash(self, tenant_id: UUID) -> str:
         rows = self._rows.get(tenant_id, [])
@@ -190,6 +216,33 @@ class SqlAuditStore:
             rows = (await session.execute(stmt)).scalars().all()
         return [_to_image(row) for row in rows]
 
+    async def chain_page(
+        self, tenant_id: UUID, *, cursor: int, limit: int
+    ) -> tuple[list[AuditImage], int]:
+        _check_page_args(cursor, limit)
+        stmt = (
+            select(AuditImageRow)
+            .where(
+                AuditImageRow.tenant_id == tenant_id,
+                AuditImageRow.chain_seq > cursor,
+            )
+            .order_by(AuditImageRow.chain_seq)
+            .limit(limit)
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        next_cursor = int(rows[-1].chain_seq) if rows else cursor
+        return [_to_image(row) for row in rows], next_cursor
+
+    async def tenant_ids(self) -> list[UUID]:
+        stmt = (
+            select(AuditImageRow.tenant_id)
+            .distinct()
+            .order_by(AuditImageRow.tenant_id)
+        )
+        async with self._session_factory() as session:
+            return [row[0] for row in (await session.execute(stmt)).all()]
+
     async def last_hash(self, tenant_id: UUID) -> str:
         stmt = (
             select(AuditImageRow.hash)
@@ -248,6 +301,15 @@ def _to_image(row: AuditImageRow) -> AuditImage:
             "created_at": row.created_at,
         }
     )
+
+
+def _check_page_args(cursor: int, limit: int) -> None:
+    """游标分页参数自检：负数游标会静默从头开始，必须炸掉而不是悄悄重扫。"""
+
+    if cursor < 0:
+        raise ValueError(f"cursor 不得为负，实际 {cursor}")
+    if limit <= 0:
+        raise ValueError(f"limit 必须 > 0，实际 {limit}")
 
 
 def _jsonable(value: Any) -> Any:

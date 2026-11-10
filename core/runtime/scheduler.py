@@ -14,6 +14,8 @@
   或「已过期」时才更新成功并 ``RETURNING``，否则没有行 = 没抢到；
 - tick：回收租约过期的 ``running`` 任务（``JobQueueStore.reclaim_stale``），
   可选跑全链审计巡检（``--audit-verify``，断链会被 ``AuditGuard`` 冻结写入）；
+  默认还会每 60s 跑一个 ``audit_image`` 链校验时间片（``--no-audit-image-scan``
+  可关），结论写入 ``smart_erp_audit_chain_broken``；
 - 退出：释放租约（``owner`` 置空、``expires_at`` 置 now），下一个副本立即接管。
 """
 
@@ -31,10 +33,13 @@ from typing import Sequence
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from apps.audit.ledger import AuditLedger
+from apps.audit.monitor import AuditChainMonitor
+from apps.audit.store import SqlAuditStore
 from apps.platform.config import get_settings
 from apps.platform.db.session import build_engine, build_session_factory
-
 from core.runtime.queue import JobQueueStore
+from observability.metrics import MetricsRegistry
 
 logger = logging.getLogger("erp.scheduler")
 
@@ -43,6 +48,13 @@ DEFAULT_SCOPE = "scheduler"
 # 进程被强杀后最多 30s 另一个副本即可接管。
 DEFAULT_LEASE_SECONDS = 30.0
 DEFAULT_TICK_SECONDS = 5.0
+# 审计影像链巡检：每 60s 跑一个时间片、每片最多 2000 行、每页 200 行。
+# 依据（台账「10 万行 44 秒」≈0.44ms/行）：2000 行约 0.9s，scheduler 容器 96MiB
+# 下单页 200 行的瞬时占用约几 MB；10 万行一轮约 50 个时间片 ≈ 50min。
+# 周期用 time.monotonic 计时，不受服务器时钟回拨影响。
+DEFAULT_AUDIT_IMAGE_INTERVAL = 60.0
+DEFAULT_AUDIT_IMAGE_ROWS = 2000
+DEFAULT_AUDIT_IMAGE_PAGE = 200
 
 _ACQUIRE_SQL = text(
     """
@@ -75,6 +87,10 @@ class SchedulerStats:
     ticks: int = 0
     reclaimed: int = 0
     takeovers: int = 0
+    audit_scans: int = 0
+    audit_rows: int = 0
+    audit_breaks: int = 0
+    audit_errors: int = 0
 
 
 @dataclass
@@ -85,7 +101,12 @@ class Scheduler:
     lease_seconds: float = DEFAULT_LEASE_SECONDS
     tick_seconds: float = DEFAULT_TICK_SECONDS
     audit_verify: bool = False
+    audit_image_scan: bool = True
+    audit_image_rows: int = DEFAULT_AUDIT_IMAGE_ROWS
+    audit_image_interval_seconds: float = DEFAULT_AUDIT_IMAGE_INTERVAL
+    metrics: MetricsRegistry | None = None
     jobs: JobQueueStore = field(init=False)
+    audit_chain: AuditChainMonitor | None = field(default=None, init=False)
     stats: SchedulerStats = field(default_factory=SchedulerStats)
     _leader: bool = False
     _stop: asyncio.Event = field(default_factory=asyncio.Event, init=False)
@@ -96,6 +117,16 @@ class Scheduler:
         # 续约间隔在 run() 内取 min(tick_seconds, lease_seconds/2)，
         # 即使 tick 配大了也不会出现「续约前租约先过期」。
         self.jobs = JobQueueStore(self.session_factory)
+        if self.metrics is None:
+            self.metrics = MetricsRegistry()
+        if self.audit_image_scan:
+            self.audit_chain = AuditChainMonitor(
+                ledger=AuditLedger(store=SqlAuditStore(self.session_factory)),
+                sink=self.metrics,
+                rows_per_run=self.audit_image_rows,
+                page_size=DEFAULT_AUDIT_IMAGE_PAGE,
+                interval_seconds=self.audit_image_interval_seconds,
+            )
 
     # ---------------------------------------------------------------- 租约
     async def acquire(self) -> bool:
@@ -156,6 +187,39 @@ class Scheduler:
                 report.degraded,
                 report.elapsed_ms,
             )
+        if self.audit_chain is not None:
+            try:
+                scan = await self.audit_chain.step()
+            except Exception:
+                # 校验本身失败时绝不写 0：那会把「不知道」变成「没问题」。
+                # 保持上一次指标值，只把失败记在 stats/日志里，由外部告警兜底。
+                self.stats.audit_errors += 1
+                logger.exception(
+                    "审计影像链巡检失败：保持上一次 smart_erp_audit_chain_broken 不变"
+                )
+                result["audit_image_error"] = 1
+            else:
+                if scan is not None:
+                    self.stats.audit_scans += 1
+                    self.stats.audit_rows += scan.rows
+                    result["audit_image_rows"] = scan.rows
+                    if scan.broken_at is not None:
+                        self.stats.audit_breaks += 1
+                        logger.error(
+                            "审计链断裂 tenant=%s broken_at=%s rows=%s detail=%s",
+                            scan.tenant_id,
+                            scan.broken_at,
+                            scan.rows,
+                            scan.detail,
+                        )
+                    else:
+                        logger.info(
+                            "审计影像链巡检 tenant=%s rows=%s cycle_completed=%s elapsed_ms=%.1f",
+                            scan.tenant_id,
+                            scan.rows,
+                            scan.cycle_completed,
+                            scan.elapsed_ms,
+                        )
         return result
 
     # ---------------------------------------------------------------- 生命周期
@@ -224,6 +288,23 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--audit-verify", action="store_true", help="每次 tick 跑全链审计巡检"
     )
+    parser.add_argument(
+        "--no-audit-image-scan",
+        action="store_true",
+        help="关闭 audit_image 链周期巡检（默认开启，写入 smart_erp_audit_chain_broken）",
+    )
+    parser.add_argument(
+        "--audit-image-rows",
+        type=int,
+        default=DEFAULT_AUDIT_IMAGE_ROWS,
+        help="每个时间片最多校验的行数（默认 %(default)s）",
+    )
+    parser.add_argument(
+        "--audit-image-interval-seconds",
+        type=float,
+        default=DEFAULT_AUDIT_IMAGE_INTERVAL,
+        help="两个校验时间片的最小间隔秒数（默认 %(default)s）",
+    )
     parser.add_argument("--ticks", type=int, default=None, help="跑 N 个 tick 后退出")
     parser.add_argument(
         "--once", action="store_true", help="等价于 --ticks 1（冒烟/复验用）"
@@ -241,6 +322,9 @@ async def _amain(args: argparse.Namespace) -> SchedulerStats:
             lease_seconds=args.lease_seconds,
             tick_seconds=args.tick_seconds,
             audit_verify=args.audit_verify,
+            audit_image_scan=not args.no_audit_image_scan,
+            audit_image_rows=args.audit_image_rows,
+            audit_image_interval_seconds=args.audit_image_interval_seconds,
         )
         max_ticks = 1 if args.once else args.ticks
         return await scheduler.run(max_ticks=max_ticks, install_signals=True)
