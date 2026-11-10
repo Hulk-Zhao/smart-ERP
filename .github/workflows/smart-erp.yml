@@ -1,4 +1,4 @@
-name: smart-erp CI
+﻿name: smart-erp CI
 
 # 依据 docs/product/tech/02-并发开发路线.md §2.9 S8 与 §4.6：
 #   本流水线只做「静态校验 + lint + 单元测试」，**不含任何部署步骤**
@@ -14,7 +14,8 @@ on:
       - "deploy/smart-erp/**"
       - "projects/smart-ERP/**"
       - "scripts/**"
-      - "tests/deploy/**"
+      - "observability/**"
+      - "tests/**"
       - "apps/**"
       - "db/migrations/**"
       - "contracts/**"
@@ -25,7 +26,8 @@ on:
       - "deploy/smart-erp/**"
       - "projects/smart-ERP/**"
       - "scripts/**"
-      - "tests/deploy/**"
+      - "observability/**"
+      - "tests/**"
       - "apps/**"
       - "db/migrations/**"
       - "contracts/**"
@@ -143,7 +145,7 @@ jobs:
         # F7=语法上合法但必然错的控制流，F82=未定义名（F821/F822/F823）。
         # 这些不是风格偏好，出现即代表运行时必炸，必须零容忍。
         run: |
-          ruff check apps tests db \
+          ruff check apps tests db observability \
             --select E9,F63,F7,F82 \
             --output-format=concise
 
@@ -154,7 +156,7 @@ jobs:
         continue-on-error: true
         run: |
           echo "::group::ruff --statistics（全量风格项，仅观测）"
-          ruff check apps tests db --statistics
+          ruff check apps tests db observability --statistics
           echo "::endgroup::"
 
       - name: pytest（按流分目录执行）
