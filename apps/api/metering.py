@@ -52,6 +52,26 @@ UNIT_PRICE_SOURCE = ENV_UNIT_PRICE
 MONEY_EXP = Decimal("0.0001")
 DEFAULT_UNIT_LABEL = "行"
 
+#: 取价口径：某时点的价 = ``effective_from <= t`` 中**最大**的那一行。
+#:
+#: **不按 ``supersedes_id`` 过滤**。``supersedes_id`` 是审计追溯链
+#: （「这行替代了哪一行」），不是取价条件：
+#: - 若按它排除旧行，``t`` 早于新价生效日的历史账就会查不到当时有效的价；
+#: - 纠错靠新行把 ``effective_from`` 往后推、自然遮蔽旧行；
+#: - 已结账的历史金额由 ``recon_batch`` 的单价/币种/价目快照保证不变。
+#:
+#: 币种必须与批次一致；不匹配即视为「无有效价」（fail closed），
+#: 绝不静默改用价格表里的另一种币种。
+PRICE_LOOKUP_SQL = """
+SELECT id, unit_price, currency
+  FROM erp.metering_price_book
+ WHERE tenant_id = CAST(:tenant_id AS uuid)
+   AND currency = :currency
+   AND effective_from <= CAST(:at AS timestamptz)
+ ORDER BY effective_from DESC
+ LIMIT 1
+"""
+
 #: 供应商侧「非自动放行、也非待人工」的状态 → 对外不计费原因码。
 OTHER_EXCLUSION_REASONS: dict[LineStatus, str] = {
     LineStatus.UNMATCHED_SUPPLIER: "unmatched_supplier",

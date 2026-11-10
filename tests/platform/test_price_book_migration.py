@@ -17,7 +17,9 @@
 5. ``currency`` 格式、自指 supersede、非正单价被 CHECK 拒绝；
 6. 同一租户同一币种的同一 ``effective_from`` 只能有一行（``23505``）——这是
    「改价 = 插新行」的唯一防歧义手段（本设计没有 ``EXCLUDE USING gist``）；
-7. ``downgrade -1`` 后价格表与四个计价列消失（已快照的计价依据随之丢失），
+7. 取价取 ``effective_from <= t`` 的最大者、**不按 supersedes 过滤**；
+   币种不符即无价；纠错不改写历史批次的单价快照；
+8. ``downgrade -1`` 后价格表与四个计价列消失（已快照的计价依据随之丢失），
    再 ``upgrade head`` 可恢复结构。
 """
 
@@ -40,6 +42,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
+from apps.api.metering import PRICE_LOOKUP_SQL
 from apps.platform.contracts.export_contracts import ROOT
 
 IMAGE = os.environ.get("ERP_PG_TEST_IMAGE", "postgres:15-alpine")
@@ -146,6 +149,29 @@ def fetch(url: str, sql: str) -> list[tuple]:
     return asyncio.run(_fetch(url, sql))
 
 
+async def _fetch_price(
+    url: str, tenant_id: str, currency: str, at: str
+) -> tuple[str, str] | None:
+    engine = create_async_engine(url, poolclass=NullPool)
+    try:
+        async with engine.connect() as conn:
+            row = (
+                await conn.execute(
+                    text(PRICE_LOOKUP_SQL),
+                    {"tenant_id": tenant_id, "currency": currency, "at": at},
+                )
+            ).first()
+            return None if row is None else (str(row[0]), str(row[1]))
+    finally:
+        await engine.dispose()
+
+
+def price_at(url: str, tenant_id: str, currency: str, at: str) -> tuple[str, str] | None:
+    """跑实现里同一份 ``PRICE_LOOKUP_SQL``，避免用例与实现各写一套条件。"""
+
+    return asyncio.run(_fetch_price(url, tenant_id, currency, at))
+
+
 def _config(url: str) -> Config:
     config = Config(str(ROOT / "alembic.ini"))
     config.set_main_option("sqlalchemy.url", url)
@@ -222,6 +248,8 @@ def _batch_insert(
     *,
     batch_id: uuid.UUID | None = None,
     fingerprint: str = "fp-price-book",
+    unit_price: str = "0.3000",
+    currency: str = "CNY",
 ) -> str:
     batch_id = batch_id or uuid.uuid4()
     return f"""
@@ -232,7 +260,7 @@ def _batch_insert(
       VALUES
         ('{batch_id}', '{tenant_id}', 'org-1', '2026-10', 'conclusive', true, 'ok',
          ARRAY[]::text[], ARRAY[]::text[], '{fingerprint}', '{APPROVER}',
-         0.3000, 'CNY', 'snapshot', '{price_book_id}')
+         {unit_price}, '{currency}', 'snapshot', '{price_book_id}')
     """
 
 
@@ -405,6 +433,114 @@ def test_self_supersede_is_rejected(provisioned_pg) -> None:
             ),
         )
     assert "ck_price_book_no_self_supersede" in str(excinfo.value)
+
+
+def test_price_lookup_uses_max_effective_from_and_does_not_filter_supersedes(
+    provisioned_pg,
+) -> None:
+    """纠错插新行后：生效日之前取旧价（历史可复现），之后取新价。
+
+    这是 ``supersedes_id`` 的口径证据：它是审计链，**不是取价过滤条件**。
+    若查询写成 ``WHERE supersedes_id IS NULL``，``2028-01-15`` 会查不到价，
+    历史账直接无法复算。
+    """
+
+    _, migrator_url, _ = provisioned_pg
+
+    wrong = uuid.uuid4()
+    fixed = uuid.uuid4()
+    run_sql(
+        migrator_url,
+        _price_insert(
+            wrong, TENANT_A, "2028-01-01T00:00:00+08:00",
+            unit_price="2.0000", contract_ref="HT-WRONG",
+        ),
+    )
+    run_sql(
+        migrator_url,
+        _price_insert(
+            fixed, TENANT_A, "2028-02-01T00:00:00+08:00",
+            unit_price="1.5000", contract_ref="HT-FIX", supersedes=wrong,
+        ),
+    )
+
+    assert price_at(migrator_url, TENANT_A, "CNY", "2028-01-15T00:00:00+08:00") == (
+        str(wrong),
+        "2.0000",
+    )
+    assert price_at(migrator_url, TENANT_A, "CNY", "2028-02-15T00:00:00+08:00") == (
+        str(fixed),
+        "1.5000",
+    )
+
+
+def test_price_lookup_is_currency_scoped(provisioned_pg) -> None:
+    """币种不符即「无有效价」，绝不静默改用价格表里的另一种币种。"""
+
+    _, migrator_url, _ = provisioned_pg
+
+    cny = uuid.uuid4()
+    run_sql(
+        migrator_url,
+        _price_insert(cny, TENANT_A, "2028-03-01T00:00:00+08:00", unit_price="0.4000"),
+    )
+    run_sql(
+        migrator_url,
+        _price_insert(
+            uuid.uuid4(),
+            TENANT_A,
+            "2028-03-01T00:00:00+08:00",
+            currency="USD",
+            unit_price="9.9900",
+        ),
+    )
+
+    assert price_at(migrator_url, TENANT_A, "CNY", "2028-03-15T00:00:00+08:00") == (
+        str(cny),
+        "0.4000",
+    )
+    assert price_at(migrator_url, TENANT_A, "EUR", "2028-03-15T00:00:00+08:00") is None
+
+
+def test_batch_snapshot_is_not_rewritten_by_price_correction(provisioned_pg) -> None:
+    """改错价不会改写历史批次：已过账批次的单价/价目快照保持原值。"""
+
+    _, migrator_url, _ = provisioned_pg
+
+    wrong = uuid.uuid4()
+    batch_id = uuid.uuid4()
+    run_sql(
+        migrator_url,
+        _price_insert(
+            wrong, TENANT_A, "2028-04-01T00:00:00+08:00",
+            unit_price="2.0000", contract_ref="HT-WRONG",
+        ),
+    )
+    run_sql(
+        migrator_url,
+        _batch_insert(
+            TENANT_A,
+            wrong,
+            batch_id=batch_id,
+            fingerprint="fp-correction",
+            unit_price="2.0000",
+        ),
+    )
+
+    run_sql(
+        migrator_url,
+        _price_insert(
+            uuid.uuid4(), TENANT_A, "2028-05-01T00:00:00+08:00",
+            unit_price="1.5000", contract_ref="HT-FIX", supersedes=wrong,
+        ),
+    )
+
+    rows = fetch(
+        migrator_url,
+        f"SELECT unit_price, price_book_id FROM erp.recon_batch "
+        f"WHERE id = '{batch_id}'",
+    )
+    assert [(str(rows[0][0]), str(rows[0][1]))] == [("2.0000", str(wrong))]
 
 
 def test_downgrade_drops_price_snapshot_and_upgrade_restores(provisioned_pg) -> None:
