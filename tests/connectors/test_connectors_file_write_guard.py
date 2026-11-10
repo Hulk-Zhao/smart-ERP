@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from apps.connectors.errors import ConnectorError, ErrorKind
+from apps.connectors.file.factory import build_file_stack
 from apps.connectors.gateway import build_default_registry
 from apps.platform.policy.levels import VerifySpec
 from tests.connectors.file_support import FILE_FIXTURES, make_file_stack, run
@@ -47,6 +48,17 @@ def test_gateway_fails_fast_when_configured_inbox_missing(
 
     with pytest.raises(RuntimeError, match="ERP_FILE_INBOX"):
         build_default_registry()
+
+
+def test_factory_default_root_falls_back_to_var_inbox_for_empty_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ``get(key, default)`` 在 env 为空字符串时返回 ""，Path("") 是当前目录；
+    # 这里锁死兜底：空值必须回落到 var/inbox，而不是进程 cwd。
+    monkeypatch.setenv("ERP_FILE_INBOX", "")
+    stack = build_file_stack()
+
+    assert stack.root == Path("var/inbox")
 
 
 def test_write_preview_verify_compensate_are_refused() -> None:

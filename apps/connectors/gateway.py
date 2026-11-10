@@ -170,6 +170,7 @@ def build_default_registry() -> GatewayRegistry:
         root = Path(inbox)
         if not root.is_dir():
             raise RuntimeError(f"ERP_FILE_INBOX 已配置但目录不存在: {root}")
+        # 该检查在 root 身份下恒为真（容器默认 root），"不可读"分支需以非 root 运行才能覆盖。
         if not os.access(root, os.R_OK):
             raise RuntimeError(f"ERP_FILE_INBOX 已配置但目录不可读: {root}")
 
