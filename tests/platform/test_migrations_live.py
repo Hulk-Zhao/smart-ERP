@@ -1,14 +1,21 @@
-"""空库从零迁移到 head 的集成测试（真实 PG15 容器）。
+"""空库从零迁移到 head 的集成测试（真实 PG15）。
 
 覆盖 S3 报过的阻塞场景：**空库** ``upgrade head`` 必须一次成功（含 revision id
 长度与 version 列宽度匹配）。流程：upgrade → downgrade base → upgrade，验证可回退可重放。
 
-环境缺失（无 docker / 无镜像 / daemon 未启动）时整条跳过，不让本地与 CI 全红；
-端口由内核分配空闲端口，避免与 55432 / 55433 / 15432 等固定端口互相踩。
+两条运行路径：
+
+1. 设置了 ``ERP_TEST_DATABASE_URL``（CI 的 postgres service、本地已有 PG）：复用该实例，
+   在它上面建一次性库 ``mig_<uuid>``，把 ``ERP_DATABASE_URL`` 指过去，跑完
+   ``DROP DATABASE ... WITH (FORCE)``。**此路径不允许 skip**：连不上、建库失败、
+   库没删掉都是红——否则「迁移链从未在 CI 真正执行」会再次变成静默。
+2. 未设置（本机没有 PG 的人）：退回 docker 起一次性 ``postgres:15-alpine`` 容器；
+   环境缺失时跳过。docker 路径不参与 CI 门禁，CI 走的是路径 1。
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import socket
@@ -16,16 +23,26 @@ import subprocess
 import time
 import uuid
 from collections.abc import Iterator
+from typing import Any
 
+import asyncpg
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
+from sqlalchemy.engine import make_url
 
 from apps.platform.contracts.export_contracts import ROOT
 from tests.platform.test_migrations import BASELINE_TABLES, VERSION_TABLE
 
+DSN_ENV = "ERP_TEST_DATABASE_URL"
 IMAGE = os.environ.get("ERP_PG_TEST_IMAGE", "postgres:15-alpine")
 STARTUP_TIMEOUT_S = 60.0
+
+
+def _admin_dsn() -> str | None:
+    value = os.environ.get(DSN_ENV, "").strip()
+    return value or None
 
 
 def _run(*args: str, timeout: float = 60.0) -> subprocess.CompletedProcess[str]:
@@ -42,10 +59,51 @@ def _docker_ready() -> bool:
     return _run("docker", "image", "inspect", IMAGE, timeout=20).returncode == 0
 
 
-pytestmark = pytest.mark.skipif(
-    not _docker_ready(),
-    reason=f"需要可用的 docker 与本地镜像 {IMAGE}（可用 ERP_PG_TEST_IMAGE 覆盖）",
-)
+def _skip_reason() -> str | None:
+    """只有「没有 DSN 且 docker 不可用」才允许 skip；有 DSN 一律不跳。"""
+
+    if _admin_dsn() is not None:
+        return None
+    if _docker_ready():
+        return None
+    return (
+        f"未设置 {DSN_ENV}，且本机缺少可用的 docker 或镜像 {IMAGE}"
+        "（镜像可用 ERP_PG_TEST_IMAGE 覆盖）"
+    )
+
+
+_SKIP_REASON = _skip_reason()
+pytestmark = pytest.mark.skipif(_SKIP_REASON is not None, reason=_SKIP_REASON or "环境缺失")
+
+
+def _asyncpg_dsn(dsn: str) -> str:
+    return make_url(dsn).set(drivername="postgresql").render_as_string(hide_password=False)
+
+
+def _with_database(dsn: str, database: str) -> str:
+    return make_url(dsn).set(database=database).render_as_string(hide_password=False)
+
+
+def _execute(dsn: str, sql: str) -> None:
+    async def run() -> None:
+        conn = await asyncpg.connect(_asyncpg_dsn(dsn))
+        try:
+            await conn.execute(sql)
+        finally:
+            await conn.close()
+
+    asyncio.run(run())
+
+
+def _fetch(dsn: str, sql: str) -> list[dict[str, Any]]:
+    async def run() -> list[dict[str, Any]]:
+        conn = await asyncpg.connect(_asyncpg_dsn(dsn))
+        try:
+            return [dict(row) for row in await conn.fetch(sql)]
+        finally:
+            await conn.close()
+
+    return asyncio.run(run())
 
 
 def _free_port() -> int:
@@ -54,18 +112,27 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _psql(container: str, sql: str) -> str:
-    result = _run(
-        "docker", "exec", container,
-        "psql", "-U", "postgres", "-d", "smart_erp", "-tA", "-c", sql,
-    )
-    assert result.returncode == 0, result.stderr
-    return result.stdout.strip()
+def _scratch_database(admin_dsn: str) -> Iterator[str]:
+    """在已有 PG 实例上建一次性库，跑完强制删除；删除结果也要断言。"""
+
+    name = f"mig_{uuid.uuid4().hex}"
+    _execute(admin_dsn, f'CREATE DATABASE "{name}"')
+    exists = _fetch(admin_dsn, f"SELECT 1 AS ok FROM pg_database WHERE datname = '{name}'")
+    assert exists, f"一次性迁移库 {name} 创建后查不到"
+    print(f"[migrations-live] 已创建一次性迁移库 {name}")
+    try:
+        yield _with_database(admin_dsn, name)
+    finally:
+        _execute(admin_dsn, f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        remaining = _fetch(
+            admin_dsn, f"SELECT count(*) AS n FROM pg_database WHERE datname = '{name}'"
+        )[0]["n"]
+        print(f"[migrations-live] 已销毁一次性迁移库 {name}（残留 {remaining}）")
+        assert remaining == 0, f"一次性迁移库 {name} 未被销毁"
 
 
-@pytest.fixture(scope="module")
-def postgres_container() -> Iterator[tuple[str, str]]:
-    """(容器名, 连接串)。端口由内核分配，避免与固定端口冲突。"""
+def _docker_database() -> Iterator[str]:
+    """无 DSN 时的退路：起一次性容器，端口由内核分配，避免与固定端口冲突。"""
 
     container = f"smart-erp-pg-test-{uuid.uuid4().hex[:8]}"
     port = _free_port()
@@ -93,36 +160,94 @@ def postgres_container() -> Iterator[tuple[str, str]]:
             time.sleep(0.3)
         else:
             raise AssertionError(f"PG15 容器 {container} 未在 {STARTUP_TIMEOUT_S}s 内就绪")
-        yield container, f"postgresql+asyncpg://postgres:postgres@127.0.0.1:{port}/smart_erp"
+        yield f"postgresql+asyncpg://postgres:postgres@127.0.0.1:{port}/smart_erp"
     finally:
         _run("docker", "rm", "-f", container)
 
 
-def _erp_tables(container_name: str) -> set[str]:
-    rows = _psql(
-        container_name,
-        "SELECT tablename FROM pg_tables WHERE schemaname = 'erp' ORDER BY tablename",
+@pytest.fixture(scope="module")
+def migrated_database() -> Iterator[str]:
+    """隔离库的连接串：有 DSN 复用 service，无 DSN 退 docker。"""
+
+    admin_dsn = _admin_dsn()
+    if admin_dsn is not None:
+        yield from _scratch_database(admin_dsn)
+        return
+    yield from _docker_database()
+
+
+def _erp_tables(dsn: str) -> set[str]:
+    rows = _fetch(dsn, "SELECT tablename FROM pg_tables WHERE schemaname = 'erp'")
+    return {f"erp.{row['tablename']}" for row in rows}
+
+
+def _erp_function_count(dsn: str) -> int:
+    rows = _fetch(
+        dsn,
+        "SELECT count(*) AS n FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace"
+        " WHERE n.nspname = 'erp'",
     )
-    return {f"erp.{row}" for row in rows.splitlines() if row}
+    return int(rows[0]["n"])
 
 
-def test_empty_database_upgrade_downgrade_upgrade(postgres_container, monkeypatch) -> None:
-    container, url = postgres_container
+def _erp_custom_type_count(dsn: str) -> int:
+    rows = _fetch(
+        dsn,
+        "SELECT count(*) AS n FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace"
+        " WHERE n.nspname = 'erp' AND t.typtype IN ('e', 'd')",
+    )
+    return int(rows[0]["n"])
+
+
+def _version(dsn: str) -> str:
+    rows = _fetch(dsn, f"SELECT version_num FROM erp.{VERSION_TABLE}")
+    assert len(rows) == 1, f"版本表 erp.{VERSION_TABLE} 应当恰好一行，实际 {len(rows)} 行"
+    return str(rows[0]["version_num"])
+
+
+def _version_column_width(dsn: str) -> int:
+    rows = _fetch(
+        dsn,
+        "SELECT character_maximum_length AS width FROM information_schema.columns"
+        f" WHERE table_schema = 'erp' AND table_name = '{VERSION_TABLE}'"
+        " AND column_name = 'version_num'",
+    )
+    assert len(rows) == 1, f"找不到 erp.{VERSION_TABLE}.version_num"
+    width = rows[0]["width"]
+    assert isinstance(width, int) and width > 0, f"版本列宽度异常: {width}"
+    return width
+
+
+def test_empty_database_upgrade_downgrade_upgrade(migrated_database, monkeypatch) -> None:
+    url = migrated_database
     monkeypatch.setenv("ERP_DATABASE_URL", url)
     config = Config(str(ROOT / "alembic.ini"))
+    expected_head = ScriptDirectory.from_config(config).get_current_head()
+    assert expected_head, "alembic.ini 解析不出 head"
+    version_table = f"erp.{VERSION_TABLE}"
 
     command.upgrade(config, "head")
-    version = _psql(container, f"SELECT version_num FROM erp.{VERSION_TABLE}")
-    assert version, "空库 upgrade 后版本表为空"
-    assert _erp_tables(container) == BASELINE_TABLES | {f"erp.{VERSION_TABLE}"}
-    assert _psql(
-        container,
-        "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace"
-        " WHERE n.nspname = 'erp'",
-    ) != "0"
+    version = _version(url)
+    width = _version_column_width(url)
+    # 版本列是 VARCHAR(32)：revision id 超宽会让空库 upgrade 直接 value too long。
+    assert len(version) <= 32, f"version_num 长度 {len(version)} 超过 VARCHAR(32): {version}"
+    assert len(version) <= width, f"version_num 长度 {len(version)} 超过实际列宽 {width}: {version}"
+    assert version == expected_head, f"空库 upgrade 后停在 {version}，预期 head 是 {expected_head}"
+
+    tables = _erp_tables(url)
+    # 只断言「基线表一张不少」：新增流的表由 test_migrations 的注册表差集负责精确比对，
+    # 这里写等号会让每个新流都得改本文件。
+    missing = (BASELINE_TABLES | {version_table}) - tables
+    assert not missing, f"空库 upgrade 后缺表: {sorted(missing)}"
+    assert _erp_function_count(url) > 0, "upgrade 后 erp schema 里没有任何函数"
 
     command.downgrade(config, "base")
-    assert _erp_tables(container) == {f"erp.{VERSION_TABLE}"}
+    residual_tables = _erp_tables(url) - {version_table}
+    assert not residual_tables, f"downgrade base 后仍残留表: {sorted(residual_tables)}"
+    assert _erp_function_count(url) == 0, "downgrade base 后 erp schema 里仍残留函数"
+    assert _erp_custom_type_count(url) == 0, "downgrade base 后 erp schema 里仍残留枚举/域类型"
 
     command.upgrade(config, "head")
-    assert _psql(container, f"SELECT version_num FROM erp.{VERSION_TABLE}") == version
+    replayed = _version(url)
+    assert replayed == expected_head, f"重放 upgrade head 后版本 {replayed} 与预期 {expected_head} 不一致"
+    assert _erp_tables(url) == tables, "重放 upgrade 后表集合与首次不一致"

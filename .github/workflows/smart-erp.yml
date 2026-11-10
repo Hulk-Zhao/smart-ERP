@@ -397,8 +397,14 @@ jobs:
             # -o addopts="" 覆盖 pyproject 的 -q：否则 -q + -q = -qq 会把
             # "N passed / M skipped" 汇总行吞掉，skip 再次变成静默（本次事故的根因之一）。
             # 只改输出详略，不改退出码语义：任何非 0 仍然失败。
+            # tests/platform 的迁移链用例会把一次性库名打到 stdout（建库/销毁证据），
+            # tee-sys 让这些行在被捕获的同时也进 job 日志；只对这一个目录开，避免噪音。
+            capture=""
+            if [ "$d" = "tests/platform" ]; then
+              capture="--capture=tee-sys"
+            fi
             status=0
-            out=$(python -m pytest "${d}" -q -o addopts="" -rs 2>&1) || status=$?
+            out=$(python -m pytest "${d}" -q -o addopts="" -rs $capture 2>&1) || status=$?
             echo "$out"
             if [ "$status" -ne 0 ]; then
               echo "::error::pytest ${d} 失败"
@@ -408,6 +414,14 @@ jobs:
             # 角色缺失/口令改不了时用例会带原因 skip —— 那种「绿但一条没跑」必须红。
             if [ "$d" = "tests/security" ] && echo "$out" | grep -Eq '[0-9]+ skipped'; then
               echo "::error::tests/security 出现 skipped：权限证据被静默跳过，检查 erp_app 角色是否在迁移前创建"
+              rc=1
+            fi
+            # tests/platform 的迁移链用例（test_migrations_live）只有拿到真实 PG 才会跑：
+            # service 已经提供了 ERP_TEST_DATABASE_URL，因此这里出现 skip 就说明迁移链
+            # 又一次没被执行——那正是本次要堵的「绿了但没跑」。
+            if [ "$d" = "tests/platform" ] && [ -n "${ERP_TEST_DATABASE_URL:-}" ] \
+              && echo "$out" | grep -Eq '[0-9]+ skipped'; then
+              echo "::error::tests/platform 出现 skipped：迁移链未被真实执行，检查 ERP_TEST_DATABASE_URL 与建库权限"
               rc=1
             fi
             echo "::endgroup::"
