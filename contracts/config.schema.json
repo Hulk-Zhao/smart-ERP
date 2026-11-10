@@ -1,0 +1,756 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://smart-erp.local/contracts/config.schema.json",
+  "title": "smart-ERP 环境变量契约（C11）",
+  "description": "唯一真源：compose 注入键 + .env.example 登记键 + 代码读取键。scope=compose/build/deploy/code；required=true 表示 compose 用 ${K:?} 强制；default 必须与 compose 的 ${K:-x} 一致。由 scripts/validate_config_schema.py 校验（含 compose 覆盖、默认值一致、多默认冲突、.env.example 与三套环境矩阵的类型/未知键、代码里读取但未登记的键）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ERP_DATABASE_URL",
+    "ERP_IMAGE_TAG",
+    "ERP_MIGRATION_DATABASE_URL"
+  ],
+  "properties": {
+    "ERP_AGENT_WORKER_CONCURRENCY": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "worker-agent"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 4
+    },
+    "ERP_API_BIND": {
+      "type": "string",
+      "scope": "compose",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "127.0.0.1"
+    },
+    "ERP_API_PORT": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 8010
+    },
+    "ERP_API_ROOT_PATH": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "/erp/api"
+    },
+    "ERP_APP_ENV": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api",
+        "connector-gw",
+        "doc",
+        "migrate",
+        "scheduler",
+        "worker",
+        "worker-agent",
+        "worker-io"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "demo"
+    },
+    "ERP_BUILD_PLATFORM": {
+      "type": "string",
+      "scope": "build",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "linux/amd64"
+    },
+    "ERP_BUILD_WEB_BASE": {
+      "type": "string",
+      "scope": "build",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "/demo/smart-erp/"
+    },
+    "ERP_CONFIG_DIR": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api",
+        "connector-gw",
+        "doc",
+        "migrate",
+        "scheduler",
+        "worker",
+        "worker-agent",
+        "worker-io"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "/app/config"
+    },
+    "ERP_CONNECTOR_GW_HOST": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "0.0.0.0",
+      "description": "连接器网关监听地址（gateway.py --host 缺省值）"
+    },
+    "ERP_CONNECTOR_GW_PORT": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "connector-gw"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 8012
+    },
+    "ERP_CONNECTOR_GW_URL": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api",
+        "scheduler",
+        "worker",
+        "worker-agent",
+        "worker-io"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "http://connector-gw:8012"
+    },
+    "ERP_DATABASE_URL": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api",
+        "scheduler",
+        "worker",
+        "worker-agent",
+        "worker-io"
+      ],
+      "required": true,
+      "secret": true,
+      "phase": "startup",
+      "default": "postgresql+asyncpg://erp_app:CHANGE_ME_PASSWORD@hulkai_aps_postgres:5432/smart_erp"
+    },
+    "ERP_DB_IDLE_TX_TIMEOUT_MS": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 60000
+    },
+    "ERP_DB_LOCK_TIMEOUT_MS": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 3000
+    },
+    "ERP_DB_MAX_OVERFLOW": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "api",
+        "scheduler",
+        "worker",
+        "worker-agent",
+        "worker-io"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "4",
+      "defaultsByService": {
+        "api": "4",
+        "scheduler": "0",
+        "worker": "0",
+        "worker-agent": "0",
+        "worker-io": "0"
+      }
+    },
+    "ERP_DB_NETWORK": {
+      "type": "string",
+      "scope": "compose",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "hulkai-gz-api_default"
+    },
+    "ERP_DB_POOL_SIZE": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "api",
+        "scheduler",
+        "worker",
+        "worker-agent",
+        "worker-io"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "4",
+      "defaultsByService": {
+        "api": "4",
+        "scheduler": "1",
+        "worker": "4",
+        "worker-agent": "4",
+        "worker-io": "2"
+      }
+    },
+    "ERP_DB_STATEMENT_TIMEOUT_MS": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 30000
+    },
+    "ERP_DEPLOY_DIR": {
+      "type": "string",
+      "scope": "deploy",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "/opt/smart-erp"
+    },
+    "ERP_DEPLOY_HOST": {
+      "type": "string",
+      "scope": "deploy",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": null
+    },
+    "ERP_DEPLOY_SSH_PORT": {
+      "type": "integer",
+      "scope": "deploy",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 22
+    },
+    "ERP_DEPLOY_USER": {
+      "type": "string",
+      "scope": "deploy",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": null
+    },
+    "ERP_DIST_DIR": {
+      "type": "string",
+      "scope": "build",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": null
+    },
+    "ERP_DOC_PORT": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "doc"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 8020
+    },
+    "ERP_DOC_SERVICE_URL": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "worker-io"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "http://doc:8020"
+    },
+    "ERP_GATEWAY_PORT": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "8012",
+      "description": "ERP_CONNECTOR_GW_PORT 的兼容别名，两者都缺省 8012"
+    },
+    "ERP_GW_EGRESS_ALLOWLIST_FILE": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "connector-gw"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "/app/config/gw-egress.yaml"
+    },
+    "ERP_GW_TIMEOUT_SECONDS": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "connector-gw"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 30
+    },
+    "ERP_HEARTBEAT_INTERVAL_SECONDS": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "scheduler",
+        "worker",
+        "worker-agent",
+        "worker-io"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 30
+    },
+    "ERP_IMAGE_TAG": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api",
+        "connector-gw",
+        "doc",
+        "migrate",
+        "scheduler",
+        "worker",
+        "worker-agent",
+        "worker-io"
+      ],
+      "required": true,
+      "secret": false,
+      "phase": "startup",
+      "default": null,
+      "pattern": "^([0-9a-f]{40}|[0-9a-f]{40}-dirty|dev)$"
+    },
+    "ERP_IO_WORKER_CONCURRENCY": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "worker-io"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 2
+    },
+    "ERP_LLM_API_KEY": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api",
+        "worker",
+        "worker-agent"
+      ],
+      "required": false,
+      "secret": true,
+      "phase": "startup",
+      "default": ""
+    },
+    "ERP_LLM_BASE_URL": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api",
+        "worker",
+        "worker-agent"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": ""
+    },
+    "ERP_LLM_MODEL": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api",
+        "worker",
+        "worker-agent"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": ""
+    },
+    "ERP_LLM_PROVIDER": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "cloud"
+    },
+    "ERP_LLM_TEMPERATURE": {
+      "type": "integer",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 0
+    },
+    "ERP_LLM_TIMEOUT_SECONDS": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "api",
+        "worker",
+        "worker-agent"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 60
+    },
+    "ERP_LOG_LEVEL": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api",
+        "connector-gw",
+        "doc",
+        "migrate",
+        "scheduler",
+        "worker",
+        "worker-agent",
+        "worker-io"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "hot",
+      "default": "INFO",
+      "enum": [
+        "DEBUG",
+        "INFO",
+        "WARNING",
+        "ERROR"
+      ]
+    },
+    "ERP_METERING_CAP_AMOUNT": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": null,
+      "description": "封顶金额，未配置时封顶余额不可核对"
+    },
+    "ERP_METERING_CURRENCY": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "CNY",
+      "description": "计量币种（3-8 位代码）"
+    },
+    "ERP_METERING_PRIOR_AMOUNT": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": null,
+      "description": "历史已计金额，未配置按 0"
+    },
+    "ERP_METERING_UNIT_LABEL": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "行",
+      "description": "计量单位显示名"
+    },
+    "ERP_METERING_UNIT_PRICE": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": null,
+      "description": "单行单价，必须来自配置；未配置时计量接口返回 503"
+    },
+    "ERP_MIGRATION_DATABASE_URL": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "migrate"
+      ],
+      "required": true,
+      "secret": true,
+      "phase": "startup",
+      "default": "postgresql+asyncpg://erp_migrator:CHANGE_ME_PASSWORD@hulkai_aps_postgres:5432/smart_erp"
+    },
+    "ERP_NGINX_IMAGE": {
+      "type": "string",
+      "scope": "build",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": null
+    },
+    "ERP_OBJECT_STORE_DRIVER": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api",
+        "doc",
+        "worker",
+        "worker-agent",
+        "worker-io"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "local"
+    },
+    "ERP_OBJECT_STORE_PATH": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api",
+        "doc",
+        "worker",
+        "worker-agent",
+        "worker-io"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "/data/objects"
+    },
+    "ERP_S3_ACCESS_KEY": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api",
+        "doc",
+        "worker",
+        "worker-agent",
+        "worker-io"
+      ],
+      "required": false,
+      "secret": true,
+      "phase": "startup",
+      "default": ""
+    },
+    "ERP_S3_BUCKET": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api",
+        "doc",
+        "worker",
+        "worker-agent",
+        "worker-io"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": ""
+    },
+    "ERP_S3_ENDPOINT": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api",
+        "doc",
+        "worker",
+        "worker-agent",
+        "worker-io"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": ""
+    },
+    "ERP_S3_REGION": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "cn-south-1"
+    },
+    "ERP_S3_SECRET_KEY": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api",
+        "doc",
+        "worker",
+        "worker-agent",
+        "worker-io"
+      ],
+      "required": false,
+      "secret": true,
+      "phase": "startup",
+      "default": ""
+    },
+    "ERP_SCHEDULER_TICK_SECONDS": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "scheduler"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 60
+    },
+    "ERP_U8_BASE_URL": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "http://u8.invalid",
+      "description": "U8 连接器基地址；占位域名不可解析，生产必须覆盖"
+    },
+    "ERP_WEB_BASE": {
+      "type": "string",
+      "scope": "build",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": null
+    },
+    "ERP_WEB_PORT": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 8088
+    },
+    "ERP_WORKER_CONCURRENCY": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "worker"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 4
+    },
+    "ERP_WORKER_QUEUES": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "worker"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "agent,io"
+    },
+    "ERP_TRACE_ENABLED": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "",
+      "description": "1/true/yes/on 才落盘 trace；其它值视为关闭（observability/exporter.py）"
+    },
+    "ERP_TRACE_FILE": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "./logs/traces.jsonl",
+      "description": "trace 追加写文件，每行一个 span（observability/exporter.py）"
+    },
+    "ERP_METRICS_ENABLED": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "",
+      "description": "1/true/yes/on 才挂载 /metrics；缺省不挂载（observability/metrics.py）"
+    },
+    "ERP_METRICS_PATH": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "/metrics",
+      "pattern": "^/.*",
+      "description": "指标端点路径；开启后必须先由反向代理限定内网（RUNBOOK 5.2）"
+    }
+  }
+}
