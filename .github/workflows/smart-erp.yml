@@ -1,12 +1,14 @@
 ﻿name: smart-erp CI
 
 # 依据 docs/product/tech/02-并发开发路线.md §2.9 S8 与 §4.6：
-#   流水线 = 静态校验 + lint + 单元测试 + 镜像构建门禁；**不含任何部署步骤**
-#   （docker save、scp、docker load、compose up 仍在发布序列里由发布机执行）。
+#   流水线 = 静态校验 + lint + 单元测试 + 镜像构建 + 离线包校验；**不含任何部署步骤**
+#   （scp、远端 docker load、compose up 仍在发布序列里由发布机执行）。
 #
-# 关于镜像构建（T806）：只 build、不 push、不产出发布包，目的是挡住
-# 「代码/依赖/契约改了但镜像起不来」这一类回归；发布用的 tar 与 sha256 仍由
-# scripts/build-images.sh 在发布机产出，两套职责不重叠。
+# 关于镜像（T806）：两段职责不同，都不 push 到任何镜像仓库。
+#   image-build  = matrix 单镜像 build（挡住「代码/依赖/契约改了但镜像起不来」）；
+#   image-bundle = 只在 main 跑 scripts/build-images.sh，产出
+#                  dist/erp-images-<sha>.tar.gz + sha256sum.txt 并上传 artifact，
+#                  验证的是发布脚本本身（docker save → gzip → sha256 全链路）。
 # 触发范围用 changes job 过滤（见下），避免每次 PR 全量构建四镜像。
 
 on:
@@ -374,3 +376,58 @@ jobs:
           docker build --file "${{ matrix.dockerfile }}" --tag "smart-erp/${{ matrix.image }}:${tag}" ${EXTRA_ARGS} .
           docker image inspect "smart-erp/${{ matrix.image }}:${tag}" \
             --format '构建成功：${{ matrix.image }} {{.Id}} {{.Size}} bytes'
+
+  # ---------------------------------------------------------------------------
+  # 6. 镜像离线包（T806 后半）：用发布脚本 scripts/build-images.sh 真跑一次
+  #    「四镜像 → 同一个 tar.gz + sha256sum.txt」，只上传 artifact，不 push 镜像。
+  #
+  #    与 image-build 的分工：
+  #      image-build = 单镜像能否构建（matrix 并行、失败定位到具体镜像）；
+  #      image-bundle = 发布脚本本身能否跑通（tag 规则、脏树门禁、docker save、
+  #                     gzip、sha256 全链路），以及产物里是不是恰好 4 个镜像。
+  #    没有这一步时，发布脚本只在发布机上被人工跑过，CI 从未验证过它。
+  #
+  #    只在 main push（或手动 workflow_dispatch）执行：PR 上再构建一遍四镜像成本翻倍，
+  #    而发布包只在合入主干后才有意义。
+  # ---------------------------------------------------------------------------
+  image-bundle:
+    name: 镜像离线包（tar + sha256，不推送）
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: changes
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.ref == 'refs/heads/main' && needs.changes.outputs.images == 'true')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 生成离线包（scripts/build-images.sh）
+        # ERP_IMAGE_TAG 必须是 40 位 sha：GITHUB_SHA 正好是；
+        # 产物放到 runner 临时目录，别写进工作树（脚本的脏树门禁会因此误判）。
+        env:
+          ERP_IMAGE_TAG: ${{ github.sha }}
+          ERP_DIST_DIR: ${{ runner.temp }}/dist
+        run: |
+          set -euo pipefail
+          bash scripts/build-images.sh
+
+      - name: 校验产物（tar.gz + sha256 + 恰好四个镜像）
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/dist"
+          ls -lh
+          test -f "erp-images-${GITHUB_SHA}.tar.gz"
+          sha256sum -c sha256sum.txt
+          loaded="$(docker load -i "erp-images-${GITHUB_SHA}.tar.gz" | grep -c '^Loaded image')"
+          echo "docker load：${loaded} 个镜像"
+          # 少一个就说明 build-images.sh 的镜像清单与发布口径漂移（doc 也不能少）
+          test "${loaded}" -eq 4
+
+      - name: 上传离线包（保留 7 天）
+        uses: actions/upload-artifact@v4
+        with:
+          name: erp-images-${{ github.sha }}
+          path: ${{ runner.temp }}/dist/*
+          retention-days: 7
+          # 包里已经是 gzip -9，再压一遍只是浪费 CPU
+          compression-level: 0
