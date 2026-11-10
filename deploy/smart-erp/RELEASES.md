@@ -5,16 +5,18 @@
 > **版本 sha 的唯一取值方式**：发布时刻的 `git ls-remote origin refs/heads/main`。
 > `git rev-parse HEAD` 只是本地检出的分支头，不能当作 main（第一次登记就错在这里）。
 
-## 现状 — 2026-11-11：v0.2.0 因 P0 跨租户越权**冻结，未登记**
+## 现状 — 2026-11-11：P0 跨租户越权**已解除**，v0.2.0 **仍不登记**
 
-S4 跨租户扫描实测到 13 处越权：租户 A 能列出/读取租户 B 的工单，能驳回、取消别家工单，能在别家工单落审批记录，能导出别家审计 CSV。根因：`_require_ticket` 与 `TicketRepository.list` 缺少 `tenant_id` 谓词。**17 条 API 路径中 10 条受影响。**
+原缺陷：`_require_ticket` 与 `TicketRepository.list` 缺 `tenant_id` 谓词，17 条 API 路径中 10 条可跨租户读取/驳回/取消/落审批/导出审计。**三条解除条件已全部满足：**
 
-| 项 | 内容 |
+| 条件 | 证据 |
 |---|---|
-| 冻结范围 | v0.2.0 **全部档位**（demo / full）；`RELEASE-CHECKLIST.md` 第 3–7 步的登记动作一律暂停 |
-| 解除条件（缺一不可） | ① S4 修复合并进 main；② 13 条越权用例全部转绿；③ 全量 `tests/*` 在 Python 3.12 下复跑 exit 0 |
-| 留底 | `docs/product/tech/dev-ledger.json` 已追加 `阻塞` 记录 |
-| 冻结期间可做 | 与发版无关的代码/文档工作（不涉及清单第 3–7 步） |
+| ① 修复进 main | #27 的修复随 #32 一起进主干；`apps/api/service.py` 在该 sha 上有四处 `tenant_id` 谓词 + 跨租户统一 404（注意 #32 是 squash，`#27` 的 merge commit 本身不在祖先链上，验证以文件内容为准，不用 `merge-base --is-ancestor`） |
+| ② 跨租户用例转绿 | `tests/security/test_idor_scan.py` **24 passed / 0 skipped / 0 failed**。24 条是当年 13 条缺陷清单的**超集**（同一缺陷按「列出/读取/驳回/取消/落审批/导出」等路径拆成多条用例），不是 13 被改成 24，以后不要拿 13 对 24 说对不上 |
+| ③ 全量复跑 | Python **3.12**，11 个目录逐项 0 failed（api 41 / recon 63 / platform 94 / security 61 / audit 18 / agents 59+24 skip / connectors 82 / docparse 90 / deploy 110 / observability 18 / e2e 11）；`ruff` 整树 0；契约 `--check` 一致；合并后 CI run `42871516840` success |
+
+**仍不登记 v0.2.0 的原因（与 P0 无关）**：主干缺 `web/` 与 `core/`——demo 档的 `web` 镜像无法从主干构建，full 档另受 B-S8-01 阻断。等这两块进主干、镜像实测通过后才走清单第 3–7 步。
+
 
 ## v0.2.0 准入条款（2026-11-11 定，硬性）
 
