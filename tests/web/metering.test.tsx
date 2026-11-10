@@ -97,11 +97,15 @@ describe('计量表：四类行 + data_gaps 显式可见 + CSV 摘要', () => {
 
     expect(await screen.findByText(/计量表 · 批次/)).toBeInTheDocument();
 
-    // 四类行
-    expect(screen.getByText('应处理')).toBeInTheDocument();
-    expect(screen.getAllByText('自动放行').length).toBeGreaterThan(0);
-    expect(screen.getByText('争议挂起')).toBeInTheDocument();
-    expect(screen.getByText('其他不计费')).toBeInTheDocument();
+    // 四类行：口径数字与可下钻桶名分开，术语按接口字段语义一一对应
+    const caliber = screen.getByTestId('metering-caliber');
+    expect(caliber).toHaveTextContent('供应商对账单行数（应处理）');
+    expect(caliber).toHaveTextContent('有效对账行数');
+    expect(caliber).toHaveTextContent('计费行数（billable 桶）');
+    expect(screen.getByTestId('metering-bucket-billable')).toHaveTextContent('计费行（billable 桶）');
+    expect(screen.getByTestId('metering-bucket-auto_released')).toHaveTextContent('自动放行但扣减');
+    expect(screen.getByTestId('metering-bucket-dispute_hold')).toHaveTextContent('争议挂起');
+    expect(screen.getByTestId('metering-bucket-other_unbillable')).toHaveTextContent('其他不计费');
 
     // 金额与单价来源
     expect(screen.getByText('本期金额')).toBeInTheDocument();
@@ -117,32 +121,45 @@ describe('计量表：四类行 + data_gaps 显式可见 + CSV 摘要', () => {
     expect(within(gaps).getByText('这几项暂无数据源')).toBeVisible();
     expect(within(gaps).getByText(/无法计算封顶余额/)).toBeVisible();
 
-    // 「有效对账行数是上界」+ 动态点名两项
+    // 上界说明：计费行数（billable 桶）是上界，且明确与有效对账行数分开
     const bound = screen.getByTestId('metering-upper-bound');
-    expect(within(bound).getByText(/有效对账行数是上界，不是精确值/)).toBeVisible();
+    expect(within(bound).getByText(/计费行数（billable 桶）是上界，不是精确值/)).toBeVisible();
     expect(within(bound).getByText(/已确认错放行（confirmed_misrelease_lines）/)).toBeVisible();
     expect(within(bound).getByText(/客户原因（customer_reason_lines）/)).toBeVisible();
-    expect(within(bound).getByText('59')).toBeInTheDocument();
+    expect(within(bound).getByTestId('metering-billable-lines')).toHaveTextContent('59');
+    expect(within(bound).getByText(/只数 billable 桶，不等于「有效对账行数」/)).toBeVisible();
+    expect(within(bound).getByTestId('metering-valid-lines')).toHaveTextContent('59');
 
     // calculation 算式
     expect(screen.getByText(/59 − 0 − 0 = 59 行 × 0.8000 CNY = 47.2000 CNY/)).toBeInTheDocument();
   });
 
-  it('计数卡按后端 billing_bucket 下钻到该桶行列表', async () => {
+  it('四类行卡片数字与下钻列表行数逐一相等（D8 验收）', async () => {
     renderPage(<MeteringPage />, {
       route: `/recon/${BATCH_ID}/metering`,
       path: '/recon/:batchId/metering',
     });
 
     await screen.findByText(/计量表 · 批次/);
-    fireEvent.click(screen.getByRole('button', { name: /自动放行/ }));
+    const buckets = [
+      ['billable', '计费行（billable 桶）', 59],
+      ['auto_released', '自动放行但扣减', 0],
+      ['dispute_hold', '争议挂起', 3],
+      ['other_unbillable', '其他不计费', 2],
+    ] as const;
 
-    expect(screen.getByText(/已筛选：自动放行桶 · 1 行 \/ 共 2 行/)).toBeInTheDocument();
+    for (const [key, label, count] of buckets) {
+      // 卡片上看到的数
+      expect(screen.getByTestId(`metering-bucket-${key}-value`)).toHaveTextContent(String(count));
+      // 点进去列表的同名数字（差一行就会失败）
+      fireEvent.click(screen.getByTestId(`metering-bucket-${key}`));
+      expect(screen.getByText(new RegExp(`已筛选：${label} · ${count} 行 / 共 64 行`))).toBeInTheDocument();
+      fireEvent.click(screen.getByText('清除筛选'));
+    }
+
+    // 清除后回到全部明细
     expect(screen.getByText('#1')).toBeInTheDocument();
-    expect(screen.queryByText('#2')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: '清除筛选' }));
-    expect(screen.getByText('#2')).toBeInTheDocument();
+    expect(screen.getByText('#64')).toBeInTheDocument();
   });
 
   it('上界说明只点名实际缺失的扣减项', async () => {

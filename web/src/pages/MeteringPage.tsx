@@ -43,12 +43,23 @@ function Metric({
   );
 }
 
+// 桶名按接口 billing_bucket 的实际语义命名：
+// billable 只是计费桶，不等于「应处理行数」（expected_lines），也不等于「有效对账行数」（auto_released_lines）。
 const BUCKET_LABEL: Record<BillingBucket, string> = {
-  billable: '应处理',
-  auto_released: '自动放行',
+  billable: '计费行（billable 桶）',
+  auto_released: '自动放行但扣减',
   dispute_hold: '争议挂起',
   other_unbillable: '其他不计费',
 };
+
+const BUCKET_HINT: Record<BillingBucket, string> = {
+  billable: '自动放行且计入计费；本期金额 = 本数 × 单价',
+  auto_released: '自动放行但被扣减；扣减源接入后才会出现',
+  dispute_hold: '需人工处理，不计费',
+  other_unbillable: '未匹配 / 重复计费 / 不可解析',
+};
+
+const BUCKET_ORDER: BillingBucket[] = ['billable', 'auto_released', 'dispute_hold', 'other_unbillable'];
 
 function CountCard({
   label,
@@ -57,6 +68,7 @@ function CountCard({
   tone = '',
   active = false,
   onClick,
+  testId,
 }: {
   label: string;
   value: number;
@@ -64,6 +76,7 @@ function CountCard({
   tone?: string;
   active?: boolean;
   onClick?: () => void;
+  testId?: string;
 }) {
   const className = `min-w-0 rounded-lg border px-2.5 py-2 text-left ${
     active ? 'border-sky-400 bg-sky-50 ring-1 ring-sky-200' : 'border-slate-200'
@@ -71,7 +84,12 @@ function CountCard({
   const content = (
     <>
       <div className="label">{label}</div>
-      <div className={`mt-0.5 font-mono text-[18px] ${tone || 'text-slate-800'}`}>{value}</div>
+      <div
+        className={`mt-0.5 font-mono text-[18px] ${tone || 'text-slate-800'}`}
+        data-testid={testId ? `${testId}-value` : undefined}
+      >
+        {value}
+      </div>
       {hint ? <div className="mt-0.5 break-words text-[10px] leading-4 text-slate-400">{hint}</div> : null}
       {onClick ? (
         <div className="mt-0.5 text-[10px] text-sky-700">{active ? '再次点击取消筛选' : '点击查看该桶行列表'}</div>
@@ -79,11 +97,13 @@ function CountCard({
     </>
   );
   return onClick ? (
-    <button type="button" aria-pressed={active} className={className} onClick={onClick}>
+    <button type="button" aria-pressed={active} className={className} onClick={onClick} data-testid={testId}>
       {content}
     </button>
   ) : (
-    <div className={className}>{content}</div>
+    <div className={className} data-testid={testId}>
+      {content}
+    </div>
   );
 }
 
@@ -257,6 +277,14 @@ export function MeteringPage() {
   const data = statement.data!;
   const allLines = data.lines ?? [];
   const visibleLines = bucket ? allLines.filter((line) => line.billing_bucket === bucket) : allLines;
+  // 卡片数字与下钻过滤共用同一个数组与同一个 billing_bucket 判定，保证「点进去的数 = 卡片上的数」。
+  const bucketCounts = allLines.reduce<Record<BillingBucket, number>>(
+    (counts, line) => {
+      counts[line.billing_bucket] += 1;
+      return counts;
+    },
+    { billable: 0, auto_released: 0, dispute_hold: 0, other_unbillable: 0 },
+  );
   const gaps = data.data_gaps ?? [];
   const excluded = data.excluded_lines;
   const capGap = missingReason(gaps, ['cap_amount', 'cap'], '服务端未返回封顶配置');
@@ -269,7 +297,7 @@ export function MeteringPage() {
   const deductionText =
     missingDeductions.length === 0
       ? '两项扣减项均有数据源，无需按 0 兜底；'
-      : `${missingDeductions.map((item) => `${item.label}（${item.field}）`).join(' 与 ')}当前无数据源，按 0 扣减，因此有效行数只会小于等于真实值；`;
+      : `${missingDeductions.map((item) => `${item.label}（${item.field}）`).join(' 与 ')}当前无数据源，按 0 扣减，因此计费行数只会小于等于真实值；`;
 
   return (
     <div className="min-w-0 space-y-4">
@@ -337,41 +365,56 @@ export function MeteringPage() {
       <section className="card min-w-0">
         <div className="card-head">
           <h2 className="section-title">四类行</h2>
-          <span className="text-[11px] text-slate-400">计数来自契约，不是前端估算</span>
+          <span className="text-[11px] text-slate-400">卡片数字与下钻列表同源（接口 billing_bucket），点进去的行数 = 卡片数字</span>
         </div>
         <div className="card-body space-y-2">
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-            <CountCard
-              label={BUCKET_LABEL.billable}
-              value={data.expected_lines}
-              hint="本批次需要对账的行"
-              active={bucket === 'billable'}
-              onClick={() => toggleBucket('billable')}
+          {/* 口径数字：只展示、不可下钻；术语与接口字段一一对应，不互相借用 */}
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4" data-testid="metering-caliber">
+            <Metric
+              label="供应商对账单行数（应处理）"
+              value={String(data.expected_lines)}
+              hint="接口 expected_lines（metrics.supplier_lines），含不计费行"
             />
-            <CountCard
-              label={BUCKET_LABEL.auto_released}
-              value={data.auto_released_lines}
-              hint="程序性事实：自动通过"
+            <Metric
+              label="有效对账行数"
+              value={String(data.auto_released_lines)}
+              hint="行级 auto，含已自动归因的差异行（auto_released_lines）"
               tone="text-emerald-700"
-              active={bucket === 'auto_released'}
-              onClick={() => toggleBucket('auto_released')}
             />
-            <CountCard
-              label={BUCKET_LABEL.dispute_hold}
-              value={excluded.dispute_hold}
-              hint={`不计费合计 ${excluded.total}`}
-              tone="text-amber-700"
-              active={bucket === 'dispute_hold'}
-              onClick={() => toggleBucket('dispute_hold')}
+            <Metric
+              label="计费行数（billable 桶）"
+              value={String(data.billable_lines)}
+              hint="billable_lines = 自动放行 − 已确认错放行 − 客户原因（上界）"
             />
-            <CountCard
-              label={BUCKET_LABEL.other_unbillable}
-              value={excluded.other_unbillable}
-              hint="含客户原因等其它口径"
-              tone="text-slate-700"
-              active={bucket === 'other_unbillable'}
-              onClick={() => toggleBucket('other_unbillable')}
+            <Metric
+              label="本次明细行数"
+              value={String(data.line_count)}
+              hint={`接口本次返回 ${allLines.length} 行；与对账单不一致时见 data_gaps`}
             />
+          </div>
+
+          <div className="text-[10px] text-slate-400">下面四张卡可点击下钻，数字按明细行的 billing_bucket 现算：</div>
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+            {BUCKET_ORDER.map((bucketKey) => (
+              <CountCard
+                key={bucketKey}
+                testId={`metering-bucket-${bucketKey}`}
+                label={BUCKET_LABEL[bucketKey]}
+                value={bucketCounts[bucketKey]}
+                hint={BUCKET_HINT[bucketKey]}
+                tone={
+                  bucketKey === 'auto_released'
+                    ? 'text-emerald-700'
+                    : bucketKey === 'dispute_hold'
+                      ? 'text-amber-700'
+                      : bucketKey === 'other_unbillable'
+                        ? 'text-slate-700'
+                        : ''
+                }
+                active={bucket === bucketKey}
+                onClick={() => toggleBucket(bucketKey)}
+              />
+            ))}
           </div>
 
           <div className="grid grid-cols-1 gap-1.5 text-[11px] text-slate-600 sm:grid-cols-2">
@@ -425,9 +468,20 @@ export function MeteringPage() {
             className="min-w-0 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] leading-5 text-sky-900"
             data-testid="metering-upper-bound"
           >
-            <b>有效对账行数是上界，不是精确值。</b>口径：{data.billable_basis}
+            <b>计费行数（billable 桶）是上界，不是精确值。</b>口径：{data.billable_basis}
             。{deductionText}{data.line_accounting}
-            。当前有效对账行数：<span className="font-mono">{data.billable_lines}</span>。
+            。当前计费行数（billable_lines）：
+            <span className="font-mono" data-testid="metering-billable-lines">
+              {data.billable_lines}
+            </span>
+            。
+            <span className="mt-1 block break-words">
+              注意：billable_lines 只数 billable 桶，不等于「有效对账行数」；有效对账行数为 auto_released_lines ={' '}
+              <span className="font-mono" data-testid="metering-valid-lines">
+                {data.auto_released_lines}
+              </span>
+              （行级 auto，含已自动归因的差异行）。
+            </span>
           </div>
         </div>
       </section>
@@ -448,6 +502,12 @@ export function MeteringPage() {
             ))
           )}
         </ol>
+        {(data.calculation ?? []).length > 0 ? (
+          <p className="mt-1 break-words text-[10px] leading-4 text-amber-700" data-testid="metering-calculation-gap">
+            服务端 calculation 文案把 billable_lines 写作「有效对账行数」，与商务口径不一致；前端不改写契约原文。
+            字段映射以上方「有效对账行数 = auto_released_lines、计费行数 = billable_lines」为准，该项待 API 流修文案。
+          </p>
+        ) : null}
       </section>
 
       <section className="card min-w-0">
@@ -507,7 +567,7 @@ export function MeteringPage() {
           <span className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
             {bucket ? (
               <>
-                已筛选：{BUCKET_LABEL[bucket]}桶 · {visibleLines.length} 行 / 共 {data.line_count} 行
+                已筛选：{BUCKET_LABEL[bucket]} · {visibleLines.length} 行 / 共 {data.line_count} 行
                 <button type="button" className="link text-[11px]" onClick={() => setBucket(null)}>
                   清除筛选
                 </button>
@@ -524,7 +584,7 @@ export function MeteringPage() {
               compact
               description={
                 bucket
-                  ? `${BUCKET_LABEL[bucket]}桶下暂无行；可清除筛选查看全部。`
+                  ? `${BUCKET_LABEL[bucket]}下暂无行；可清除筛选查看全部。`
                   : '该批次没有计量行：本期确实无数据，不是加载失败。'
               }
             />
