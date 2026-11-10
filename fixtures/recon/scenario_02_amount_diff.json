@@ -1,0 +1,117 @@
+{
+  "name": "scenario_02_amount_diff",
+  "description": "金额差异：第 1 行供应商单价偏高（单价不一致），第 3 行税率口径不同（税率口径）",
+  "input": {
+    "scope": {
+      "org_id": "ORG-DEMO",
+      "period": "2026-10",
+      "system_ids": ["ERP", "MES", "WMS", "STATEMENT"]
+    },
+    "suppliers": ["SUP-DEMO-01"],
+    "options": {
+      "tolerance": {"amount": "0.01", "price": "0.0001", "qty": "0.0001"}
+    },
+    "master_data": {
+      "suppliers": [
+        {"code": "SUP-DEMO-01", "name": "示例供应商一", "tax_no": "91310000DEMO00001X"}
+      ],
+      "items": [
+        {"code": "IT-2001", "name": "示例外壳", "base_unit": "PCS"},
+        {"code": "IT-2002", "name": "示例支架", "base_unit": "PCS"},
+        {"code": "IT-2003", "name": "示例线束", "base_unit": "PCS"}
+      ],
+      "unit_conversions": []
+    },
+    "our_lines": [
+      {
+        "system": "ERP",
+        "doc_no": "PO-2026-0002",
+        "line_no": 1,
+        "supplier_code": "SUP-DEMO-01",
+        "item_code": "IT-2001",
+        "qty": "100",
+        "unit": "PCS",
+        "unit_price": "12.5",
+        "amount": "1250",
+        "tax_rate": "0.13",
+        "period": "2026-10"
+      },
+      {
+        "system": "ERP",
+        "doc_no": "PO-2026-0002",
+        "line_no": 2,
+        "supplier_code": "SUP-DEMO-01",
+        "item_code": "IT-2002",
+        "qty": "50",
+        "unit": "PCS",
+        "unit_price": "8",
+        "amount": "400",
+        "tax_rate": "0.13",
+        "period": "2026-10"
+      },
+      {
+        "system": "ERP",
+        "doc_no": "PO-2026-0002",
+        "line_no": 3,
+        "supplier_code": "SUP-DEMO-01",
+        "item_code": "IT-2003",
+        "qty": "20",
+        "unit": "PCS",
+        "unit_price": "45",
+        "amount": "900",
+        "tax_rate": "0.13",
+        "period": "2026-10"
+      }
+    ],
+    "supplier_lines": [
+      {
+        "system": "STATEMENT",
+        "doc_no": "PO-2026-0002",
+        "line_no": 1,
+        "supplier_code": "SUP-DEMO-01",
+        "item_code": "IT-2001",
+        "qty": "100",
+        "unit": "PCS",
+        "unit_price": "13",
+        "amount": "1300",
+        "tax_rate": "0.13",
+        "period": "2026-10"
+      },
+      {
+        "system": "STATEMENT",
+        "doc_no": "PO-2026-0002",
+        "line_no": 2,
+        "supplier_code": "SUP-DEMO-01",
+        "item_code": "IT-2002",
+        "qty": "50",
+        "unit": "PCS",
+        "unit_price": "8",
+        "amount": "400",
+        "tax_rate": "0.13",
+        "period": "2026-10"
+      },
+      {
+        "system": "STATEMENT",
+        "doc_no": "PO-2026-0002",
+        "line_no": 3,
+        "supplier_code": "SUP-DEMO-01",
+        "item_code": "IT-2003",
+        "qty": "20",
+        "unit": "PCS",
+        "unit_price": "45",
+        "amount": "927",
+        "tax_rate": "0.16",
+        "period": "2026-10"
+      }
+    ]
+  },
+  "expected": {
+    "batch_status": "已对账",
+    "conclusive": true,
+    "matched": 3,
+    "matched_rate": "1.0000",
+    "diff_types": ["单价不一致", "税率口径"],
+    "diff_amount": "77.0000",
+    "missing_kinds": []
+  }
+}

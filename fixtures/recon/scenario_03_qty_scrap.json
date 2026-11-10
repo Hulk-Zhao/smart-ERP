@@ -1,0 +1,91 @@
+{
+  "name": "scenario_03_qty_scrap",
+  "description": "数量差异：第 1 行供应商按产出计费未扣报废（报废未扣），第 2 行多计 20 件（数量不符）",
+  "input": {
+    "scope": {
+      "org_id": "ORG-DEMO",
+      "period": "2026-10",
+      "system_ids": ["ERP", "MES", "WMS", "STATEMENT"]
+    },
+    "suppliers": ["SUP-DEMO-02"],
+    "options": {
+      "tolerance": {"amount": "0.01", "price": "0.0001", "qty": "0.0001"}
+    },
+    "master_data": {
+      "suppliers": [
+        {"code": "SUP-DEMO-02", "name": "示例供应商二", "tax_no": "91310000DEMO00002X"}
+      ],
+      "items": [
+        {"code": "IT-2001", "name": "示例外壳", "base_unit": "PCS"},
+        {"code": "IT-2002", "name": "示例支架", "base_unit": "PCS"}
+      ],
+      "unit_conversions": []
+    },
+    "our_lines": [
+      {
+        "system": "MES",
+        "doc_no": "WO-2026-0003",
+        "line_no": 1,
+        "supplier_code": "SUP-DEMO-02",
+        "item_code": "IT-2001",
+        "qty": "970",
+        "unit": "PCS",
+        "unit_price": "2",
+        "amount": "1940",
+        "tax_rate": "0.13",
+        "scrap_qty": "30",
+        "period": "2026-10"
+      },
+      {
+        "system": "ERP",
+        "doc_no": "PO-2026-0003",
+        "line_no": 1,
+        "supplier_code": "SUP-DEMO-02",
+        "item_code": "IT-2002",
+        "qty": "200",
+        "unit": "PCS",
+        "unit_price": "5",
+        "amount": "1000",
+        "tax_rate": "0.13",
+        "period": "2026-10"
+      }
+    ],
+    "supplier_lines": [
+      {
+        "system": "STATEMENT",
+        "doc_no": "INV-S-3001",
+        "line_no": 1,
+        "supplier_code": "SUP-DEMO-02",
+        "item_code": "IT-2001",
+        "qty": "1000",
+        "unit": "PCS",
+        "unit_price": "2",
+        "amount": "2000",
+        "tax_rate": "0.13",
+        "period": "2026-10"
+      },
+      {
+        "system": "STATEMENT",
+        "doc_no": "INV-S-3001",
+        "line_no": 2,
+        "supplier_code": "SUP-DEMO-02",
+        "item_code": "IT-2002",
+        "qty": "220",
+        "unit": "PCS",
+        "unit_price": "5",
+        "amount": "1100",
+        "tax_rate": "0.13",
+        "period": "2026-10"
+      }
+    ]
+  },
+  "expected": {
+    "batch_status": "已对账",
+    "conclusive": true,
+    "matched": 2,
+    "matched_rate": "1.0000",
+    "diff_types": ["报废未扣", "数量不符"],
+    "diff_amount": "160.0000",
+    "missing_kinds": []
+  }
+}
