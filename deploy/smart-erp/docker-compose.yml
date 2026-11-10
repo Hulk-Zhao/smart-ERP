@@ -9,6 +9,11 @@
 #   full：demo 全部 + doc（3G）/ worker-agent（2G）/ worker-io（1G）/ migrate（一次性）。
 #         full 档通过 `--profile full` 启动；migrate 不进常驻循环（restart: "no"）。
 #
+# 档位口径（唯一权威，T802 定稿 2026-11-11）：只有 demo / full 两个档位，
+#   `--profile` 只接受 demo、full 这两个取值；**不存在 ops 档**，也不计划新增第三档。
+#   证据：本文件全部 services 的 profiles 取值集合恰为 {demo, full}；
+#   锁死方式：tests/deploy/test_compose_deploy.py::test_profiles_are_exactly_demo_and_full。
+#
 # 设计约束（评审时逐条对照，不是疏漏）：
 #   1. 数据库复用外部 PG15（hulkai-gz-api 的 aps-postgres），本文件不起 pg / redis /
 #      minio —— 任何档位都没有这些容器，CI 与 tests/deploy 均有断言。

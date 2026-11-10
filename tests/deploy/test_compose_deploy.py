@@ -152,6 +152,17 @@ class ComposeStaticTest(unittest.TestCase):
                 self.assertEqual(self.services[name]["profiles"], ["full"])
         self.assertEqual(self.services["worker"]["profiles"], ["demo"])
 
+    def test_profiles_are_exactly_demo_and_full(self):
+        """T802 档位口径：只有 demo / full 两档；`--profile` 不接受其它取值（不存在 ops 档）。"""
+        used = set()
+        for svc in self.services.values():
+            used.update(svc.get("profiles") or [])
+        self.assertEqual(used, {"demo", "full"}, f"档位取值只能是 demo / full，实际 {sorted(used)}")
+        self.assertFalse(
+            [p for p in used if "ops" in p.lower()],
+            "不得存在 ops 档：历史上从未有该档位，文档与编排不得再出现",
+        )
+
     def test_demo_memory_budget(self):
         """§1A.3：demo 档常驻合计恰好 1200MiB；full 档另算（≤8G 整机）。"""
         total = 0.0

@@ -1,6 +1,7 @@
 # 发布前检查清单（smart-erp demo / full 档）
 
 每次发版按顺序执行，任一步非 0 就不发。全部在仓库根目录运行。
+**档位口径**：只有 `demo` / `full` 两个档位，`--profile` 只接受这两个取值，**不存在 ops 档**（T802 定稿，2026-11-11）。依据是 `docker-compose.yml` 头注释与 `tests/deploy/test_compose_deploy.py::test_profiles_are_exactly_demo_and_full` 的断言，不依赖口头约定。
 发版完成后在 [RELEASES.md](./RELEASES.md) 追加一条登记（tag、验证项、回滚 sha）。
 
 | # | 命令 | 通过标准 |
