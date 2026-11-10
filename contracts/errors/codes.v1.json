@@ -1,0 +1,143 @@
+{
+  "contract": "errors",
+  "errors": [
+    {
+      "code": "E-AUTHZ-001",
+      "fail_code": null,
+      "http_status": 403,
+      "next_step": "提供申请入口",
+      "retriable": false,
+      "title": "超出数据范围"
+    },
+    {
+      "code": "E-AUTHZ-002",
+      "fail_code": null,
+      "http_status": 403,
+      "next_step": "联系管理员",
+      "retriable": false,
+      "title": "字段 scope 不足（资金字段只读）"
+    },
+    {
+      "code": "E-CONFLICT-VERSION",
+      "fail_code": "F7",
+      "http_status": 409,
+      "next_step": "重新取数",
+      "retriable": false,
+      "title": "并发版本变化"
+    },
+    {
+      "code": "E-CONN-RATE_LIMIT",
+      "fail_code": "F5",
+      "http_status": 429,
+      "next_step": "自动退避，显示预计恢复",
+      "retriable": true,
+      "title": "限流"
+    },
+    {
+      "code": "E-CONN-SCHEMA_CHANGED",
+      "fail_code": "F5",
+      "http_status": 502,
+      "next_step": "已降 W0，联系运维",
+      "retriable": false,
+      "title": "版本漂移"
+    },
+    {
+      "code": "E-CONN-UNAVAILABLE",
+      "fail_code": "F5",
+      "http_status": 503,
+      "next_step": "只读降级提示 + 重试",
+      "retriable": true,
+      "title": "连接器不可用"
+    },
+    {
+      "code": "E-DATA-AMBIGUOUS",
+      "fail_code": "F3",
+      "http_status": 422,
+      "next_step": "人工裁决",
+      "retriable": false,
+      "title": "匹配歧义"
+    },
+    {
+      "code": "E-DATA-MISSING",
+      "fail_code": "F1",
+      "http_status": 422,
+      "next_step": "显示缺失清单（不猜）",
+      "retriable": false,
+      "title": "缺数据"
+    },
+    {
+      "code": "E-DATA-UNBOUND",
+      "fail_code": "F4",
+      "http_status": 422,
+      "next_step": "绑定流程",
+      "retriable": false,
+      "title": "主数据未绑定"
+    },
+    {
+      "code": "E-EXTERNAL-EFFECTIVE",
+      "fail_code": "F8",
+      "http_status": 409,
+      "next_step": "生成处置任务（不可回滚）",
+      "retriable": false,
+      "title": "外部已生效"
+    },
+    {
+      "code": "E-IDEM-CONFLICT",
+      "fail_code": null,
+      "http_status": 409,
+      "next_step": "报障",
+      "retriable": false,
+      "title": "同键不同参"
+    },
+    {
+      "code": "E-PARSE-FAILED",
+      "fail_code": "F2",
+      "http_status": 422,
+      "next_step": "转补录（带影像对照）",
+      "retriable": false,
+      "title": "解析失败"
+    },
+    {
+      "code": "E-POLICY-APPROVAL",
+      "fail_code": null,
+      "http_status": 409,
+      "next_step": "跳审批页",
+      "retriable": false,
+      "title": "审批未满足"
+    },
+    {
+      "code": "E-POLICY-LEVEL",
+      "fail_code": null,
+      "http_status": 403,
+      "next_step": "联系管理员改配置",
+      "retriable": false,
+      "title": "取严后等级不足"
+    },
+    {
+      "code": "E-POLICY-W3FORBIDDEN",
+      "fail_code": null,
+      "http_status": 403,
+      "next_step": "安全事件，无重试",
+      "retriable": false,
+      "title": "W3 动作被拒"
+    },
+    {
+      "code": "E-STATE-ILLEGAL",
+      "fail_code": null,
+      "http_status": 409,
+      "next_step": "报障",
+      "retriable": false,
+      "title": "非法状态迁移"
+    },
+    {
+      "code": "E-VERIFY-MISMATCH",
+      "fail_code": "F6",
+      "http_status": 409,
+      "next_step": "自动补偿中",
+      "retriable": false,
+      "title": "写入值不符"
+    }
+  ],
+  "format": "E-{DOMAIN}-{NNN}",
+  "version": "1.0"
+}
