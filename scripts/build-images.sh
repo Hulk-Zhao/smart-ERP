@@ -12,8 +12,17 @@
 #   ERP_IMAGE_TAG=$(git rev-parse HEAD) scripts/build-images.sh
 #   scripts/build-images.sh --tag <40位sha> --dry-run
 #   scripts/build-images.sh --no-cache --out /tmp/erp-dist
+#   scripts/build-images.sh --tag <40位sha> --allow-dirty   # 仅限冒烟/演练
 #
-# 退出码：0 成功；2 参数/前置条件不满足；其它为 docker 自身错误。
+# 工作树门禁：构建前跑 `git status --porcelain`，非空直接拒绝（tag 无法唯一标识内容）。
+#   发布构建请在目标 commit 的独立 worktree 里执行——脚本按自身路径定位仓库根：
+#     git worktree add /tmp/smart-erp-build <40位sha>
+#     /tmp/smart-erp-build/scripts/build-images.sh --tag <40位sha>
+#     git worktree remove --force /tmp/smart-erp-build
+#   确认只用于本地验证时才加 --allow-dirty：tag 自动追加 "-dirty"，deploy-images.sh
+#   会因 tag 不是 40 位 sha 拒绝下发。
+#
+# 退出码：0 成功；2 参数/前置条件不满足（含工作树不干净）；其它为 docker 自身错误。
 # =============================================================================
 set -euo pipefail
 
@@ -25,6 +34,7 @@ PLATFORM="${ERP_BUILD_PLATFORM:-linux/amd64}"
 WEB_BASE="${ERP_BUILD_WEB_BASE:-/demo/smart-erp/}"
 DRY_RUN=0
 NO_CACHE=0
+ALLOW_DIRTY=0
 
 usage() {
   cat <<'EOF'
@@ -33,6 +43,7 @@ usage() {
       --out <dir>       产物目录，默认 <repo>/dist
       --platform <p>    目标平台，默认 linux/amd64（必须与服务器架构一致）
       --no-cache        关闭 docker 构建缓存
+      --allow-dirty     允许脏工作树构建（tag 追加 -dirty，不可用于发布登记）
       --dry-run         只打印将执行的命令，不真正构建
   -h, --help            显示本帮助
 EOF
@@ -47,6 +58,7 @@ while [[ $# -gt 0 ]]; do
     --out)        DIST_DIR="${2:-}"; shift 2 ;;
     --platform)   PLATFORM="${2:-}"; shift 2 ;;
     --no-cache)   NO_CACHE=1; shift ;;
+    --allow-dirty) ALLOW_DIRTY=1; shift ;;
     --dry-run)    DRY_RUN=1; shift ;;
     -h|--help)    usage; exit 0 ;;
     *)            usage; die "未知参数: $1" ;;
@@ -57,6 +69,39 @@ done
 [[ -n "$TAG" ]] || die "缺少 ERP_IMAGE_TAG：必须是完整 40 位 git sha（git rev-parse HEAD）"
 if [[ ! "$TAG" =~ ^[0-9a-f]{40}$ ]]; then
   die "ERP_IMAGE_TAG='${TAG}' 不合法：必须是完整 40 位小写十六进制 sha，禁止 latest / 短 sha"
+fi
+
+# ---- 1.5 工作树洁净门禁（tag 必须唯一标识镜像内容）-------------------------
+DIRTY_LIST=""
+if git -C "${REPO_ROOT}" rev-parse --git-dir >/dev/null 2>&1; then
+  DIRTY_LIST="$(git -C "${REPO_ROOT}" status --porcelain)"
+else
+  (( ALLOW_DIRTY )) || die "不是 git 仓库，无法校验工作树；发布构建必须在 git worktree 中进行，或显式 --allow-dirty"
+  DIRTY_LIST="(不是 git 仓库，无法列出脏文件)"
+fi
+
+if [[ -n "${DIRTY_LIST}" ]]; then
+  if (( ALLOW_DIRTY )); then
+    TAG="${TAG}-dirty"
+    warn "工作树不干净，按 --allow-dirty 继续；tag 改为 ${TAG}（不可用于发布登记）"
+    printf '%s\n' "${DIRTY_LIST}" >&2
+  else
+    {
+      echo "工作树不干净，拒绝构建：tag=${TAG} 无法唯一标识镜像内容。"
+      echo "git status --porcelain："
+      printf '%s\n' "${DIRTY_LIST}"
+      echo
+      echo "处理方式（择一）："
+      echo "  1) 发布构建：在目标 commit 的独立 worktree 里跑本脚本（脚本按自身路径定位仓库根）："
+      echo "       git worktree add /tmp/smart-erp-build <40位sha>"
+      echo "       /tmp/smart-erp-build/scripts/build-images.sh --tag <40位sha>"
+      echo "       git worktree remove --force /tmp/smart-erp-build"
+      echo "  2) 冒烟/演练：确认产物只用于本地验证后加 --allow-dirty（tag 自动加 -dirty）。"
+    } >&2
+    exit 2
+  fi
+else
+  echo "== 工作树洁净：git status --porcelain 为空 =="
 fi
 
 # ---- 2. 前置条件（源码与依赖清单由其它流负责，这里只做可读的失败）----------
