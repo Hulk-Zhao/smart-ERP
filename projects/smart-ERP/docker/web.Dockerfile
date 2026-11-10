@@ -2,7 +2,9 @@
 # smart-erp/web —— 前端静态产物（Vite 构建 → nginx 1.27-alpine 运行）
 # -----------------------------------------------------------------------------
 # 依据 §1A.2：node:22-alpine 构建 → nginx:1.27-alpine 运行；只拷 dist/ 与 nginx 配置；
-# 目标 < 60MB。子路径部署 base=/demo/smart-erp/（§1A.4 路由）。
+# 体积口径（2026-11-11 修订）：基础镜像 + 自建产物增量 ≤ 5MB（实测 nginx:1.27-alpine 74.5MB
+# + 前端产物 0.1MB），不再追镜像总量 <60MB；见 docs/product/tech/01-技术架构.md §1A.2。
+# 子路径部署 base=/demo/smart-erp/（§1A.4 路由）。
 #
 # 构建（context 必须是仓库根）：
 #   docker build -f projects/smart-ERP/docker/web.Dockerfile \
