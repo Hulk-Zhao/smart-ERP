@@ -19,7 +19,7 @@ from apps.platform.api.middleware import (
     TRACE_ID_HEADER,
     install_middleware,
 )
-from apps.platform.api.router import api_router
+from apps.platform.api.router import api_router, register_business_routers
 
 __all__ = [
     "DEFAULT_TIMEOUT_S",
@@ -43,6 +43,8 @@ def install_platform(app: FastAPI, *, timeout_s: float = DEFAULT_TIMEOUT_S) -> F
 
     install_error_handlers(app)
     install_middleware(app, timeout_s=timeout_s)
+    # 先导入业务模块（导入即向 api_router 注册），再一次性挂载，避免路由漏接。
+    register_business_routers()
     app.include_router(api_router)
     app.state._erp_platform_installed = True
     return app
