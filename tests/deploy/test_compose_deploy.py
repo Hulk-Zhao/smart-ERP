@@ -455,7 +455,13 @@ class ArtifactsTest(unittest.TestCase):
         bash = _usable_bash()
         if not bash:
             self.skipTest("本机没有可用的 bash（WSL 壳不算），跳过语法检查")
-        for name in ("build-images.sh", "deploy-images.sh"):
+        for name in (
+            "build-images.sh",
+            "deploy-images.sh",
+            "backup-smart-erp.sh",
+            "restore-smart-erp.sh",
+            "upgrade-smart-erp.sh",
+        ):
             path = SCRIPTS_DIR / name
             with self.subTest(script=name):
                 self.assertTrue(path.is_file(), f"缺少 {path}")
@@ -483,6 +489,92 @@ class ArtifactsTest(unittest.TestCase):
         text = (SCRIPTS_DIR / "build-images.sh").read_text(encoding="utf-8")
         self.assertNotIn("docker push", text, "决策：不建镜像仓库")
         self.assertIn("docker save", text)
+
+    def test_backup_script_scope_and_inbox_exclusion(self):
+        """备份只碰 smart_erp 库 + erp_objects 卷，且显式排除 inbox（瞬时收件目录）。"""
+        text = (SCRIPTS_DIR / "backup-smart-erp.sh").read_text(encoding="utf-8")
+        self.assertIn('DB_NAME" != "smart_erp"', text, "库名红线必须写死在脚本里")
+        self.assertIn('exit 3', text, "库名不符必须直接拒绝（退出码 3）")
+        self.assertIn("erp_objects", text)
+        self.assertIn("pg_dump -Fc", text)
+        # 不备份实例级对象，避免把 APS 等其它住户带进来
+        self.assertNotIn("pg_dumpall", text)
+        # inbox：绑定挂载的瞬时输入，打包时必须显式排除（两种写法都排，兼容 busybox tar）
+        self.assertIn("--exclude='./inbox'", text)
+        self.assertIn("--exclude='inbox'", text)
+
+    def test_backup_tar_exclude_works_in_runtime_image(self):
+        """运行时镜像 alpine:3.20 是 busybox tar；--exclude 两种写法必须真的排掉 inbox。
+
+        镜像由 CI 的 pre-pull 步骤提前拉到本机（deploy-static 与 python-checks 都跑），
+        这里不再自行 pull：
+          - docker CLI 缺失或 daemon 不可用 → skip（环境不具备，无法验证）；
+          - docker 可用但镜像不在 → fail（pre-pull 未生效或本地没拉，属真异常，不许当绿）。
+        断言只依赖 busybox tar 的排除语义，不依赖具体 digest：上游重推同 tag 会换 digest，
+        属可接受的脆弱点；若 busybox 换成不兼容实现，下面的 tar 断言会失败，届时换镜像并
+        同步改断言即可，不要用 digest 钉死。
+        """
+        text = (SCRIPTS_DIR / "backup-smart-erp.sh").read_text(encoding="utf-8")
+        self.assertIn('OBJ_IMAGE="${ERP_BACKUP_OBJECT_IMAGE:-alpine:3.20}"', text,
+                      "备份镜像必须是 alpine（busybox tar）；换镜像要同时换断言")
+        if not shutil.which("docker"):
+            self.skipTest("本机没有 docker，跳过 busybox tar 行为验证")
+        image = "alpine:3.20"
+        daemon = subprocess.run(["docker", "info"], capture_output=True, check=False)
+        if daemon.returncode != 0:
+            self.skipTest("docker 守护进程不可用（CLI 在但 daemon 连不上），跳过")
+        if subprocess.run(
+            ["docker", "image", "inspect", image], capture_output=True, check=False
+        ).returncode != 0:
+            self.fail(
+                f"镜像 {image} 不在本机：CI 由 deploy-static / python-checks 的 pre-pull "
+                f"步骤保证；本地请先 docker pull {image}。镜像缺失不得 skip，"
+                "否则这条断言在主干上等于不存在"
+            )
+        with tempfile.TemporaryDirectory(prefix="s8-tar-") as tmp:
+            root = Path(tmp)
+            (root / "objects").mkdir()
+            (root / "objects" / "a.txt").write_text("keep\n", encoding="utf-8")
+            (root / "inbox").mkdir()
+            (root / "inbox" / "x.csv").write_text("secret\n", encoding="utf-8")
+            done = subprocess.run(
+                [
+                    "docker", "run", "--rm", "-v", f"{root}:/t", image, "sh", "-c",
+                    (
+                        "cd /t && tar -czf /tmp/o.tgz "
+                        "--exclude='./inbox' --exclude='inbox' ./ && tar -tzf /tmp/o.tgz"
+                    ),
+                ],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertIn("objects/a.txt", done.stdout)
+            self.assertNotIn("inbox", done.stdout, "busybox tar 必须排掉 inbox")
+
+    def test_restore_script_never_touches_inbox(self):
+        """恢复只写 --target-volume；inbox 只许出现在注释里，不得有任何删除/清空动作。"""
+        text = (SCRIPTS_DIR / "restore-smart-erp.sh").read_text(encoding="utf-8")
+        self.assertIn("--target-volume", text)
+        self.assertIn("--force", text, "非空库必须要求显式 --force")
+        # 唯一允许的删除是临时目录清理（trap 里的 TMP_DIR），不得删 inbox 或产物
+        self.assertNotRegex(text, r"rm\s+-[a-z]*[rf][a-z]*\s+[^\n]*inbox")
+        for line in text.splitlines():
+            if "inbox" in line:
+                self.assertTrue(
+                    line.lstrip().startswith("#"),
+                    f"restore 脚本不得对 inbox 做任何操作，只能是注释：{line.strip()}",
+                )
+
+    def test_upgrade_script_requires_backup_and_migrates_first(self):
+        """升级前置：当天备份 + 新旧镜像；迁移失败不碰应用容器；回滚指向 old-tag。"""
+        text = (SCRIPTS_DIR / "upgrade-smart-erp.sh").read_text(encoding="utf-8")
+        self.assertIn('[[ "$OLD_TAG" =~ ^[0-9a-f]{40}$ ]]', text)
+        self.assertIn('[[ "$NEW_TAG" =~ ^[0-9a-f]{40}$ ]]', text)
+        self.assertIn('"$PROFILE" == "demo" || "$PROFILE" == "full"', text)
+        self.assertIn("今天还没有备份", text, "必须先有当天备份才能升级")
+        self.assertIn("迁移不可自动回退", text)
+        self.assertIn("应用容器未动", text, "migrate 失败时应用容器必须保持旧版本")
+        self.assertIn('ERP_IMAGE_TAG="$OLD_TAG"', text, "失败路径必须给出回旧 tag 的命令")
 
     def test_provision_sql_isolation(self):
         sql = PROVISION_SQL.read_text(encoding="utf-8")
