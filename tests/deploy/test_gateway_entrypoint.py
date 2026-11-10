@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import ast
+import unittest
 from pathlib import Path
 
 import yaml
@@ -39,21 +40,32 @@ def _dockerfile_cmd() -> list[str]:
     raise AssertionError("connector-gw.Dockerfile 缺少 CMD")
 
 
-def test_entry_module_file_exists() -> None:
-    assert ENTRY_FILE.is_file(), f"入口模块不存在：{ENTRY_FILE.relative_to(REPO_ROOT)}"
+class GatewayEntrypointTest(unittest.TestCase):
+    """用 TestCase 包装：unittest discover 只收 TestCase，pytest 两种都收，
+    包成类后两个入口收到的是同一批用例，避免 CI 换入口时静默少收。"""
 
+    def test_entry_module_file_exists(self) -> None:
+        assert ENTRY_FILE.is_file(), (
+            f"入口模块不存在：{ENTRY_FILE.relative_to(REPO_ROOT)}"
+        )
 
-def test_compose_command_points_to_cli_module() -> None:
-    command = _compose_gw_command()
-    assert command[:3] == ["python", "-m", ENTRY_MODULE], f"compose command 与入口不一致：{command}"
+    def test_compose_command_points_to_cli_module(self) -> None:
+        command = _compose_gw_command()
+        assert command[:3] == ["python", "-m", ENTRY_MODULE], (
+            f"compose command 与入口不一致：{command}"
+        )
 
+    def test_dockerfile_cmd_points_to_cli_module(self) -> None:
+        cmd = _dockerfile_cmd()
+        assert cmd[:3] == ["python", "-m", ENTRY_MODULE], (
+            f"Dockerfile CMD 与入口不一致：{cmd}"
+        )
 
-def test_dockerfile_cmd_points_to_cli_module() -> None:
-    cmd = _dockerfile_cmd()
-    assert cmd[:3] == ["python", "-m", ENTRY_MODULE], f"Dockerfile CMD 与入口不一致：{cmd}"
-
-
-def test_entry_module_exposes_main() -> None:
-    tree = ast.parse(ENTRY_FILE.read_text(encoding="utf-8"))
-    functions = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
-    assert "main" in functions, "apps/connectors/gateway.py 必须提供 main() 供 python -m 调用"
+    def test_entry_module_exposes_main(self) -> None:
+        tree = ast.parse(ENTRY_FILE.read_text(encoding="utf-8"))
+        functions = {
+            node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        }
+        assert "main" in functions, (
+            "apps/connectors/gateway.py 必须提供 main() 供 python -m 调用"
+        )
