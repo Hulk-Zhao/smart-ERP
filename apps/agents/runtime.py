@@ -11,12 +11,14 @@ import asyncio
 import hashlib
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+from apps.agents.alerts import Alert, AlertSink, NullAlertSink
+from apps.agents.audit_guard import READONLY, AuditGuard, WriteDegraded
 from apps.agents.compensation import CompensationQueue, CompensationTaskView
 from apps.agents.events import EventRecord
 from apps.agents.failure import Failure, classify_exception, failure_of
@@ -27,6 +29,9 @@ from apps.platform.connectors.sdk import CompensateResult, UnknownOutcome, Verif
 from apps.platform.contracts.ticket import TicketState
 from apps.platform.policy.gateway import GatewayResult, WriteGateway
 from apps.platform.policy.levels import ActionSpec, SceneSpec
+
+UNIQUE_VERIFY_KINDS = frozenset({"read_by_external_id", "read_by_idem_key"})
+RECOVERY_THRESHOLD_ERROR = "E-RECOVERY-THRESHOLD"
 
 
 def request_hash(payload: Mapping[str, Any]) -> str:
@@ -120,6 +125,11 @@ class TicketRuntime:
         retry_backoff_seconds: Sequence[float] = (0.0, 0.0, 0.0),
         compensation_retry_seconds: float = 8.0,
         max_compensation_attempts: int = 3,
+        compensation_stale_seconds: float = 60.0,
+        recovery_daily_limit: int = 3,
+        recovery_step_limit: int = 2,
+        audit: AuditGuard | None = None,
+        alert_sink: AlertSink | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
@@ -136,6 +146,11 @@ class TicketRuntime:
         self._backoff = tuple(retry_backoff_seconds)
         self._comp_retry = compensation_retry_seconds
         self._max_comp_attempts = max_compensation_attempts
+        self._comp_stale = compensation_stale_seconds
+        self._recovery_daily_limit = recovery_daily_limit
+        self._recovery_step_limit = recovery_step_limit
+        self._alerts = alert_sink or NullAlertSink()
+        self._audit = audit or AuditGuard(store, alert_sink=self._alerts)
         self._sleep = sleep
         self._clock = clock or (lambda: datetime.now(tz=UTC))
 
@@ -207,6 +222,15 @@ class TicketRuntime:
     ) -> ExecutionReport:
         """持租约执行计划；租约拿不到就直接拒绝（防双跑）。"""
 
+        # 热路径 fail-closed：审计链不可信 / 全局只读时，先拒绝再谈租约与写入
+        await self._audit.assert_executable(ticket_id)
+        if await self._audit.global_mode() == READONLY and any(
+            step.action.level.value > 0 for step in steps
+        ):
+            raise WriteDegraded(
+                f"审计链巡检已把系统降级为只读，工单 {ticket_id} 的写类动作拒绝执行"
+            )
+
         if not await self._leases.acquire(ticket_id, owner, ttl_seconds=self._lease_ttl):
             raise LeaseNotHeld(f"工单 {ticket_id} 已被 {owner!r} 之外的 worker 持有租约")
         try:
@@ -229,6 +253,7 @@ class TicketRuntime:
                     existing=existing.get(index),
                     scene=scene,
                     run=run,
+                    trace_id=trace_id,
                 )
                 run.outcomes.append(outcome)
 
@@ -307,6 +332,7 @@ class TicketRuntime:
         existing: Any,
         scene: SceneSpec,
         run: _RunState,
+        trace_id: str | None = None,
     ) -> StepOutcome:
         # 1) 已成功/跳过的步骤永不重做（断点续跑）
         if existing is not None and existing.state in {"succeeded", "skipped", "compensated"}:
@@ -321,16 +347,13 @@ class TicketRuntime:
         if existing is not None and existing.state in {"intent", "running"}:
             observed = await self._verify(planned)
             if observed.matches():
-                await self._store.mark_step(
+                return await self._recover(
+                    ticket_id=ticket_id,
                     step_id=existing.id,
-                    state="succeeded",
-                    response_snapshot={"recovered_by_verify": dict(observed.observed or {})},
-                )
-                return StepOutcome(
                     step_no=step_no,
-                    action_key=planned.action.key,
-                    state="succeeded",
-                    recovered=True,
+                    planned=planned,
+                    observed=observed,
+                    trace_id=trace_id,
                 )
             if observed.status == "mismatch":
                 await self._store.mark_step(
@@ -391,19 +414,14 @@ class TicketRuntime:
                 # 结果未知：不重试，先问目标系统
                 observed = await self._verify(planned)
                 if observed.matches():
-                    await self._store.mark_step(
+                    return await self._recover(
+                        ticket_id=ticket_id,
                         step_id=step.id,
-                        state="succeeded",
-                        response_snapshot={
-                            "recovered_by_verify": dict(observed.observed or {})
-                        },
-                    )
-                    return StepOutcome(
                         step_no=step_no,
-                        action_key=planned.action.key,
-                        state="succeeded",
-                        recovered=True,
+                        planned=planned,
+                        observed=observed,
                         attempts=attempt,
+                        trace_id=trace_id,
                     )
                 if observed.absent():
                     last_error = "E-CONN-UNAVAILABLE"
@@ -484,15 +502,57 @@ class TicketRuntime:
                     f"工单 {ticket_id} 当前为 {ticket.state}，不在「补偿中」"
                 )
 
+            owner_name = owner or "compensator"
+            # 启动/重试恢复入口：心跳过期的 running 先重新入队，再按 DESC 续跑
+            reclaimed = await self._queue.reclaim_stale(
+                ticket_id, stale_after_seconds=self._comp_stale
+            )
+            if reclaimed:
+                self._alerts.emit(
+                    Alert(
+                        "P1",
+                        "COMPENSATION_STALE_RECLAIMED",
+                        f"工单 {ticket_id} 回收 {len(reclaimed)} 个 stale running 补偿任务",
+                        subject=str(ticket_id),
+                    )
+                )
+
             tasks = await self._queue.enqueue(ticket_id)
             for _ in range(len(tasks) * self._max_comp_attempts + 1):
-                task = await self._queue.claim_next(ticket_id)
+                task = await self._queue.claim_next(ticket_id, owner_name)
                 if task is None:
                     break
+                if task.attempts > self._max_comp_attempts:
+                    await self._queue.mark_failed(
+                        task.id, "补偿尝试次数超限", max_attempts=1
+                    )
+                    self._alerts.emit(
+                        Alert(
+                            "P0",
+                            "COMPENSATION_ATTEMPTS_EXCEEDED",
+                            f"工单 {ticket_id} 补偿 seq={task.compensate_seq} 超过 "
+                            f"{self._max_comp_attempts} 次，转人工",
+                            subject=str(ticket_id),
+                        )
+                    )
+                    await self._store.record_compensation(
+                        ticket_id=ticket_id,
+                        compensate_seq=task.compensate_seq,
+                        state="attempts_exceeded",
+                        trace_id=trace_id,
+                    )
+                    continue
+                await self._queue.heartbeat(task.id, owner_name)
                 await self._run_compensation(ticket_id, task, trace_id=trace_id)
 
             counts = await self._queue.counts(ticket_id)
-            if counts.failed or counts.running or counts.queued:
+            steps = await self._store.list_steps(ticket_id)
+            recovery_threshold_hit = any(
+                step.state == "unresolved"
+                and step.error_code == RECOVERY_THRESHOLD_ERROR
+                for step in steps
+            )
+            if counts.failed or counts.running or counts.queued or recovery_threshold_hit:
                 failed = max(1, counts.failed)
                 await self._store.transition(
                     ticket_id,
@@ -526,6 +586,26 @@ class TicketRuntime:
         finally:
             if held:
                 await self._leases.release(ticket_id, owner)  # type: ignore[arg-type]
+
+    async def recover_stale_compensations(
+        self, *, stale_after_seconds: float | None = None
+    ) -> tuple[CompensationTaskView, ...]:
+        """启动恢复入口：全库扫描心跳过期的 running 并重新入队。"""
+
+        reclaimed = await self._queue.reclaim_stale_all(
+            stale_after_seconds=(
+                self._comp_stale if stale_after_seconds is None else stale_after_seconds
+            )
+        )
+        if reclaimed:
+            self._alerts.emit(
+                Alert(
+                    "P1",
+                    "COMPENSATION_STALE_RECLAIMED",
+                    f"启动恢复：回收 {len(reclaimed)} 个 stale running 补偿任务",
+                )
+            )
+        return tuple(reclaimed)
 
     async def _run_compensation(
         self,
@@ -586,6 +666,100 @@ class TicketRuntime:
 
     # ---------------------------------------------------------------- 内部
     async def _verify(self, planned: PlannedStep) -> VerifyResult:
+        """只接受「按唯一键（幂等键/外部单号）」的确认，避免凭印象判 match。"""
+
         if self._verifier is None:
             raise RuntimeGuardError("未注入 verifier，无法判定未知结果")
-        return await self._verifier(planned)
+        spec = planned.action.verify
+        fields = set(getattr(spec, "fields", ()) or ())
+        if (
+            spec is None
+            or getattr(spec, "kind", "") not in UNIQUE_VERIFY_KINDS
+            or not ({"external_id", "idem_key"} & fields)
+        ):
+            self._alerts.emit(
+                Alert(
+                    "P1",
+                    "VERIFY_SPEC_NOT_UNIQUE",
+                    f"动作 {planned.action.key} 的 verify 未按唯一键确认，按 unresolved 处理",
+                    subject=planned.idem_key,
+                )
+            )
+            return VerifyResult(
+                status="mismatch",
+                observed={"reason": "verify_spec_not_unique",
+                          "kind": getattr(spec, "kind", None)},
+            )
+        payload = dict(planned.verify_payload or planned.payload)
+        payload.setdefault("idem_key", planned.idem_key)
+        return await self._verifier(replace(planned, verify_payload=payload))
+
+    async def _recover(
+        self,
+        *,
+        ticket_id: UUID,
+        step_id: UUID,
+        step_no: int,
+        planned: PlannedStep,
+        observed: VerifyResult,
+        attempts: int = 1,
+        trace_id: str | None = None,
+    ) -> StepOutcome:
+        """外部已成功、本地未提交：写显式 recovered 事件；超阈值强制转人工。"""
+
+        prior_step = await self._store.count_recoveries(ticket_id, step_no=step_no)
+        prior_today = await self._store.count_recoveries(ticket_id, today_only=True)
+        if (
+            prior_step >= self._recovery_step_limit
+            or prior_today >= self._recovery_daily_limit
+        ):
+            await self._store.mark_step(
+                step_id=step_id,
+                state="unresolved",
+                error_code=RECOVERY_THRESHOLD_ERROR,
+            )
+            self._alerts.emit(
+                Alert(
+                    "P0",
+                    "RECOVERY_THRESHOLD_EXCEEDED",
+                    f"工单 {ticket_id} 步骤 {step_no} 反复 recovered"
+                    f"（同步骤 {prior_step} 次 / 当日 {prior_today} 次），强制转人工",
+                    subject=str(ticket_id),
+                )
+            )
+            return StepOutcome(
+                step_no=step_no,
+                action_key=planned.action.key,
+                state="unresolved",
+                fail_code="F6",
+                attempts=attempts,
+            )
+
+        await self._store.mark_step(
+            step_id=step_id,
+            state="succeeded",
+            response_snapshot={"recovered_by_verify": dict(observed.observed or {})},
+        )
+        await self._store.record_recovery(
+            ticket_id=ticket_id,
+            step_no=step_no,
+            idem_key=planned.idem_key,
+            verify_observed=dict(observed.observed or {}),
+            prior_recoveries=prior_step,
+            trace_id=trace_id,
+        )
+        self._alerts.emit(
+            Alert(
+                "info",
+                "STEP_RECOVERED",
+                f"工单 {ticket_id} 步骤 {step_no} 由 verify 确认后恢复",
+                subject=planned.idem_key,
+            )
+        )
+        return StepOutcome(
+            step_no=step_no,
+            action_key=planned.action.key,
+            state="succeeded",
+            recovered=True,
+            attempts=attempts,
+        )

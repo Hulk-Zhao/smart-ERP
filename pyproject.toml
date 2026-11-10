@@ -34,7 +34,9 @@ pdf = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["apps*"]
+# core / tools 是 C15 常驻进程入口（python -m core.runtime.worker 等），
+# 只打 apps* 时即使补了文件镜像里也会 ModuleNotFoundError（B-S8-01）。
+include = ["apps*", "core*", "tools*"]
 namespaces = false
 
 [tool.pytest.ini_options]

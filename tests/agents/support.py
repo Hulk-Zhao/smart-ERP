@@ -175,6 +175,9 @@ def build_runtime(
     *,
     max_attempts: int = 3,
     breaker: Any = None,
+    compensator: Any = None,
+    compensation_stale_seconds: float = 60.0,
+    alert_sink: Any = None,
 ) -> TicketRuntime:
     """把测试替身装配成运行时（写入仍走真实 WriteGateway）。"""
 
@@ -199,8 +202,10 @@ def build_runtime(
         gateway=gateway,
         compensation=env.queue,
         verifier=verify,
-        compensator=compensate,
+        compensator=compensator or compensate,
         max_attempts=max_attempts,
         retry_backoff_seconds=(0.0, 0.0, 0.0),
         compensation_retry_seconds=0.0,
+        compensation_stale_seconds=compensation_stale_seconds,
+        alert_sink=alert_sink,
     )
