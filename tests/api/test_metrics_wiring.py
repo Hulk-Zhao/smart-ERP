@@ -149,3 +149,50 @@ def test_persist_conflict_is_counted_as_failure(env) -> None:
         stage="persist", code="E-IDEM-CONFLICT"
     ) == 1
 
+
+def test_projection_persists_and_persist_failure_is_counted(env) -> None:
+    """同一 ``run_recon`` 里的两件事必须同时成立（rebase 后不许静默丢一边）。
+
+    - 成功路径：读取只认持久化快照（不读内存），GET 200 且能读到差异，说明
+      快照里带了 ``view`` 投影；若丢了 ``view=_batch_view(batch)``，读路径会
+      503「未持久化视图投影」。
+    - 失败路径：把 store 换成必冲突实现，409 必须仍记到
+      ``recon_runs_failed_total{stage="persist"}``，且不破坏已落库的投影。
+    """
+
+    run = env.client.post(
+        f"{PREFIX}/recon/runs", json=_body(env), headers=env.headers("initiator", "k-proj-ok")
+    )
+    assert run.status_code == 201, run.text
+    batch_id = run.json()["batch_id"]
+
+    params = env.scope_params(system_ids=[cf.SYSTEM, cf.STATEMENT])
+    got = env.client.get(
+        f"{PREFIX}/recon/runs/{batch_id}", params=params, headers=env.headers()
+    )
+    assert got.status_code == 200, got.text
+    assert got.json()["batch_id"] == batch_id
+    assert got.json()["status"] == run.json()["status"]
+    assert got.json()["metrics"] == run.json()["metrics"]
+    assert sum(
+        env.container.metrics.recon_batches_total.value(result=label)
+        for label in RESULT_LABELS
+    ) == 1
+
+    store = env.container.recon_store
+    env.container.recon_store = _ConflictStore()
+    failed = env.client.post(
+        f"{PREFIX}/recon/runs", json=_body(env), headers=env.headers("initiator", "k-proj-fail")
+    )
+    assert failed.status_code == 409, failed.text
+    assert env.container.metrics.recon_runs_failed_total.value(
+        stage="persist", code="E-IDEM-CONFLICT"
+    ) == 1
+
+    # 失败没有把已落库的投影弄坏：换回真实 store，同一批次仍可读。
+    env.container.recon_store = store
+    again = env.client.get(
+        f"{PREFIX}/recon/runs/{batch_id}", params=params, headers=env.headers()
+    )
+    assert again.status_code == 200, again.text
+
