@@ -327,14 +327,9 @@ class ComposeStaticTest(unittest.TestCase):
         # web 的 /healthz 必须真的由 nginx 配置返回，而不是只写在探针里
         nginx_conf = (DOCKER_DIR / "web-nginx.conf").read_text(encoding="utf-8")
         self.assertIn("location = /healthz", nginx_conf)
-        # 反向代理必须用「resolver + 变量」，否则 api 未就绪时 nginx 会
-        # "host not found in upstream" 直接起不来（实测踩过）
-        self.assertIn("resolver 127.0.0.11", nginx_conf)
-        self.assertIn("proxy_pass $erp_api_upstream", nginx_conf)
-        # 必须剥前缀：api 以 uvicorn --root-path=/erp/api 启动，应用只认无前缀路径；
-        # 旧写法 proxy_pass .../erp/api/ 会让所有 /erp/api/* 404。
-        self.assertIn("proxy_pass $erp_api_upstream/;", nginx_conf)
-        self.assertNotIn("proxy_pass http://api:8010", nginx_conf)
+        # 上游必须写字面量 + URI 恰好 "/"：变量式 proxy_pass 不做前缀替换，
+        # 见 test_proxy_pass_never_mixes_variable_and_uri 与真容器用例。
+        self.assertIn("proxy_pass http://api:8010/;", nginx_conf)
 
         # gw 的 read_only + tmpfs（§1A.2）
         gw = self.services["connector-gw"]
@@ -385,6 +380,39 @@ class ComposeStaticTest(unittest.TestCase):
             f"（{root_path.rstrip('/')}/healthz 对应容器内 /healthz），URI 必须恰好是 '/'，"
             "否则该前缀下所有请求都会 404",
         )
+
+    def test_proxy_pass_never_mixes_variable_and_uri(self):
+        """禁止 `proxy_pass` 同时出现变量与 URI：nginx 此时不做前缀替换。
+
+        反例（2026-11-11 真容器实测，全部 404）：
+            set $erp_api_upstream http://api:8010;
+            proxy_pass $erp_api_upstream/;
+        请求 /erp/api/healthz 到达上游的是 "/"，不是 "/healthz"。
+        允许的两种写法：
+            proxy_pass http://api:8010/;                        # 字面量 + 尾斜杠
+            proxy_pass $erp_api_upstream; + rewrite ... break;  # 变量不带 URI
+        """
+        nginx_conf = (DOCKER_DIR / "web-nginx.conf").read_text(encoding="utf-8")
+        # 先去掉注释：说明文字里会引用反例（例如本节 docstring），不能当成指令匹配。
+        code = re.sub(r"#[^\n]*", "", nginx_conf)
+        directives = re.findall(r"proxy_pass\s+([^;]+);", code)
+        self.assertTrue(directives, "web-nginx.conf 未找到 proxy_pass")
+        for target in directives:
+            target = target.strip()
+            if "$" not in target:
+                continue
+            remainder = re.sub(
+                r"^(\$[A-Za-z_][A-Za-z0-9_]*|https?://[^/]+)", "", target
+            )
+            self.assertEqual(
+                remainder,
+                "",
+                f"proxy_pass {target!r} 同时含变量和 URI（剩余 {remainder!r}）："
+                "nginx 用变量时不做 location 前缀替换，URI 会按指令原样发送，"
+                "该 location 下所有请求都会被压成这个 URI（实测全部 404）。"
+                "变量式必须不带 URI 并配 rewrite，或直接写字面量 "
+                "proxy_pass http://api:8010/;",
+            )
 
     def test_healthz_route_really_exists(self):
         """healthcheck 打 /healthz，就必须在源码里真有这条路由，而不是只写在 YAML 里。"""

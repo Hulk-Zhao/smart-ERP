@@ -99,7 +99,7 @@ jobs:
   deploy-static:
     name: 部署面静态校验
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -163,6 +163,25 @@ jobs:
           fi
           grep -q "ERP_IMAGE_TAG" /tmp/compose.err /tmp/compose.out
           echo "负向校验通过：缺 ERP_IMAGE_TAG 时被拒绝"
+
+      # 静态断言看不见 nginx 的变量语义：`proxy_pass $upstream/;` 文本上完全
+      # 合法，运行时却会把所有 /erp/api/* 压成 "/"。这里用真实配置起 web + api
+      # 两个容器，直接打经 web 的 /erp/api/healthz 与 /openapi.json。
+      - name: 构建真容器用例镜像（api + web，不推送）
+        run: |
+          set -euo pipefail
+          docker build --file projects/smart-ERP/docker/api.Dockerfile \
+            --tag smart-erp/app:ci-nginx-e2e .
+          docker build --file projects/smart-ERP/docker/web.Dockerfile \
+            --build-arg ERP_WEB_BASE=/demo/smart-erp/ \
+            --tag smart-erp/web:ci-nginx-e2e .
+
+      - name: 真容器断言（经 web 的 /erp/api/* 必须 200）
+        env:
+          ERP_NGINX_E2E: "1"
+          ERP_NGINX_E2E_API_IMAGE: smart-erp/app:ci-nginx-e2e
+          ERP_NGINX_E2E_WEB_IMAGE: smart-erp/web:ci-nginx-e2e
+        run: python -m pytest tests/deploy/test_nginx_runtime.py -q -o addopts="" -rs
 
   # ---------------------------------------------------------------------------
   # 2. shell lint：发布脚本是本流的交付物，语法与常见坑必须机器把关
