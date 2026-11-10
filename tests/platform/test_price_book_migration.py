@@ -297,6 +297,8 @@ def test_app_role_cannot_mutate_price_book(provisioned_pg, sql: str) -> None:
     with pytest.raises(DBAPIError) as excinfo:
         run_sql(app_url, sql)
     assert "permission denied" in str(excinfo.value)
+    # 权限拒绝是 42501 insufficient_privilege；23514 是 check_violation，别混用
+    assert getattr(excinfo.value.orig, "sqlstate", None) == "42501"
 
 
 def test_app_role_can_select_and_insert(provisioned_pg) -> None:

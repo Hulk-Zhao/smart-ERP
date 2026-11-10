@@ -21,8 +21,22 @@ Create Date: 2026-11-11
 - **owner / 授权**：本迁移必须由 ``erp_migrator`` 执行（表 owner = erp_migrator）；
   ``ALTER DEFAULT PRIVILEGES`` 会给 ``erp_app`` 自动授 UPDATE/DELETE，
   所以建表后必须显式 ``REVOKE``，再只给 SELECT/INSERT。负向用例见
-  ``tests/platform/test_price_book_migration.py``（UPDATE / DELETE / TRUNCATE 均须权限错误，
-  ``pg_tables.tableowner = 'erp_migrator'``）。
+  ``tests/platform/test_price_book_migration.py``（UPDATE / DELETE / TRUNCATE 均须
+  ``42501 insufficient_privilege``——**不是** ``23514 check_violation``，
+  后者是 CHECK 约束拒绝，排查方向完全不同；``pg_tables.tableowner = 'erp_migrator'``）。
+
+取价口径（写在实现里，不只留在评审记录）：
+- 取价 SQL 见 ``apps/api/metering.py::PRICE_LOOKUP_SQL``：在
+  ``effective_from <= t`` 中 ``ORDER BY effective_from DESC LIMIT 1``；
+- **不按 ``supersedes_id IS NULL`` 过滤**。``supersedes_id`` 是审计追溯链，
+  不是取价条件；「作废」的生效时刻由**新行的 effective_from** 定义，
+  不由旧行状态定义。按它过滤会让 ``t`` 早于新价生效日的区间直接查不到价，
+  历史账无法复算；
+- 纠错 = 插新行（``supersedes_id`` 指向旧行）；旧批次金额由 ``recon_batch``
+  的四字段快照保证不变，不得 UPDATE / DELETE 价格表（``erp_app`` 无此权限，42501）；
+- 未来日期的错价行无法被更早的 ``effective_from`` 遮蔽：纠错行的
+  ``effective_from`` 必须 ≥ 错价行，取 ``错价行.effective_from + 1µs``；
+- 币种必须与批次一致；不符即「无有效价」，fail closed，绝不改用价格表里的其他币种。
 
 取整口径（两级，只在账期汇总层取整一次）：
 - 批次级 ``statement`` 金额保留 4 位小数、**不取整**，前端标注「未取整，最终以账期账单为准」；
