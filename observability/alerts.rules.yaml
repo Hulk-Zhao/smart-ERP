@@ -58,26 +58,146 @@ groups:
             越晚处理越可能变成对账差异与付款错误，属于业务闭环中断而非单纯技术告警。
           runbook: "按失败分类 F1-F8 拆分 smart_erp_ticket_failures_total，先处理 F5/F6"
 
+      # ================================================================
+      # 待接线规则（已注释，未启用）——采集点待接线（归属流：apps/agents）
+      #
+      # 口径（README §6.1.2）：规则引用的指标必须在同一次 PR 里有采集点；
+      # 做不到就显式标注「采集点待接线」并把规则注释掉，不许留一条永不触发的告警。
+      # 下列 6 条依赖的 compensation_overdue / compensation_future_retry /
+      # db_clock_skew_seconds 目前零生产调用。接线后取消注释、重跑 promtool，
+      # 并把 README §6.1 的采集点列改成真实「文件:行」。
+      #
+      # 原 SmartErpCompensationBacklogHigh(P1) 已物理删除：它依赖
+      # smart_erp_compensation_backlog，而 set_compensation_backlog 在
+      # apps/、core/、db/、scripts/ 零调用——永不触发的 P1 是假安全感。
+      # ================================================================
       # ------------------------------------------------------------------
-      # P1：补偿积压
-      # 指标：smart_erp_compensation_backlog
+      # P2 / P1：补偿任务到期未领取（claim 停摆）
+      # 指标：smart_erp_compensation_overdue
+      # 采集点：无（待 apps/agents 接线；未接线前这些规则不会触发）
+      # SQL 口径：state='queued' AND (
+      #   (next_retry_at IS NOT NULL AND next_retry_at < now() - interval '60 seconds')
+      #   OR (next_retry_at IS NULL
+      #       AND coalesce(updated_at, created_at) < now() - interval '60 seconds'))
+      # NULL 分支不可省：零重试修复后，没有闸门的行 next_retry_at 就是 NULL，
+      # 漏掉它等于给「立即应领取却没人领」造了一个新的静默面。
+      # max()：各副本读同一张表，取最大值避免重复计数。
       # ------------------------------------------------------------------
-      - alert: SmartErpCompensationBacklogHigh
-        # sum()：每个副本各自持有补偿队列，必须相加才是全局积压。
-        expr: sum(smart_erp_compensation_backlog) > 20
-        for: 10m
-        labels:
-          severity: P1
-          service: smart-erp
-        annotations:
-          summary: "补偿任务积压 > 20（持续 10 分钟）"
-          description: >-
-            当前补偿积压={{ $value }}。补偿是把“已写出去但最终失败”的动作撤回，
-            积压意味着外部系统里存在一批该撤未撤的数据。
-          why_paged: >-
-            补偿积压不是队列延迟，而是外部系统正在保留错误数据；每多一分钟，
-            可能被下游报表、付款或供应商对账消费，事后纠正成本远高于夜间处理。
-          runbook: "检查 gateway.compensate span 的失败原因与补偿 worker 心跳"
+      # - alert: SmartErpCompensationOverdueP2
+      #   expr: max(smart_erp_compensation_overdue) > 0
+      #   for: 5m
+      #   labels:
+      #     severity: P2
+      #     service: smart-erp
+      #   annotations:
+      #     summary: "补偿任务到期 60s 未被领取（持续 5 分钟）"
+      #     description: >-
+      #       当前过期未领取={{ $value }}。worker 仍在跑但 claim 拿不到任务，
+      #       通常是 next_retry_at 的比较依赖了服务器时钟，或队列扫描条件写错。
+      #     why_paged: >-
+      #       这条不叫醒人：5 分钟内可能只是 worker 重启或短时锁竞争；
+      #       但它一旦持续就是任务永久停在 queued（重试闸门永远不过期），
+      #       所以必须在工作时间先看一眼，避免拖到 P1。
+      #     runbook: "查 compensation.claim_next 的返回与 next_retry_at/updated_at 分布，见 RUNBOOK 补偿队列段"
+
+      # - alert: SmartErpCompensationOverdueP1Volume
+      #   expr: max(smart_erp_compensation_overdue) > 5
+      #   for: 5m
+      #   labels:
+      #     severity: P1
+      #     service: smart-erp
+      #   annotations:
+      #     summary: "补偿任务过期未领取 > 5（持续 5 分钟）"
+      #     description: >-
+      #       过期未领取={{ $value }}，已不是单条卡住而是批量停摆。
+      #       这些任务本应「立即领取」，说明 claim 路径整体失效。
+      #     why_paged: >-
+      #       批量停摆意味着坏数据在外部系统里停留时间被拉长，且人工无法从队列看出来；
+      #       5 分钟内处理可以把影响限制在单批，拖到早上会变成对账差异。
+      #     runbook: "立即核对 DB 与应用时钟偏差；若同批出现 future_retry，按时钟回拨处理"
+
+      # - alert: SmartErpCompensationOverdueP1Duration
+      #   expr: max(smart_erp_compensation_overdue) > 0
+      #   for: 15m
+      #   labels:
+      #     severity: P1
+      #     service: smart-erp
+      #   annotations:
+      #     summary: "补偿任务过期未领取持续 15 分钟"
+      #     description: >-
+      #       即使只有 1 条，卡满 15 分钟也说明 claim 不会自愈。单条卡死同样会造成
+      #       该笔业务永远不补偿，且没有任何重试会把它捞起来。
+      #     why_paged: >-
+      #       15 分钟是「短暂抖动」与「逻辑失效」的分界；跨过这条线还等，
+      #       就等于承认队列里有一条永远不会执行的任务，必须人工介入。
+      #     runbook: "按 overdue 的 SQL 取样本行，确认 next_retry_at / updated_at / state"
+
+      # ------------------------------------------------------------------
+      # P1：未来重试（唯一能直接抓到墙钟回拨的信号）
+      # 指标：smart_erp_compensation_future_retry
+      # 采集点：无（待 apps/agents 接线）
+      # 口径：state='queued' AND next_retry_at > now() + 18s
+      # 18s = 最大重试退避 8s + 10s 余量；超过即不可能由正常退避产生。
+      # ------------------------------------------------------------------
+      # - alert: SmartErpCompensationFutureRetry
+      #   expr: max(smart_erp_compensation_future_retry) > 0
+      #   for: 1m
+      #   labels:
+      #     severity: P1
+      #     service: smart-erp
+      #   annotations:
+      #     summary: "出现 next_retry_at 落在未来 18s 之外的补偿任务"
+      #     description: >-
+      #       计数={{ $value }}。正常退避最长 8s，写入的未来时间超过 now()+18s 只能是
+      #       墙钟被回拨（或应用/DB 时钟不一致）导致把过去的「立即」写成了未来。
+      #     why_paged: >-
+      #       这是根因信号：此时任务可能还没卡住，但 claim 已经不会再取到它们；
+      #       1 分钟内确认可以避免进入「静默 queued」，并为时钟问题留下证据。
+      #     runbook: "比对应用与 DB 的 now()；检查宿主 NTP/pmtx 与容器时钟，见下方的 clock_skew 指标"
+
+      # ------------------------------------------------------------------
+      # P1 / P2：应用侧时钟回拨（根因信号，任务卡住之前就能报）
+      # 指标：smart_erp_db_clock_skew_seconds（Δtick 与 Δwall 成对采样，负值=回拨）
+      # 采集点：无（待 apps/agents 接线）
+      # ------------------------------------------------------------------
+      # - alert: SmartErpClockSkewP2
+      #   expr: max(abs(smart_erp_db_clock_skew_seconds)) >= 5
+      #   for: 1m
+      #   labels:
+      #     severity: P2
+      #     service: smart-erp
+      #   annotations:
+      #     summary: "应用单调时钟与墙钟偏差 ≥ 5s（持续 1 分钟）"
+      #     description: >-
+      #       最大偏差={{ $value }}s。时钟不一致会让所有「now() 比较」写入的闸门时间失真，
+      #       包括补偿的 next_retry_at；此时业务可能仍正常，但已有任务被写到了错误的时间。
+      #     why_paged: >-
+      #       5s 是 NTP 步进/容器迁移的典型量级，先在工作时间排查；
+      #       它本身不叫醒人，但如果同时出现 future_retry，则按 P1 处理。
+      #     runbook: "检查宿主机 NTP（chrony/pmtx）与容器时钟；确认是否有 VM 迁移/休眠"
+
+      # - alert: SmartErpClockSkewP1
+      #   expr: max(abs(smart_erp_db_clock_skew_seconds)) >= 30
+      #   for: 1m
+      #   labels:
+      #     severity: P1
+      #     service: smart-erp
+      #   annotations:
+      #     summary: "应用单调时钟与墙钟偏差 ≥ 30s（持续 1 分钟）"
+      #     description: >-
+      #       最大偏差={{ $value }}s。这个量级足以让依赖 now() 的重试闸门整批失效，
+      #       并可能重放/跳过整段调度窗口。
+      #     why_paged: >-
+      #       30s 不是抖动而是故障：要么时钟被大幅回拨，要么进程被挂起后墙钟跳变；
+      #       继续跑会让补偿与重试在错误时间线上执行，必须立即确认并决定是否停 worker。
+      #     runbook: "先停补偿 worker 防止继续写错 next_retry_at；再校正时钟并核对 overdue/future_retry"
+
+      # ------------------------------------------------------------------
+      # 说明：原 SmartErpCompensationBacklogHigh(P1) 已删除。
+      # 它依赖 smart_erp_compensation_backlog，而 set_compensation_backlog 在
+      # apps/、core/、db/、scripts/ 零调用——永不触发的 P1 是假安全感。
+      # 待 apps/agents 落地采集点后，再连同 overdue/future_retry 一起恢复并验收。
+      # ------------------------------------------------------------------
 
       # ------------------------------------------------------------------
       # P1：对账批次失败率

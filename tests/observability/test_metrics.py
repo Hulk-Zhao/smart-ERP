@@ -235,6 +235,57 @@ def test_audit_chain_gauge_flips_back_to_zero() -> None:
     assert "smart_erp_audit_chain_broken 0" in render_metrics(registry)
 
 
+# ---------------------------------------------------------------- 补偿 / 时钟口径
+
+
+def test_compensation_quality_gauges_render_expected_series() -> None:
+    registry = MetricsRegistry()
+    registry.set_compensation_overdue(3)
+    registry.set_compensation_future_retry(1)
+    registry.observe_clock_skew(monotonic_delta_seconds=10.0, wall_delta_seconds=8.57)
+
+    text = render_metrics(registry)
+
+    assert "smart_erp_compensation_overdue 3" in text
+    assert "smart_erp_compensation_future_retry 1" in text
+    # 负值是合法信号（墙钟回拨），不能被 _non_negative 拦掉。
+    assert "smart_erp_db_clock_skew_seconds -1.43" in text
+    assert "smart_erp_db_clock_skew_backwards_seconds_max 1.43" in text
+
+
+def test_clock_skew_returns_signed_delta_and_keeps_lifetime_backwards_max() -> None:
+    registry = MetricsRegistry()
+
+    # 单调时钟走了 10s、墙钟只走了 8.57s → 墙钟回拨 1.43s（今晚实测量级）。
+    assert registry.observe_clock_skew(
+        monotonic_delta_seconds=10.0, wall_delta_seconds=8.57
+    ) == pytest.approx(-1.43)
+
+    # 墙钟恢复正常前进：瞬时 skew 转正，但历史最大回拨必须保留。
+    assert registry.observe_clock_skew(
+        monotonic_delta_seconds=10.0, wall_delta_seconds=25.0
+    ) == pytest.approx(15.0)
+    assert registry.db_clock_skew_seconds.value() == pytest.approx(15.0)
+    assert registry.db_clock_skew_backwards_seconds_max.value() == pytest.approx(1.43)
+
+
+def test_clock_skew_rejects_invalid_samples_and_counts_reject_negatives() -> None:
+    registry = MetricsRegistry()
+    # 单调时钟不可能倒退：传负增量说明采样点写错了。
+    with pytest.raises(MetricError):
+        registry.observe_clock_skew(
+            monotonic_delta_seconds=-1.0, wall_delta_seconds=1.0
+        )
+    with pytest.raises(MetricError):
+        registry.observe_clock_skew(
+            monotonic_delta_seconds=1.0, wall_delta_seconds=float("nan")
+        )
+    with pytest.raises(MetricError):
+        registry.set_compensation_overdue(-1)
+    with pytest.raises(MetricError):
+        registry.set_compensation_future_retry(-1)
+
+
 def test_metric_names_are_stable_and_prefixed() -> None:
     names = MetricsRegistry().metric_names
     assert all(name.startswith("smart_erp_") for name in names)
@@ -245,6 +296,10 @@ def test_metric_names_are_stable_and_prefixed() -> None:
         "smart_erp_recon_batches_total",
         "smart_erp_unresolved_tickets",
         "smart_erp_compensation_backlog",
+        "smart_erp_compensation_overdue",
+        "smart_erp_compensation_future_retry",
+        "smart_erp_db_clock_skew_seconds",
+        "smart_erp_db_clock_skew_backwards_seconds_max",
         "smart_erp_audit_chain_broken",
     ):
         assert required in names
