@@ -8,17 +8,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Mapping, Sequence
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-from apps.platform.contracts.ticket import TicketState
-from apps.platform.db.models import Ticket, TicketEvent, TicketStep
 
 from apps.agents.events import (
     COMPENSATION_EVENT,
@@ -31,6 +29,8 @@ from apps.agents.events import (
     replay,
 )
 from apps.agents.state_machine import TransitionContext, resolve_transition
+from apps.platform.contracts.ticket import TicketState
+from apps.platform.db.models import Ticket, TicketEvent, TicketStep
 
 
 class StoreError(Exception):

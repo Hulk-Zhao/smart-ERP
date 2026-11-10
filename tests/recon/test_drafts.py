@@ -21,8 +21,8 @@ def test_amount_diff_produces_one_draft_per_type():
     assert len(result.discrepancy_drafts) == 2
     by_type = {draft.diff_type.value: draft for draft in result.discrepancy_drafts}
     assert set(by_type) == {"单价不一致", "税率口径"}
-    assert by_type["单价不一致"].amount.amount == Decimal("50")
-    assert by_type["税率口径"].amount.amount == Decimal("27")
+    assert by_type["单价不一致"].amount.amount == Decimal(50)
+    assert by_type["税率口径"].amount.amount == Decimal(27)
     assert all(draft.status == "草稿" for draft in result.discrepancy_drafts)
     assert all(draft.supplier_code == "SUP-DEMO-01" for draft in result.discrepancy_drafts)
     assert all(draft.period == "2026-10" for draft in result.discrepancy_drafts)

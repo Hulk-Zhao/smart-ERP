@@ -38,7 +38,7 @@ def test_unit_price_diff_amount_and_owner(make_request, make_line):
 
     assert [diff.type for diff in attribution.diffs] == [DiffType.UNIT_PRICE]
     diff = attribution.diffs[0]
-    assert diff.amount.amount == Decimal("10")
+    assert diff.amount.amount == Decimal(10)
     assert diff.owner is DiffOwner.SUPPLIER
     assert diff.confidence >= Decimal("0.70")
     assert diff.needs_manual is False
@@ -58,7 +58,7 @@ def test_qty_diff_amount(make_request, make_line):
 
     by_type = {diff.type: diff for diff in attribution.diffs}
     assert set(by_type) == {DiffType.QTY}
-    assert by_type[DiffType.QTY].amount.amount == Decimal("10")
+    assert by_type[DiffType.QTY].amount.amount == Decimal(10)
     assert by_type[DiffType.QTY].confidence == Decimal("0.88")
 
 
@@ -75,7 +75,7 @@ def test_scrap_not_deducted(make_request, make_line):
 
     by_type = {diff.type: diff for diff in attribution.diffs}
     assert set(by_type) == {DiffType.SCRAP}
-    assert by_type[DiffType.SCRAP].amount.amount == Decimal("15")
+    assert by_type[DiffType.SCRAP].amount.amount == Decimal(15)
     assert by_type[DiffType.SCRAP].owner is DiffOwner.SUPPLIER
 
 
@@ -96,7 +96,7 @@ def test_tax_rate_diff(make_request, make_line):
 
     by_type = {diff.type: diff for diff in attribution.diffs}
     assert set(by_type) == {DiffType.TAX}
-    assert by_type[DiffType.TAX].amount.amount == Decimal("3")
+    assert by_type[DiffType.TAX].amount.amount == Decimal(3)
 
 
 def test_unexplained_amount_is_not_forced_into_seven_types(make_request, make_line):
@@ -139,7 +139,7 @@ def test_duplicate_billing_is_intercepted(make_request, make_line):
     types = [diff.type for diff in result.diffs]
     assert DiffType.DUPLICATE in types
     duplicate = next(diff for diff in result.diffs if diff.type is DiffType.DUPLICATE)
-    assert duplicate.amount.amount == Decimal("50")
+    assert duplicate.amount.amount == Decimal(50)
     assert duplicate.owner is DiffOwner.SUPPLIER
     assert any(line.status.value == "重复计费" for line in result.lines)
     # 重复占计费额 50%，判定为疑似数据异常并阻断自动处置
@@ -150,7 +150,7 @@ def test_duplicate_billing_is_intercepted(make_request, make_line):
 def test_confidence_below_threshold_requires_manual():
     low = DiffItem(
         type=DiffType.UNIT_PRICE,
-        amount=Money(Decimal("1")),
+        amount=Money(Decimal(1)),
         owner=DiffOwner.SUPPLIER,
         suggestion="待人工",
         confidence=Decimal("0.69"),
@@ -159,7 +159,7 @@ def test_confidence_below_threshold_requires_manual():
     )
     high = DiffItem(
         type=DiffType.UNIT_PRICE,
-        amount=Money(Decimal("1")),
+        amount=Money(Decimal(1)),
         owner=DiffOwner.SUPPLIER,
         suggestion="可自动",
         confidence=Decimal("0.70"),
@@ -176,7 +176,7 @@ def test_confidence_below_threshold_requires_manual():
             line_no=1,
             supplier_code="SUP-A",
             item_code="IT-A",
-            qty=Decimal("1"),
+            qty=Decimal(1),
             unit="箱",
         ),
         "箱→PCS 缺换算",

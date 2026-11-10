@@ -13,7 +13,7 @@ CI 另有一条遍历注册表的测试（``tests/platform/test_registry_scan.py
 
 from __future__ import annotations
 
-from typing import Iterator
+from collections.abc import Iterator
 
 from apps.platform.contracts.errors import ErrorCode
 from apps.platform.policy.levels import (

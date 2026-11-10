@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import random
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import AsyncIterator
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
@@ -18,12 +18,11 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from apps.platform.db.models import Ticket
-
 from apps.agents.compensation import CompensationQueue
 from apps.agents.lease import LeaseManager
 from apps.agents.state_machine import TransitionContext
 from apps.agents.store import TicketStore
+from apps.platform.db.models import Ticket
 
 TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
 USER_ID = UUID("22222222-2222-2222-2222-222222222222")

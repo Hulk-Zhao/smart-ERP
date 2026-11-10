@@ -15,8 +15,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import AbstractContextManager
-from typing import Any, Mapping
+from typing import Any
 
 from observability.trace import Span, Trace, Tracer
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
+from security_support import NOW, meta_a, meta_b, principal, scope
 
 from apps.security.identity import (
     MissingFieldWhitelist,
@@ -14,7 +15,6 @@ from apps.security.identity import (
     connector_security_level,
 )
 from apps.security.scope import Scope, ScopeViolation
-from security_support import NOW, meta_a, meta_b, principal, scope
 
 
 def _broker() -> TokenBroker:

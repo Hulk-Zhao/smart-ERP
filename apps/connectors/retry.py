@@ -10,11 +10,8 @@ import asyncio
 import random
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TypeVar
 
 from apps.connectors.errors import ConnectorError
-
-T = TypeVar("T")
 
 Sleep = Callable[[float], Awaitable[None]]
 RetryHook = Callable[[int, ConnectorError, float], None]
@@ -69,7 +66,7 @@ def delay_for(err: ConnectorError, attempt: int, policy: RetryPolicy, *, rng=Non
     return backoff_delay(attempt, policy, rng=rng)
 
 
-async def retry_async(
+async def retry_async[T](
     call: Callable[[], Awaitable[T]],
     *,
     policy: RetryPolicy | None = None,

@@ -86,8 +86,8 @@ def test_amount_diff_scenario_attributes_price_and_tax():
 
     by_type = {diff.type: diff for diff in result.diffs}
     assert set(by_type) == {DiffType.UNIT_PRICE, DiffType.TAX}
-    assert by_type[DiffType.UNIT_PRICE].amount.amount == Decimal("50")
-    assert by_type[DiffType.TAX].amount.amount == Decimal("27")
+    assert by_type[DiffType.UNIT_PRICE].amount.amount == Decimal(50)
+    assert by_type[DiffType.TAX].amount.amount == Decimal(27)
     assert all(diff.needs_manual is False for diff in result.diffs)
 
 
@@ -97,6 +97,6 @@ def test_qty_scenario_attributes_scrap_and_qty():
 
     by_type = {diff.type: diff for diff in result.diffs}
     assert set(by_type) == {DiffType.SCRAP, DiffType.QTY}
-    assert by_type[DiffType.SCRAP].amount.amount == Decimal("60")
-    assert by_type[DiffType.QTY].amount.amount == Decimal("100")
+    assert by_type[DiffType.SCRAP].amount.amount == Decimal(60)
+    assert by_type[DiffType.QTY].amount.amount == Decimal(100)
     assert result.metrics.suspected_anomaly is False

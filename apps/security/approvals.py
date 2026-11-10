@@ -12,18 +12,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Callable, Literal, Mapping
+from typing import Literal
 from uuid import UUID, uuid4
 
 from apps.platform.contracts.errors import ErrorCode
 from apps.platform.policy.levels import WriteLevel
 from apps.security.identity import UserPrincipal
 
-DEFAULT_DUAL_AMOUNT = Decimal("100000")
-DEFAULT_CFO_AMOUNT = Decimal("500000")
+DEFAULT_DUAL_AMOUNT = Decimal(100000)
+DEFAULT_CFO_AMOUNT = Decimal(500000)
 
 ApprovalRole = Literal["reviewer", "approver", "cfo"]
 APPROVAL_ROLES: tuple[str, ...] = ("reviewer", "approver", "cfo")
@@ -117,7 +118,7 @@ class ApprovalService:
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._thresholds = thresholds or ApprovalThresholds()
-        self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._clock = clock or (lambda: datetime.now(UTC))
         self._records: dict[str, list[ApprovalRecord]] = {}
 
     @property
@@ -296,8 +297,8 @@ def _money(value: Decimal | int | str) -> Decimal:
 
 
 def _utc(value: datetime) -> datetime:
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(
-        timezone.utc
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(
+        UTC
     )
 
 

@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import pytest
-
-from apps.platform.contracts.errors import ErrorCode
-from apps.platform.policy.gateway import BreakerState
-from apps.platform.policy.levels import WriteLevel
+from support import make_action
 
 from apps.agents.breaker import BreakerPolicy, CircuitBreaker
 from apps.agents.runtime import PlannedStep
@@ -19,7 +16,9 @@ from apps.agents.shell import (
     SceneLevelExceeded,
     validate_input,
 )
-from support import make_action
+from apps.platform.contracts.errors import ErrorCode
+from apps.platform.policy.gateway import BreakerState
+from apps.platform.policy.levels import WriteLevel
 
 
 def _base_input(**overrides: object) -> dict[str, object]:

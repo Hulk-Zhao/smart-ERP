@@ -10,20 +10,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping, Sequence
-
-from apps.platform.contracts.errors import ErrorCode
-from apps.platform.contracts.ticket import (
-    IllegalTransition as ContractIllegalTransition,
-)
-from apps.platform.contracts.ticket import TicketState, assert_transition
+from typing import Any
 
 from apps.agents.state_machine import (
     TransitionContext,
     TransitionError,
     resolve_transition,
 )
+from apps.platform.contracts.errors import ErrorCode
+from apps.platform.contracts.ticket import (
+    IllegalTransition as ContractIllegalTransition,
+)
+from apps.platform.contracts.ticket import TicketState, assert_transition
 
 GENESIS_HASH = "0" * 64
 CREATED_EVENT = "created"
@@ -68,7 +68,7 @@ def compute_hash(
             "trace_id": trace_id,
         }
     )
-    return hashlib.sha256(f"{prev_hash}\n{body}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{prev_hash}\n{body}".encode()).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +97,7 @@ class EventRecord:
             trace_id=self.trace_id,
         )
 
-    def seal(self) -> "EventRecord":
+    def seal(self) -> EventRecord:
         """补齐 hash（构造新事件时用）。"""
 
         return EventRecord(

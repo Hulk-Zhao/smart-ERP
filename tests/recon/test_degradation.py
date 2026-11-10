@@ -155,5 +155,5 @@ def test_conversion_factor_supports_inverse(make_request):
     )
     master = request.master_data
     assert conversion_factor(master, "IT-A", "PCS", "箱") == Decimal("0.01")
-    assert conversion_factor(master, "IT-A", "箱", "PCS") == Decimal("100")
+    assert conversion_factor(master, "IT-A", "箱", "PCS") == Decimal(100)
     assert conversion_factor(master, "IT-B", "箱", "PCS") is None

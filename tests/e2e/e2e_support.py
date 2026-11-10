@@ -17,9 +17,10 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Literal, Mapping
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import FastAPI
@@ -51,10 +52,9 @@ from apps.security.approvals import ApprovalService
 from apps.security.gate import AccessGate, AccessRequest
 from apps.security.identity import TokenBroker, UserPrincipal
 from apps.security.scope import Scope, ScopeGrant
-
 from observability import MemoryExporter, TracedConnector, Tracer
 
-NOW = datetime(2026, 11, 10, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
 TENANT = UUID("11111111-1111-1111-1111-111111111111")
 USER = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 SESSION_SYSTEMS = ("u8",)
@@ -247,7 +247,7 @@ class Harness:
                         idem_key=request.idem_key,
                         scene=_scene_for(level),
                     )
-                except Exception as exc:  # noqa: BLE001 - 统一映射为 problem+json
+                except Exception as exc:
                     code = getattr(exc, "code", ErrorCode.AUTHZ_SCOPE)
                     span.mark_rejected(code.value if isinstance(code, ErrorCode) else str(code))
                     raise

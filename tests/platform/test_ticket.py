@@ -15,7 +15,7 @@ from apps.platform.contracts.ticket import (
 
 def test_exactly_twelve_states() -> None:
     assert len(TicketState) == 12
-    assert len(set(state.value for state in TicketState)) == 12
+    assert len({state.value for state in TicketState}) == 12
 
 
 def test_legal_transition() -> None:

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
-from typing import Any, Mapping
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from apps.audit.ledger import AuditLedger
@@ -29,7 +30,6 @@ from apps.platform.policy.levels import (
     VerifySpec,
     WriteLevel,
 )
-from apps.platform.policy.registry import ActionRegistry
 
 
 def run(coro):
@@ -159,7 +159,7 @@ async def seed_step(
         object_id=object_key,
         before={"draft_id": object_key, "status": "new"},
         after={"draft_id": object_key, "status": "draft"},
-        created_at=datetime(2026, 11, 10, 10, step_no, tzinfo=timezone.utc),
+        created_at=datetime(2026, 11, 10, 10, step_no, tzinfo=UTC),
     )
     return StepWrite(
         step_id=sid,

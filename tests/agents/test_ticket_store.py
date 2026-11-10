@@ -4,17 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from itertools import pairwise
 
 import pytest
+from dbutil import db_env, new_ticket
 from sqlalchemy import text
-
-from apps.platform.contracts.ticket import TicketState
 
 from apps.agents.events import ReplayError, replay
 from apps.agents.state_machine import IllegalTransitionError, TransitionContext
 from apps.agents.store import DuplicateTicket
-
-from dbutil import db_env, new_ticket
+from apps.platform.contracts.ticket import TicketState
 
 
 def _intent_kwargs(ticket_id, step_no: int = 1) -> dict[str, object]:
@@ -69,7 +68,7 @@ def test_projection_rebuild_equals_stored_state(db: str) -> None:
             events = await env.store.list_events(ticket.id)
             assert [event.seq for event in events] == list(range(1, len(events) + 1))
             assert events[0].event_type == "created"
-            for previous, current in zip(events, events[1:]):
+            for previous, current in pairwise(events):
                 assert current.prev_hash == previous.hash
             assert replay(events).state is TicketState.COMPLETED
 

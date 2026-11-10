@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateTable
 
-from apps.audit.models import AuditAnchorRow, AuditImageRow, AuditBase
+from apps.audit.models import AuditAnchorRow, AuditBase, AuditImageRow
 from apps.platform.db.models import Base
 from apps.security.models import (
     ApprovalRecordRow,

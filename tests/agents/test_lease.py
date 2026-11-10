@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import asyncio
 
+from dbutil import db_env, new_ticket, prepare_executing
 from sqlalchemy import text
-
-from apps.platform.contracts.ticket import TicketState
+from support import SCENE, ScriptedConnector, build_runtime, make_action
 
 from apps.agents.lease import LeaseNotHeld
 from apps.agents.runtime import ExecutionReport, PlannedStep
-
-from dbutil import db_env, new_ticket, prepare_executing
-from support import SCENE, ScriptedConnector, build_runtime, make_action
+from apps.platform.contracts.ticket import TicketState
 
 
 def test_only_one_owner_wins_concurrently(db: str) -> None:

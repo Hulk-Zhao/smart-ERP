@@ -78,24 +78,20 @@ def test_step_parents_children_and_carries_required_attributes() -> None:
 def test_unknown_span_name_and_bad_decision_are_rejected() -> None:
     tracer = Tracer()
     trace = tracer.start_trace(ticket_id="T-1", agent="AG-1")
-    with pytest.raises(TraceConventionError):
-        with tracer.span(trace, "custom.made.up"):
-            pass
-    with pytest.raises(TraceConventionError):
-        with tracer.decision(trace, kind="guess"):
-            pass
-    with pytest.raises(TraceConventionError):
-        with tracer.decision(trace, kind="match", confidence=1.2):
-            pass
+    with pytest.raises(TraceConventionError), tracer.span(trace, "custom.made.up"):
+        pass
+    with pytest.raises(TraceConventionError), tracer.decision(trace, kind="guess"):
+        pass
+    with pytest.raises(TraceConventionError), tracer.decision(trace, kind="match", confidence=1.2):
+        pass
 
 
 def test_exception_marks_error_and_propagates() -> None:
     tracer = Tracer()
     trace = tracer.start_trace(ticket_id="T-1", agent="AG-1")
 
-    with pytest.raises(RuntimeError):
-        with tracer.span(trace, "gateway.write", level="W1", idem_key="idem-1"):
-            raise RuntimeError("模拟传输失败")
+    with pytest.raises(RuntimeError), tracer.span(trace, "gateway.write", level="W1", idem_key="idem-1"):
+        raise RuntimeError("模拟传输失败")
 
     span = trace.spans[0]
     assert span.status == "error"
@@ -118,14 +114,13 @@ def test_exporter_receives_flat_fields_and_redacts_secrets(tmp_path) -> None:
     memory = MemoryExporter()
     tracer = Tracer(exporter=memory)
     trace = tracer.start_trace(ticket_id="T-1", agent="AG-1")
-    with tracer.step(trace, step_no=1, action_key="u8.po.draft", level="W1", system="u8"):
-        with tracer.span(
-            trace,
-            "gateway.write",
-            credential_ref="vault://lease/secret",
-            idem_key="idem-1",
-        ):
-            pass
+    with tracer.step(trace, step_no=1, action_key="u8.po.draft", level="W1", system="u8"), tracer.span(
+        trace,
+        "gateway.write",
+        credential_ref="vault://lease/secret",
+        idem_key="idem-1",
+    ):
+        pass
 
     assert len(memory.spans) == 2
     write_row = next(row for row in memory.spans if row["name"] == "gateway.write")

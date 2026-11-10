@@ -10,16 +10,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Awaitable, Callable, Mapping, Sequence
+from typing import Any
 from uuid import UUID
-
-from apps.platform.connectors.sdk import CompensateResult, UnknownOutcome, VerifyResult
-from apps.platform.policy.gateway import GatewayResult, WriteGateway
-from apps.platform.policy.levels import ActionSpec, SceneSpec
-from apps.platform.contracts.ticket import TicketState
 
 from apps.agents.compensation import CompensationQueue, CompensationTaskView
 from apps.agents.events import EventRecord
@@ -27,6 +23,10 @@ from apps.agents.failure import Failure, classify_exception, failure_of
 from apps.agents.lease import LeaseManager, LeaseNotHeld
 from apps.agents.state_machine import DEVIATION_THRESHOLD, TransitionContext
 from apps.agents.store import TicketStore
+from apps.platform.connectors.sdk import CompensateResult, UnknownOutcome, VerifyResult
+from apps.platform.contracts.ticket import TicketState
+from apps.platform.policy.gateway import GatewayResult, WriteGateway
+from apps.platform.policy.levels import ActionSpec, SceneSpec
 
 
 def request_hash(payload: Mapping[str, Any]) -> str:
@@ -137,7 +137,7 @@ class TicketRuntime:
         self._comp_retry = compensation_retry_seconds
         self._max_comp_attempts = max_compensation_attempts
         self._sleep = sleep
-        self._clock = clock or (lambda: datetime.now(tz=timezone.utc))
+        self._clock = clock or (lambda: datetime.now(tz=UTC))
 
     # -------------------------------------------------------------- 生命周期
     async def mark_preview(

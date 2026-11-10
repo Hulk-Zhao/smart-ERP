@@ -12,23 +12,23 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from apps.agents.breaker import CircuitBreaker
+from apps.agents.failure import Failure, classify_exception, failure_of
+from apps.agents.runtime import ExecutionReport, PlannedStep, StepOutcome, TicketRuntime
+from apps.agents.scenes import AgentScene
 from apps.platform.contracts.agent import USABLE_CONFIDENCE_MIN, Scope
 from apps.platform.contracts.canonical import Money
 from apps.platform.contracts.errors import ErrorCode, FailCode
 from apps.platform.contracts.ticket import TicketState
 from apps.platform.policy.gateway import BreakerState, ForbiddenWriteError, WriteGateway
 from apps.platform.policy.levels import WriteLevel
-
-from apps.agents.breaker import CircuitBreaker
-from apps.agents.failure import Failure, classify_exception, failure_of
-from apps.agents.runtime import ExecutionReport, PlannedStep, StepOutcome, TicketRuntime
-from apps.agents.scenes import AgentScene
 
 
 class AgentInputRejected(Exception):

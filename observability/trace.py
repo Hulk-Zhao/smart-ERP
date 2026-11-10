@@ -17,12 +17,13 @@ import re
 import secrets
 import threading
 import time
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Callable, Iterator, Mapping
+from typing import Any
 from uuid import UUID
 
 # ---------------------------------------------------------------- 冻结约定
@@ -171,28 +172,28 @@ class Span:
     events: list[dict[str, Any]] = field(default_factory=list)
 
     # -- 写入 ---------------------------------------------------------
-    def set(self, **attributes: Any) -> "Span":
+    def set(self, **attributes: Any) -> Span:
         """补充/覆盖属性；值在写入时归一化。"""
 
         self.attributes.update(_sanitize(attributes))
         return self
 
-    def add_event(self, name: str, **attributes: Any) -> "Span":
+    def add_event(self, name: str, **attributes: Any) -> Span:
         self.events.append(
             {
                 "name": name,
-                "ts": datetime.now(tz=timezone.utc).isoformat(),
+                "ts": datetime.now(tz=UTC).isoformat(),
                 "attributes": _sanitize(attributes),
             }
         )
         return self
 
-    def mark_error(self, error: BaseException | str) -> "Span":
+    def mark_error(self, error: BaseException | str) -> Span:
         self.status = "error"
         self.attributes["error"] = normalize(error)
         return self
 
-    def mark_rejected(self, code: str) -> "Span":
+    def mark_rejected(self, code: str) -> Span:
         """策略拒绝（W3 / 越权 / 审批）不是技术错误，单独标记便于统计。"""
 
         self.status = "rejected"
@@ -204,7 +205,7 @@ class Span:
             return
         if error is not None and self.status == "ok":
             self.mark_error(error)
-        self.ended_at = datetime.now(tz=timezone.utc)
+        self.ended_at = datetime.now(tz=UTC)
         self.duration_ms = round((time.perf_counter() - self.started_monotonic) * 1000, 3)
 
     # -- 读取 ---------------------------------------------------------
@@ -249,7 +250,7 @@ class Trace:
         trace_id: str,
         ticket_id: str,
         agent: str,
-        tracer: "Tracer",
+        tracer: Tracer,
     ) -> None:
         self.trace_id = trace_id
         self.ticket_id = ticket_id
@@ -319,7 +320,7 @@ class Tracer:
         monotonic: Callable[[], float] | None = None,
     ) -> None:
         self._exporter = exporter
-        self._clock = clock or (lambda: datetime.now(tz=timezone.utc))
+        self._clock = clock or (lambda: datetime.now(tz=UTC))
         self._monotonic = monotonic or time.perf_counter
         self._current: contextvars.ContextVar[Span | None] = contextvars.ContextVar(
             f"smart_erp_current_span_{id(self)}", default=None
@@ -391,7 +392,7 @@ class Tracer:
         error: BaseException | None = None
         try:
             yield span
-        except BaseException as exc:  # noqa: BLE001 - 记录后原样抛出
+        except BaseException as exc:
             error = exc
             raise
         finally:
