@@ -1,0 +1,6 @@
+﻿doc_no,doc_date,supplier_code,supplier_name,line_no,item_code,item_name,qty,unit,unit_price,amount,tax_rate,tax_included,period
+ST-2026-0003,2026-10-31,SUP-DEMO-01,示例供应商一,1,IT-1003,示例支架,20,PCS,45,900,0.13,true,2026-10
+ST-2026-0003,2026-10-31,SUP-DEMO-01,示例供应商一,2,,缺编码行,10,PCS,5,50,0.13,true,2026-10
+ST-2026-0004,2026-10-31,SUP-DEMO-02,示例供应商二,1,IT-2002,示例面板,abc,PCS,10,100,0.13,true,2026-10
+ST-2026-0005,2026-10-31,SUP-DEMO-03,示例供应商三,1,IT-3001,示例螺钉,100,PCS,0.5,60,0.13,true,2026-10
+,2026-10-31,,缺单号与供应商,1,IT-4001,孤儿行,1,PCS,1,1,0.13,true,2026-10

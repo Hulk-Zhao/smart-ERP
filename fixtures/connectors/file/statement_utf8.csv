@@ -1,0 +1,4 @@
+doc_no,doc_date,supplier_code,supplier_name,line_no,item_code,item_name,qty,unit,unit_price,amount,tax_rate,tax_included,period
+ST-2026-0001,2026-10-31,SUP-DEMO-01,示例供应商一,1,IT-1001,示例线束,100,PCS,12.5,1250,0.13,true,2026-10
+ST-2026-0001,2026-10-31,SUP-DEMO-01,示例供应商一,2,IT-1002,示例端子,50,PCS,8,400,0.13,true,2026-10
+ST-2026-0002,2026-10-31,SUP-DEMO-02,示例供应商二,1,IT-2001,示例壳体,8,BOX,120,960,0.13,true,2026-10

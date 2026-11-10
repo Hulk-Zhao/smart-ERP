@@ -99,6 +99,10 @@ class Document(CanonicalRecord):
         "arrival_vouch",
         "invoice",
         "payment_draft",
+        # 文件通道（T105）：对账单/送货单是 PRD 02 §3 列明的单据类型，
+        # 此前 Literal 未收录，属于增量补齐（只增不改）。
+        "supplier_statement",
+        "delivery_note",
     ]
     doc_no: str = Field(min_length=1)
     doc_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
