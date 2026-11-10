@@ -3,6 +3,11 @@
 只用于模型注册表/迁移一致性校验与 SQL 适配器的列引用；业务读写由
 ``apps.api.metering`` 的原生 SQL 完成。没有这张声明，``tests/platform/test_migrations.py``
 的双向差集会把迁移建出的表当成「拼错表名」。
+
+边界：本文件**只让表名集合闭合**，不代表模型与库完全一致。真正的约束在迁移里
+（``unit_price_source`` 封闭枚举与四字段同生共死的 CHECK、同租户同币种同生效时刻
+唯一、复合外键、权限），证据是 ``tests/platform/test_price_book_migration.py``
+的 PG 用例（实连 PostgreSQL），不是这里声明的 ``UniqueConstraint`` / ``ForeignKey``。
 """
 
 from __future__ import annotations
