@@ -383,7 +383,7 @@ jobs:
   #
   #    与 image-build 的分工：
   #      image-build = 单镜像能否构建（matrix 并行、失败定位到具体镜像）；
-  #      image-bundle = 发布脚本本身能否跑通（tag 规则、脏树门禁、docker save、
+  #      image-bundle = 发布脚本本身能否跑通（tag 规则、docker save、
   #                     gzip、sha256 全链路），以及产物里是不是恰好 4 个镜像。
   #    没有这一步时，发布脚本只在发布机上被人工跑过，CI 从未验证过它。
   #
@@ -403,7 +403,7 @@ jobs:
 
       - name: 生成离线包（scripts/build-images.sh）
         # ERP_IMAGE_TAG 必须是 40 位 sha：GITHUB_SHA 正好是；
-        # 产物放到 runner 临时目录，别写进工作树（脚本的脏树门禁会因此误判）。
+        # 产物放到 runner 临时目录，避免把 GB 级 tar 留在工作树里（cleanup 也更快）。
         env:
           ERP_IMAGE_TAG: ${{ github.sha }}
           ERP_DIST_DIR: ${{ runner.temp }}/dist
