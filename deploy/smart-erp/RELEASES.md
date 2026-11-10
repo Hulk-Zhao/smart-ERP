@@ -5,6 +5,27 @@
 > **版本 sha 的唯一取值方式**：发布时刻的 `git ls-remote origin refs/heads/main`。
 > `git rev-parse HEAD` 只是本地检出的分支头，不能当作 main（第一次登记就错在这里）。
 
+## 现状 — 2026-11-11：v0.2.0 因 P0 跨租户越权**冻结，未登记**
+
+S4 跨租户扫描实测到 13 处越权：租户 A 能列出/读取租户 B 的工单，能驳回、取消别家工单，能在别家工单落审批记录，能导出别家审计 CSV。根因：`_require_ticket` 与 `TicketRepository.list` 缺少 `tenant_id` 谓词。**17 条 API 路径中 10 条受影响。**
+
+| 项 | 内容 |
+|---|---|
+| 冻结范围 | v0.2.0 **全部档位**（demo / full）；`RELEASE-CHECKLIST.md` 第 3–7 步的登记动作一律暂停 |
+| 解除条件（缺一不可） | ① S4 修复合并进 main；② 13 条越权用例全部转绿；③ 全量 `tests/*` 在 Python 3.12 下复跑 exit 0 |
+| 留底 | `docs/product/tech/dev-ledger.json` 已追加 `阻塞` 记录 |
+| 冻结期间可做 | 与发版无关的代码/文档工作（不涉及清单第 3–7 步） |
+
+## v0.2.0 准入条款（2026-11-11 定，硬性）
+
+| # | 条款 | 判定方式 |
+|---|---|---|
+| 1 | **只发 demo 档**：api + connector-gw + web 三个镜像；full 档不发 | 登记条「档位」字段必须是 demo；出现 full 服务或 full 档镜像的登记视为违规 |
+| 2 | **full 档在 B-S8-01 解除前不具备发版条件**（`core/runtime/*` 与 `tools/health.py` 缺失、打包 `include` 未含 `core*`，4 个服务起不来） | 依据只有一个：S8 的 `FULL-READINESS.md`（S8 交付物，随 S8 合入主干）；集成会话不得自行判断「差不多了」 |
+| 3 | S6 合并、S8 真 build 出 web 镜像并拿到 `/healthz` 200 后，才可走清单第 3–7 步 | 三个镜像包齐全 + 容器实测 200，缺一不登记 |
+
+v0.2.0 登记口径（届时按此填写登记条）：demo 档；含 `web/` 与 `contracts/api/` 契约产物；**不含** `apps/api/` 计量端点完整批次；**不含** S2 对账改进；full 档未就绪；`worker` / `scheduler` 未交付；未执行远端部署。
+
 ## v0.1.0-demo — 2026-11-11（版本 sha 已校正；当前阻塞，不可发布）
 
 | 项 | 内容 |
@@ -43,7 +64,7 @@ doc 镜像冒烟（工作树，tag `smart-erp/doc:dev`）：`/healthz` `{"status
 
 1. 把 connector-gw 入口修复合入 main，并在 `RELEASE-CHECKLIST.md` 第 0 步用 `git ls-remote` 重新核对 sha；
 2. 合入后再按新 sha 重跑：gw 冒烟、`build-images.sh`、`check_image_contents.py`；
-3. full 档与 doc 镜像合入后，才登记 `v0.2.0-full`（届时 doc 冒烟用该 sha 的镜像重跑）。
+3. full 档与 doc 镜像合入后，才登记 `v0.2.0-full`（届时 doc 冒烟用该 sha 的镜像重跑）。**2026-11-11 修正**：按上方「准入条款」第 1 条，v0.2.0 只发 demo 档；`v0.2.0-full` 在 B-S8-01 解除前不登记。
 
 ### 进展（2026-11-11 后续，未登记新版本）
 
