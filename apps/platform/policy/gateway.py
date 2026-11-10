@@ -128,7 +128,7 @@ class WriteGateway:
         self._breaker_cap = breaker_cap or (lambda scene_code: WriteLevel.W2)
         self._approvals = approvals or DenyAllApprovals()
         #: B 级（服务账号降级）租约上的字段白名单；None 表示 A 级，不额外收窄。
-        self._narrowed_fields = narrowed_fields
+        self._narrowed_fields = frozenset(narrowed_fields) if narrowed_fields is not None else None
 
     async def execute(
         self,
