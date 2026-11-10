@@ -230,6 +230,7 @@ def test_empty_database_upgrade_downgrade_upgrade(migrated_database, monkeypatch
     version = _version(url)
     width = _version_column_width(url)
     # 版本列是 VARCHAR(32)：revision id 超宽会让空库 upgrade 直接 value too long。
+    print(f"[migrations-live] upgrade head={version} len(version_num)={len(version)} column_width={width}")
     assert len(version) <= 32, f"version_num 长度 {len(version)} 超过 VARCHAR(32): {version}"
     assert len(version) <= width, f"version_num 长度 {len(version)} 超过实际列宽 {width}: {version}"
     assert version == expected_head, f"空库 upgrade 后停在 {version}，预期 head 是 {expected_head}"
@@ -243,9 +244,15 @@ def test_empty_database_upgrade_downgrade_upgrade(migrated_database, monkeypatch
 
     command.downgrade(config, "base")
     residual_tables = _erp_tables(url) - {version_table}
+    residual_functions = _erp_function_count(url)
+    residual_types = _erp_custom_type_count(url)
+    print(
+        f"[migrations-live] downgrade base 后 erp 残留：表 {sorted(residual_tables)}、"
+        f"函数 {residual_functions}、枚举/域类型 {residual_types}"
+    )
     assert not residual_tables, f"downgrade base 后仍残留表: {sorted(residual_tables)}"
-    assert _erp_function_count(url) == 0, "downgrade base 后 erp schema 里仍残留函数"
-    assert _erp_custom_type_count(url) == 0, "downgrade base 后 erp schema 里仍残留枚举/域类型"
+    assert residual_functions == 0, "downgrade base 后 erp schema 里仍残留函数"
+    assert residual_types == 0, "downgrade base 后 erp schema 里仍残留枚举/域类型"
 
     command.upgrade(config, "head")
     replayed = _version(url)
