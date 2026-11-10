@@ -51,7 +51,7 @@
    - doc `/healthz` → 200 `{"status":"ok","service":"smart-erp-doc"}`
    - web `/` → 200，HTML 引用 `/demo/smart-erp/assets/index-CAhPj0Me.js` 与 `/demo/smart-erp/assets/index-DfZgi6P2.css`
 4. **compose 编排**：`--profile demo config` 与 `--profile full config` 均 exit 0；full 输出含 `host_ip: 127.0.0.1` / `target: 8010` / `published: "8010"`；两档 `… config | grep -c 8011` 均为 **0**。
-5. **worker / scheduler**：四容器按 compose 健康命令 `python -m tools.health <worker|scheduler> --check [--queues …]` 判定，均 `healthy` 且 `RestartCount=0`；插入 5 agent + 3 io 任务后 `agent succeeded 5` / `io succeeded 3`；`erp.worker_heartbeat` 3 行（age 8–9s，jobs_done 5 / 3 / 0）；`python tests/agents/s8_evidence.py` → `SUMMARY 4/4 passed`（cli_5_jobs 5 succeeded；retry_and_dead 10 succeeded / 4 dead / 6 retries；kill9_reclaim 心跳 3.3s 后回收 1；scheduler_single_point A→B 接管）。
+5. **worker / scheduler**：四容器按 compose 健康命令 `python -m tools.health <worker|scheduler> --check [--queues …]` 判定，均 `healthy` 且 `RestartCount=0`；插入 5 agent + 3 io 任务后 `agent succeeded 5` / `io succeeded 3`；`erp.worker_heartbeat` 3 行、`age` 为秒级（两次实测 3–9s），`jobs_done` 合计 8（单行分配随抢占而变，不固定为某个值）；`python tests/agents/s8_evidence.py` → `SUMMARY 4/4 passed`（cli_5_jobs 5 succeeded；retry_and_dead 10 succeeded / 4 dead / 6 retries；kill9_reclaim 心跳 3.3s 后回收 1；scheduler_single_point A→B 接管）。
 6. **回归**：`python -m pytest tests/deploy -q` → 38 passed。
 
 ### 已知缺口（登记时如实记录）
