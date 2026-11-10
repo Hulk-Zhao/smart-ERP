@@ -339,11 +339,11 @@ curl -m 5 -o /dev/null -sS -w '%{http_code}\n' https://<域名>/metrics   # 期�
 配合 5.3 第 ③ 条（`http://<公网IP>:8010/metrics` 必须连接失败），「矩阵三行 + 根路径兜底 +
 公网直连失败」全部通过，才算「指标既不能绕过 nginx，也不能直连宿主」。换域名/改前缀后必须重跑。
 
-> **前置依赖（截至 2026-11-11 尚未满足）**：`docker-compose.yml` 目前没有把
-> `ERP_METRICS_ENABLED` 下发进 api 容器（`docker compose config | grep ERP_METRICS_ENABLED`
-> 无输出），此时在 `.env` 里写 `1` 不会生效，第 2 行会停在 404。补下发要同时改
-> `contracts/config.schema.json` 的 `scope`/`services`（校验器会比对「实际注入的服务」），
-> 属 S8 + S0 的契约变更，单独合入后再执行本矩阵。
+> **开关下发位置**：`docker-compose.yml` 已把 `ERP_METRICS_ENABLED` 显式下发给 `api`
+> （schema `scope=compose`、`services=["api"]`），`deploy/smart-erp/.env.example` 保持空值——
+> 生产默认关闭。做第 2 行时在 `deploy/smart-erp/.env` 里临时写 `1`，验收完删掉该行
+> （或改回 `0`）并再次 `--force-recreate api`；`env/prod.env` 不登记该键，避免「关闭」
+> 在线上偶发变成「开启」。
 
 ### 5.3 发布后自检（三条都要过）
 
