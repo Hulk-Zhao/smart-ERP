@@ -254,6 +254,9 @@ class RollbackService:
         *,
         confirmed_manual: bool = False,
         payload_builder: PayloadBuilder | None = None,
+        reason: str = "",
+        actor_id: UUID | None = None,
+        actor_roles: Sequence[str] = (),
     ) -> RollbackResult:
         if plan.has_forbidden:
             forbidden = [
@@ -288,6 +291,16 @@ class RollbackService:
             if item.action is None:
                 raise RollbackRejected(f"{item.action_key} 缺少可执行的反向动作")
 
+            # 只在调用方显式给出回滚人/理由时留痕；旧调用（默认空）影像链形状不变。
+            if actor_id is not None or reason.strip():
+                await self._audit_rollback_request(
+                    plan.ticket_id,
+                    item,
+                    reason=reason,
+                    actor_id=actor_id,
+                    actor_roles=actor_roles,
+                )
+
             result = await self._gateway.execute(
                 item.action,
                 builder(item),
@@ -312,6 +325,32 @@ class RollbackService:
             )
 
         return RollbackResult(executed=tuple(executed), manual_tasks=tuple(manual_tasks))
+
+    async def _audit_rollback_request(
+        self,
+        ticket_id: UUID,
+        item: RollbackItem,
+        *,
+        reason: str,
+        actor_id: UUID | None,
+        actor_roles: Sequence[str],
+    ) -> None:
+        image = item.step.audit_image
+        await self._ledger.append_image(
+            tenant_id=image.tenant_id,
+            ticket_id=ticket_id,
+            step_id=item.step.step_id,
+            system=image.system,
+            object_type=f"{image.object_type}:rollback_request",
+            object_id=image.object_id,
+            before={"rollback": "requested"},
+            after={
+                "reason": (reason or "").strip(),
+                "actor_id": None if actor_id is None else str(actor_id),
+                "actor_roles": sorted(actor_roles),
+            },
+            field_diff=None,
+        )
 
     async def _audit_manual_task(self, ticket_id: UUID, item: RollbackItem) -> None:
         image = item.step.audit_image

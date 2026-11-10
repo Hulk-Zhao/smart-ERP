@@ -98,6 +98,11 @@ from apps.recon.models import (
 from apps.security.approvals import TicketFacts
 from apps.security.gate import AccessGrant, AccessRequest
 from apps.security.identity import SessionToken, UserPrincipal
+from apps.security.roles import (
+    assert_can_export_audit,
+    assert_can_read_ticket,
+    assert_can_rollback,
+)
 from apps.security.scope import Scope, ScopeGuard
 
 FAIL_CODE_OPTIONS = tuple(sorted(COMPENSATE_FAIL_CODES))
@@ -272,6 +277,22 @@ def _write_system(ticket: TicketRecord) -> str:
     return ticket.systems[0]
 
 
+def _pending_field_whitelist(
+    container: ApiContainer, ticket: TicketRecord
+) -> frozenset[str]:
+    """B 级写只允许落动作登记的可写字段；未登记动作不留空窗。"""
+
+    pending = ticket.pending_write
+    if pending is None:
+        return frozenset()
+    try:
+        return container.actions.get(pending.action_key).writable_fields
+    except KeyError as exc:
+        raise ProblemError(
+            ErrorCode.POLICY_LEVEL, f"动作 {pending.action_key} 未注册，拒绝执行"
+        ) from exc
+
+
 # --------------------------------------------------------------------------- 工单
 
 
@@ -288,6 +309,7 @@ def list_tickets(
     cursor: str | None,
     limit: int | None,
 ) -> tuple[list[TicketOut], str | None]:
+    assert_can_read_ticket(principal_of(session))
     scope = _require_scope(session, build_scope(scope_in))
     rows, next_cursor = container.tickets.list(
         tenant_id=session.tenant_id,
@@ -306,6 +328,7 @@ def list_tickets(
 def get_ticket(
     container: ApiContainer, session: SessionToken, *, scope_in: ScopeIn, ticket_id: UUID
 ) -> TicketDetailOut:
+    assert_can_read_ticket(principal_of(session))
     scope = _require_scope(session, build_scope(scope_in))
     ticket = _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
@@ -340,11 +363,17 @@ async def approve_ticket(
         system=_write_system(ticket),
         amount=ticket.amount,
         touches_fund=ticket.touches_fund,
+        field_whitelist=_pending_field_whitelist(container, ticket),
     )
 
     executed: list[TicketStepOut] = []
     if ticket.pending_write is not None:
-        step = await _execute_pending_write(container, ticket, ticket.pending_write)
+        step = await _execute_pending_write(
+            container,
+            ticket,
+            ticket.pending_write,
+            narrowed_fields=_lease_narrowed_fields(grant),
+        )
         executed.append(_step_out(step))
 
     resolve_transition(
@@ -369,8 +398,24 @@ async def approve_ticket(
     )
 
 
+def _lease_narrowed_fields(grant: AccessGrant) -> frozenset[str] | None:
+    """把租约的字段白名单透传给写闸：只收窄、不放宽写等级。
+
+    委派模式下租约会话的 ``narrowed_fields`` 为空，此时传 ``None`` 表示沿用
+    动作自身的可写 scope；服务账号（B 级）才使用租约白名单。
+    """
+
+    if grant.lease.mode != "service_account":
+        return None
+    return grant.lease.narrowed_fields or None
+
+
 async def _execute_pending_write(
-    container: ApiContainer, ticket: TicketRecord, pending: PendingWrite
+    container: ApiContainer,
+    ticket: TicketRecord,
+    pending: PendingWrite,
+    *,
+    narrowed_fields: frozenset[str] | None = None,
 ) -> TicketStepRecord:
     try:
         action = container.actions.get(pending.action_key)
@@ -380,7 +425,10 @@ async def _execute_pending_write(
         ) from exc
 
     gateway = container.gateway_for(
-        pending.system, str(ticket.ticket_id), _ticket_facts(ticket)
+        pending.system,
+        str(ticket.ticket_id),
+        _ticket_facts(ticket),
+        narrowed_fields=narrowed_fields,
     )
     scene = container.scene_for(ticket.scene_code, ticket.write_level)
     result = await gateway.execute(
@@ -540,7 +588,12 @@ async def compensate_ticket(
     scope = _require_scope(session, build_scope(body.scope))
     ticket = _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
-    _require_initiator(ticket, session)
+    # C1：自己发起的工单可直接回滚；他人工单仅 IT/CIO 与 CFO，且必须带理由。
+    rollback_other = assert_can_rollback(
+        principal_of(session),
+        initiator_id=ticket.initiator_id,
+        reason=body.reason,
+    )
     if ticket.state not in (TicketState.EXECUTING, TicketState.COMPENSATING):
         raise ProblemError(
             ErrorCode.STATE_ILLEGAL,
@@ -607,6 +660,10 @@ async def compensate_ticket(
         result = await service.execute(
             RollbackPlan(ticket_id=plan.ticket_id, items=tuple(items)),
             confirmed_manual=body.confirmed_manual,
+            # C1：回滚他人工单时理由/操作者/角色随回滚影像一起留痕；自己发起的工单不多写。
+            reason=(body.reason or "") if rollback_other else "",
+            actor_id=session.user_id if rollback_other else None,
+            actor_roles=tuple(sorted(session.roles)) if rollback_other else (),
         )
         for done in result.executed:
             executed.append(
@@ -1183,6 +1240,7 @@ async def list_audit_images(
     cursor: str | None,
     limit: int | None,
 ) -> tuple[list[AuditImageOut], str | None]:
+    assert_can_read_ticket(principal_of(session))
     scope = _require_scope(session, build_scope(scope_in))
     ticket = _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
@@ -1210,6 +1268,7 @@ async def audit_chain(
     scope_in: ScopeIn,
     ticket_id: UUID,
 ) -> AuditChainOut:
+    assert_can_read_ticket(principal_of(session))
     scope = _require_scope(session, build_scope(scope_in))
     ticket = _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
@@ -1237,11 +1296,17 @@ async def export_audit_csv(
     ticket_id: UUID,
     system: str | None,
 ) -> tuple[str, bytes, str]:
-    """按工单导出审计明细；返回 (文件名, 内容, sha256)。"""
+    """按工单导出审计明细；返回 (文件名, 内容, sha256)。
+
+    导出本身也是一次对审计数据的读取，必须留痕（FR-1304）：先写审计影像，
+    写入失败即抛异常、不返回内容——不允许「导出了但没留痕」。
+    """
 
     scope = _require_scope(session, build_scope(scope_in))
     ticket = _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
+    # 角色闸放在租户取数之后：跨租户一律 404，不因角色不同泄露工单是否存在。
+    assert_can_export_audit(principal_of(session))
     images = await container.ledger.list_images(
         AuditQuery(
             tenant_id=ticket.tenant_id,
@@ -1270,7 +1335,26 @@ async def export_audit_csv(
         )
     content = ("\n".join(lines) + "\n").encode("utf-8-sig")
     digest = hashlib.sha256(content).hexdigest()
-    return f"audit-{ticket.ticket_no}.csv", content, digest
+    file_name = f"audit-{ticket.ticket_no}.csv"
+
+    await container.ledger.append_image(
+        tenant_id=ticket.tenant_id,
+        ticket_id=ticket.ticket_id,
+        step_id=uuid4(),
+        system=system or _write_system(ticket),
+        object_type="audit:export",
+        object_id=file_name,
+        before={"export": "requested"},
+        after={
+            "export": "delivered",
+            "file": file_name,
+            "sha256": digest,
+            "images": len(images),
+            "actor_id": str(session.user_id),
+            "actor_roles": sorted(session.roles),
+        },
+    )
+    return file_name, content, digest
 
 
 def _csv(value: str) -> str:

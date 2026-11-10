@@ -153,7 +153,14 @@ class ApiContainer:
         assert self.gate is not None  # __post_init__ 已补齐
         return self.gate.authorize(request)
 
-    def gateway_for(self, system: str, ticket_id: str, facts: TicketFacts) -> WriteGateway:
+    def gateway_for(
+        self,
+        system: str,
+        ticket_id: str,
+        facts: TicketFacts,
+        *,
+        narrowed_fields: frozenset[str] | None = None,
+    ) -> WriteGateway:
         """为一张工单构造写闸门；连接器按工单的目标系统取，找不到直接 503。"""
 
         connector = self.connectors.get(system)
@@ -165,6 +172,7 @@ class ApiContainer:
         return WriteGateway(
             connector,
             approvals=ApprovalGateAdapter(self.approvals, {ticket_id: facts}),
+            narrowed_fields=narrowed_fields,
         )
 
 

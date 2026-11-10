@@ -26,6 +26,7 @@ from apps.platform.policy.gateway import WriteGatewayError
 from apps.security.approvals import ApprovalError
 from apps.security.gate import AccessDenied
 from apps.security.identity import IdentityError
+from apps.security.roles import RoleDenied
 from apps.security.scope import ScopeViolation
 
 
@@ -44,6 +45,9 @@ def as_problem(exc: BaseException) -> ProblemError | None:
         return ProblemError(ErrorCode.AUTHZ_SCOPE, str(exc))
     if isinstance(exc, AccessDenied):
         return ProblemError(exc.code, str(exc))
+    if isinstance(exc, RoleDenied):
+        # 角色闸拒绝统一 403：读/看影像/导出/回滚他人工单都走这里。
+        return ProblemError(ErrorCode.AUTHZ_SCOPE, str(exc))
     if isinstance(exc, ApprovalError):
         return ProblemError(exc.code, str(exc))
     if isinstance(exc, WriteGatewayError):
