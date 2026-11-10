@@ -140,7 +140,13 @@ class GatewayRegistry:
 
 
 def build_default_registry() -> GatewayRegistry:
-    """装配默认连接器（当前只有 U8 假实现）。任何装配失败都直接抛出，由 main 报错退出。"""
+    """装配默认连接器。
+
+    默认只有 U8 假实现；``ERP_FILE_INBOX`` 指向存在的目录时才挂文件通道
+    （只读导入，不声明任何写动作）。任何装配失败都直接抛出，由 main 报错退出。
+    """
+
+    from pathlib import Path
 
     from apps.connectors.u8.factory import build_u8_stack
 
@@ -155,6 +161,18 @@ def build_default_registry() -> GatewayRegistry:
             return False
 
     registry.register("u8", stack.connector, probe=probe)
+
+    inbox = os.environ.get("ERP_FILE_INBOX")
+    if inbox and Path(inbox).is_dir():
+        from apps.connectors.file.factory import build_file_stack
+
+        file_stack = build_file_stack(root=Path(inbox))
+
+        async def file_probe(root: str = inbox) -> bool:
+            path = Path(root)
+            return path.is_dir() and os.access(path, os.R_OK)
+
+        registry.register("file", file_stack.connector, probe=file_probe)
     return registry
 
 
