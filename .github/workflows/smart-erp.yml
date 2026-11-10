@@ -106,11 +106,29 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: 安装测试依赖
-        run: python -m pip install --disable-pip-version-check pyyaml
+        run: python -m pip install --disable-pip-version-check pyyaml pytest
+
+      - name: 预拉部署测试镜像 alpine:3.20（失败即 infra 红）
+        # tar 行为用例要求镜像已在手：拉取失败必须是明确的 infra 红，
+        # 不能在用例里 skip 掉、job 仍绿。tag 故意不钉 digest——断言只依赖
+        # busybox tar 的排除语义；上游重推同 tag 时日志里的 digest 会变。
+        run: |
+          set -euo pipefail
+          image="alpine:3.20"
+          docker pull "$image"
+          digest="$(docker image inspect "$image" --format '{{index .RepoDigests 0}}')"
+          if [ -z "$digest" ]; then
+            echo "::error::${image} 拉取后 RepoDigests 为空"
+            exit 1
+          fi
+          echo "pre-pull ok: ${image} -> ${digest}"
 
       - name: 离线静态校验（tests/deploy）
-        # 不用 -t .：tests/ 下没有 __init__.py，顶层包发现会报 not importable
-        run: python -m unittest discover -s tests/deploy -v
+        # 不用 -t .：tests/ 下没有 __init__.py，顶层包发现会报 not importable。
+        # -rs 把 skip 原因逐条打进日志（unittest 的 -v 虽也打印 skip 原因，但 -rs 是
+        # pytest 专有；这里与 python-checks 统一用 pytest，保证「这条到底跑没跑」
+        # 能直接翻日志回答，而不是靠人回忆）。
+        run: python -m pytest tests/deploy -q -o addopts="" -rs
 
       - name: compose 正向解析（demo 档）
         run: |
@@ -253,6 +271,21 @@ jobs:
           alembic -c alembic.ini current | tee /tmp/alembic-current.txt
           grep -q "0005_worker_runtime" /tmp/alembic-current.txt
 
+      - name: 预拉部署测试镜像 alpine:3.20（失败即 infra 红）
+        # tar 行为用例要求镜像已在手：拉取失败必须是明确的 infra 红，
+        # 不能在用例里 skip 掉、job 仍绿。tag 故意不钉 digest——断言只依赖
+        # busybox tar 的排除语义；上游重推同 tag 时日志里的 digest 会变。
+        run: |
+          set -euo pipefail
+          image="alpine:3.20"
+          docker pull "$image"
+          digest="$(docker image inspect "$image" --format '{{index .RepoDigests 0}}')"
+          if [ -z "$digest" ]; then
+            echo "::error::${image} 拉取后 RepoDigests 为空"
+            exit 1
+          fi
+          echo "pre-pull ok: ${image} -> ${digest}"
+
       - name: pytest（按流分目录执行）
         # ERP_TEST_DATABASE_URL 让 tests/agents 的 PG 集成用例真正执行；
         # 未设置时那 45 条会静默 skip（Saga / 状态机 / 租约 / 补偿队列 / 审计链 / intent-verify）。
@@ -283,7 +316,7 @@ jobs:
             # -o addopts="" 覆盖 pyproject 的 -q：否则 -q + -q = -qq 会把
             # "N passed / M skipped" 汇总行吞掉，skip 再次变成静默（本次事故的根因之一）。
             # 只改输出详略，不改退出码语义：任何非 0 仍然失败。
-            if ! python -m pytest "${d}" -q -o addopts=""; then
+            if ! python -m pytest "${d}" -q -o addopts="" -rs; then
               echo "::error::pytest ${d} 失败"
               rc=1
             fi
