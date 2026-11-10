@@ -7,18 +7,28 @@ name = "smart-erp"
 version = "0.1.0"
 description = "聚合型 AI ERP —— 可审计业务执行层（Phase 1 / MVP）"
 requires-python = ">=3.12"
+# 依赖版本策略（2026-11-11 定）：
+# 1. 运行时依赖一律写下界 + 上界（`>=x,<y`），上界取「最近一次全量实测通过的次版本 +1」；
+#    不要写 `==`，否则安全补丁进不来。
+# 2. 升级依赖必须单独开 PR，且 CI（Linux + Python 3.12，`pip install -e ".[dev]"`）
+#    与本机各跑一遍全量测试后再合。
+# 3. 不提交 uv.lock：CI 走 `pip install -e ".[dev]"` 根本不读它，入库只会形成
+#    「本机一个真源、CI 另一个真源」的双头，比无锁更难查。
+# 背景：2026-11-10 排查「CI 绿、本机红」时，本机锁 fastapi 0.162.3、CI 装 0.162.4，
+# 靠两边各跑一遍才把它排除出嫌疑人；约束写在 pyproject.toml 里两处都看得见。
 dependencies = [
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.30",
+    "fastapi>=0.115,<0.163",
+    "uvicorn[standard]>=0.30,<0.55",
     "pydantic>=2.7",
     "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29",
     "alembic>=1.13",
     # connector-gw 的 U8 transport / mock 在导入期即依赖 httpx（非仅测试用）
     "httpx>=0.27",
-    # apps/platform/api 的中间件直接继承 starlette；不写版本约束，
-    # 沿用 fastapi 选定的那一版，避免与 fastapi 的依赖区间冲突。
-    "starlette",
+    # apps/platform/api 的中间件与错误处理直接 import starlette（middleware.base /
+    # requests / responses / types / exceptions），属直接依赖而非纯传递依赖，故给区间；
+    # 1.x（当前 1.10.0）与 fastapi 0.162.4 实测解析通过。
+    "starlette>=1.0,<2",
 ]
 
 [project.optional-dependencies]
