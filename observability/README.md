@@ -188,7 +188,7 @@ location = /erp/api/metrics { deny all; }   # 或 return 404;
 
 「采集点」列是硬信息：`无` 表示仓库里**没有任何生产代码调用该写入方法**，指标永远返回 0/空。
 规则里引用未接采集点的指标等于挂了一条永不触发的告警（见 §6.1.2）。
-本列按 `origin/main`（`2dac800`，2026-11-11）全仓审计填写；写成 `文件:行` 的必须能直接跳过去，
+本列按 `origin/main`（`45572f7`，2026-11-11）全仓审计填写；写成 `文件:行` 的必须能直接跳过去，
 `无` 的必须在 §6.1.3 缺口清单里再出现一次。
 
 | 指标 | 类型 | 标签 | 多副本聚合 | 采集点 | 口径 |
@@ -296,7 +296,7 @@ registry.observe_recon_result(result, duration_seconds=elapsed)  # result 为 ap
    `smart_erp_audit_chain_broken` 就是反例：写入点在 scheduler，`/metrics` 只挂在 web（`apps/main.py:35`），
    两边不通，所以这条 P0 继续保持注释——不明就里地取消注释，等于恢复一条哑告警。
 
-### 6.1.3 采集点审计表（基准 `origin/main` `2dac800`，2026-11-11）
+### 6.1.3 采集点审计表（基准 `origin/main` `45572f7`，2026-11-11）
 
 可复现的审计命令（rebase 到 `origin/main` 后执行）：
 
@@ -304,11 +304,12 @@ registry.observe_recon_result(result, duration_seconds=elapsed)  # result 为 ap
 git grep -n -E "\.(record_ticket|record_stage|record_recon_batch|observe_recon_result|record_recon_failure|set_unresolved|set_compensation_backlog|set_compensation_overdue|set_compensation_future_retry|observe_clock_skew|set_audit_chain_broken|observe_trace)\(" -- . ':(exclude)observability' ':(exclude)tests' ':(exclude)docs'
 ```
 
-命中 4 行：`apps/api/service.py:975`（`observe_recon_result`）、`:983` 与 `:986`（`record_recon_failure`）、
-`apps/main.py:35`（`install_metrics`）。其余写入方法在 `observability/`、`tests/`、`docs/` 之外零命中。
+命中 3 行，全部在 `apps/api/service.py`：`:975`（`observe_recon_result`）、`:983` 与 `:986`（`record_recon_failure`）。
+其余写入方法在 `observability/`、`tests/`、`docs/` 之外零命中。
+`/metrics` 的挂载点是 `apps/main.py:35` 的 `install_metrics(...)`，它不写指标，不在本命令的匹配范围内。
 
 > 注意：`apps/audit/monitor.py` 的 `set_audit_chain_broken()` 只在分支
-> `feat/audit-chain-metric-wiring`（`4473014`）上，未合入 main，故不计入上面的 4 行。
+> `feat/audit-chain-metric-wiring`（`4473014`）上，未合入 main，故不计入上面的 3 行。
 > 即便合入，它写的是 scheduler 进程的内存，而 `/metrics` 只在 web 进程——见第 5 条判据。
 
 | 指标 | 生产采集点 | 是否仍被 `alerts.rules.yaml` 引用 | 取消注释的前置条件 |
