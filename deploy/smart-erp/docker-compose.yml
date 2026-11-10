@@ -39,6 +39,8 @@ x-app-env: &app-env
   PYTHONUNBUFFERED: "1"
   PYTHONDONTWRITEBYTECODE: "1"
   # 键名以 apps/platform/config.py 为准（S0 已落地）：ERP_APP_ENV，不是 ERP_ENV
+  # 全档位统一默认 demo（T803）：此前 full 专属服务写 `:-full`，一旦 .env 漏填，
+  # api 会认为 demo、doc 会认为 full，同一部署出现两个环境值。full 档请显式设 ERP_APP_ENV=full。
   ERP_APP_ENV: ${ERP_APP_ENV:-demo}
   ERP_LOG_LEVEL: ${ERP_LOG_LEVEL:-INFO}
   ERP_IMAGE_TAG: ${ERP_IMAGE_TAG:?ERP_IMAGE_TAG must be the full 40-char git sha}
@@ -297,7 +299,7 @@ services:
     command: ["python", "/app/docparse_service.py", "--port=8020"]
     environment:
       <<: *app-env
-      ERP_APP_ENV: ${ERP_APP_ENV:-full}
+      ERP_APP_ENV: ${ERP_APP_ENV:-demo}
       # 与下方 expose 的 8020 对齐
       ERP_DOC_PORT: ${ERP_DOC_PORT:-8020}
       ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
@@ -343,7 +345,7 @@ services:
       - --concurrency=${ERP_AGENT_WORKER_CONCURRENCY:-4}
     environment:
       <<: *app-env
-      ERP_APP_ENV: ${ERP_APP_ENV:-full}
+      ERP_APP_ENV: ${ERP_APP_ENV:-demo}
       ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
       ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-4}
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
@@ -397,7 +399,7 @@ services:
       - --concurrency=${ERP_IO_WORKER_CONCURRENCY:-2}
     environment:
       <<: *app-env
-      ERP_APP_ENV: ${ERP_APP_ENV:-full}
+      ERP_APP_ENV: ${ERP_APP_ENV:-demo}
       ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
       ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-2}
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
@@ -442,7 +444,7 @@ services:
     command: ["alembic", "-c", "/app/alembic.ini", "upgrade", "head"]
     environment:
       <<: *app-env
-      ERP_APP_ENV: ${ERP_APP_ENV:-full}
+      ERP_APP_ENV: ${ERP_APP_ENV:-demo}
       # 用迁移专用角色，不用业务的 erp_app：DDL 权限只在 erp_migrator 上
       ERP_DATABASE_URL: ${ERP_MIGRATION_DATABASE_URL:?ERP_MIGRATION_DATABASE_URL is required (postgresql+asyncpg://erp_migrator:...@<pg-host>:5432/smart_erp)}
     networks:
