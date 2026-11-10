@@ -68,6 +68,7 @@ METRICS_ENABLED_VAR = "ERP_METRICS_ENABLED"
 METRICS_PATH_VAR = "ERP_METRICS_PATH"
 DEFAULT_METRICS_PATH = "/metrics"
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
+_FALSY = frozenset({"", "0", "false", "no", "off"})
 
 _METRIC_NAME_RE = re.compile(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$")
 _LABEL_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
@@ -529,11 +530,33 @@ async def _send_response(
     await send({"type": "http.response.body", "body": b"" if head else body})
 
 
-def metrics_enabled(env: Mapping[str, str] | None = None) -> bool:
-    """``/metrics`` 是否开启；未配置即关闭，避免生产默认暴露内部指标。"""
+def parse_env_flag(name: str, env: Mapping[str, str] | None = None) -> bool:
+    """解析布尔环境开关：空值=关闭、大小写与首尾空白不敏感、**非法值直接报错**。
+
+    ``ERP_METRICS_ENABLED`` 与 ``ERP_TRACE_ENABLED`` 共用这一份实现，语义不再分叉：
+    拼错或误用（``enabled``、``ture``、``2``）以前会被静默当成"关闭"，变成
+    「以为开了、其实没开」；现在直接抛 ``MetricError``。
+
+    **只允许在装配期调用**（启动时决定是否挂注册表/导出器）。放进请求路径会让
+    非法配置变成每个请求 500；合法配置虽只多一次字典查找，也没有理由按请求重读。
+    """
 
     source = os.environ if env is None else env
-    return str(source.get(METRICS_ENABLED_VAR, "")).strip().lower() in _TRUTHY
+    raw = str(source.get(name, "")).strip().lower()
+    if raw in _TRUTHY:
+        return True
+    if raw in _FALSY:
+        return False
+    raise MetricError(
+        f"{name} 取值非法：{raw!r}"
+        "（只接受 1/true/yes/on 与 0/false/no/off，空值等于关闭）"
+    )
+
+
+def metrics_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """``/metrics`` 是否开启；未配置即关闭，非法取值抛错而不是静默关闭。"""
+
+    return parse_env_flag(METRICS_ENABLED_VAR, env)
 
 
 def install_metrics(

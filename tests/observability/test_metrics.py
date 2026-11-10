@@ -319,10 +319,29 @@ def test_metrics_path_can_be_overridden_by_env() -> None:
     assert client.get("/metrics").status_code == 404
 
 
-def test_metrics_enabled_helper_only_accepts_truthy_values() -> None:
-    for value in ("1", "true", "TRUE", "yes", "on"):
-        assert metrics_enabled({"ERP_METRICS_ENABLED": value}) is True
-    for value in ("", "0", "false", "off", "no", "enabled"):
-        assert metrics_enabled({"ERP_METRICS_ENABLED": value}) is False
+@pytest.mark.parametrize("raw", ["1", "true", "TRUE", "On", " yes ", "on"])
+def test_metrics_enabled_accepts_truthy_spellings(raw: str) -> None:
+    assert metrics_enabled({"ERP_METRICS_ENABLED": raw}) is True
+
+
+@pytest.mark.parametrize("raw", ["", "0", "false", "FALSE", "no", "off", " OFF "])
+def test_metrics_enabled_treats_blank_and_falsy_as_off(raw: str) -> None:
+    assert metrics_enabled({"ERP_METRICS_ENABLED": raw}) is False
     assert metrics_enabled({}) is False
+
+
+@pytest.mark.parametrize("raw", ["enabled", "ture", "2", "yes please"])
+def test_metrics_enabled_rejects_invalid_values(raw: str) -> None:
+    # 拼错/误用不得静默关闭：那会变成「以为开了、其实没开」
+    with pytest.raises(MetricError) as excinfo:
+        metrics_enabled({"ERP_METRICS_ENABLED": raw})
+    assert "ERP_METRICS_ENABLED" in str(excinfo.value)
+
+
+def test_install_metrics_fails_fast_on_invalid_switch() -> None:
+    app = FastAPI()
+    with pytest.raises(MetricError):
+        install_metrics(app, MetricsRegistry(), env={"ERP_METRICS_ENABLED": "enabled"})
+    # 抛错前不得已经挂上路由
+    assert TestClient(app).get("/metrics").status_code == 404
 

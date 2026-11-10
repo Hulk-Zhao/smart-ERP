@@ -30,6 +30,7 @@ from observability.metrics import (
     MetricsRegistry,
     install_metrics,
     metrics_enabled,
+    parse_env_flag,
     render_metrics,
 )
 from observability.render import (
@@ -96,6 +97,7 @@ __all__ = [
     "metrics_enabled",
     "new_span_id",
     "new_trace_id",
+    "parse_env_flag",
     "parse_traceparent",
     "render_decision_chain",
     "render_metrics",

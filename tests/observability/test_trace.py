@@ -9,6 +9,7 @@ import pytest
 from observability import (
     JsonlExporter,
     MemoryExporter,
+    MetricError,
     TraceConventionError,
     Tracer,
     exporter_from_env,
@@ -153,3 +154,18 @@ def test_exporter_from_env_defaults_off() -> None:
     )
     assert isinstance(exporter, JsonlExporter)
     assert str(exporter.path).replace("\\", "/") == "logs/x.jsonl"
+
+
+def test_exporter_from_env_accepts_mixed_case_and_spaces() -> None:
+    exporter = exporter_from_env(
+        {"ERP_TRACE_ENABLED": " On ", "ERP_TRACE_FILE": "logs/y.jsonl"}
+    )
+    assert isinstance(exporter, JsonlExporter)
+
+
+@pytest.mark.parametrize("raw", ["enabled", "ture", "2"])
+def test_exporter_from_env_rejects_invalid_switch(raw: str) -> None:
+    # 与 ERP_METRICS_ENABLED 同一实现，trace 也不允许拼错静默关闭
+    with pytest.raises(MetricError) as excinfo:
+        exporter_from_env({"ERP_TRACE_ENABLED": raw})
+    assert "ERP_TRACE_ENABLED" in str(excinfo.value)

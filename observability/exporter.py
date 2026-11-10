@@ -2,7 +2,8 @@
 
 开关（全部 ``ERP_`` 前缀，与平台配置一致）：
 
-- ``ERP_TRACE_ENABLED``：``1/true/on`` 才导出，默认关闭；
+- ``ERP_TRACE_ENABLED``：``1/true/yes/on`` 打开；``0/false/no/off`` 或空值关闭；
+  其他取值启动即报错（与 ``ERP_METRICS_ENABLED`` 共用 :func:`observability.metrics.parse_env_flag`）；
 - ``ERP_TRACE_FILE``：导出文件路径，默认 ``./logs/traces.jsonl``。
 
 导出失败不得影响业务：``export()`` 吞掉 IO 异常并计数，由 :attr:`JsonlExporter.errors`
@@ -17,6 +18,7 @@ import threading
 from pathlib import Path
 from typing import Any, Protocol
 
+from observability.metrics import parse_env_flag
 from observability.trace import Span
 
 DEFAULT_TRACE_FILE = "logs/traces.jsonl"
@@ -72,7 +74,7 @@ def exporter_from_env(env: dict[str, str] | None = None) -> SpanExporter | None:
     """按环境变量装配导出器；未开启返回 ``None``（纯内存）。"""
 
     values = env if env is not None else dict(os.environ)
-    if values.get("ERP_TRACE_ENABLED", "").strip().lower() not in {"1", "true", "yes", "on"}:
+    if not parse_env_flag("ERP_TRACE_ENABLED", values):
         return None
     path = values.get("ERP_TRACE_FILE", "").strip() or DEFAULT_TRACE_FILE
     return JsonlExporter(path)

@@ -10,7 +10,7 @@
 
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
-| `ERP_TRACE_ENABLED` | 关 | `1/true/yes/on` 才落盘；关闭时 span 仍保留在内存，便于测试与排障 |
+| `ERP_TRACE_ENABLED` | 关 | `1/true/yes/on` 落盘（大小写与首尾空白不敏感）；`0/false/no/off` 或空值关闭；**其他取值启动即报错**；关闭时 span 仍保留在内存，便于测试与排障 |
 | `ERP_TRACE_FILE` | `logs/traces.jsonl` | 追加写；每行一个 span（JSON） |
 
 ```python
@@ -160,8 +160,14 @@ if mounted:
 
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
-| `ERP_METRICS_ENABLED` | 关 | `1/true/yes/on` 才挂载；与 `ERP_TRACE_ENABLED` 同一原则，生产默认不暴露 |
+| `ERP_METRICS_ENABLED` | 关 | `1/true/yes/on` 才挂载（大小写与首尾空白不敏感）；`0/false/no/off` 或空值关闭；**其他取值启动即报错**。与 `ERP_TRACE_ENABLED` 同一实现，生产默认不暴露 |
 | `ERP_METRICS_PATH` | `/metrics` | 端点路径；必须先由反向代理/网络策略限定为内网 |
+
+两个开关都由 `parse_env_flag()`（`observability/metrics.py`）解析，语义不再各写一套。
+它**只许在装配期调用**：`exporter_from_env()` 在构造 `Tracer` 时执行，`install_metrics()`
+在注册路由时执行，两者都不在请求路径上。非法取值让进程启动失败是刻意的——拼错
+（`enabled`、`ture`）被静默当成关闭，就是「以为开了、其实没开」的生产事故；而放到
+请求路径上读，非法配置会变成每个请求 500。
 
 `GET /metrics` 与 `HEAD` 返回文本，其他方法 405；不进入 OpenAPI schema。`apps/` 由其他流维护，本层只提供 `install_metrics()`，由接入方在装配处显式调用。
 
@@ -300,7 +306,7 @@ audit_chain_broken=1  max()=1  firing=True
 
 全量回归（本次）：`tests=637 failures=0 errors=0 skipped=25`（跳过均为未提供 `ERP_TEST_DATABASE_URL` 的 PG 用例）。
 
-`tests/observability/test_metrics.py` 覆盖：高基数标签拒绝、文本格式与累计桶、span→指标折算（成功 / F6 / rejected / unclassified）、业务指标、`/metrics` 的 200 与 OpenAPI 排除、非 GET 405、默认不挂载与 `ERP_METRICS_ENABLED` 开关。
+`tests/observability/test_metrics.py` 覆盖：高基数标签拒绝、文本格式与累计桶、span→指标折算（成功 / F6 / rejected / unclassified）、业务指标、`/metrics` 的 200 与 OpenAPI 排除、非 GET 405、默认不挂载与 `ERP_METRICS_ENABLED` 开关、开关 fail-fast（大小写/首尾空白接受，非法值抛 `MetricError` 且不挂路由）。
 `tests/observability/test_alerts.py` 覆盖：YAML 解析、规则数量与 `why_paged`、P0 审计断链的 `for: 1m`、表达式引用的指标全部存在、健康/断链两种快照下的触发求值。
 
 ### 9.1 发布前检查（全部通过才可上线）
