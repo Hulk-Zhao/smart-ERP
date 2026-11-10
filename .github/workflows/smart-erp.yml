@@ -103,7 +103,7 @@ jobs:
   deploy-static:
     name: 部署面静态校验
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -167,6 +167,37 @@ jobs:
           fi
           grep -q "ERP_IMAGE_TAG" /tmp/compose.err /tmp/compose.out
           echo "负向校验通过：缺 ERP_IMAGE_TAG 时被拒绝"
+
+      # 静态断言看不见 nginx 的变量语义：`proxy_pass $upstream/;` 文本上完全
+      # 合法，运行时却会把所有 /erp/api/* 压成 "/"。这里用真实配置起 web + api
+      # 两个容器，直接打经 web 的 /erp/api/healthz 与 /openapi.json。
+      - name: 构建真容器用例镜像（api + web，不推送）
+        run: |
+          set -euo pipefail
+          docker build --file projects/smart-ERP/docker/api.Dockerfile \
+            --tag smart-erp/app:ci-nginx-e2e .
+          docker build --file projects/smart-ERP/docker/web.Dockerfile \
+            --build-arg ERP_WEB_BASE=/demo/smart-erp/ \
+            --tag smart-erp/web:ci-nginx-e2e .
+
+      - name: 真容器断言（经 web 的 /erp/api/* 必须 200）
+        env:
+          ERP_NGINX_E2E: "1"
+          ERP_NGINX_E2E_API_IMAGE: smart-erp/app:ci-nginx-e2e
+          ERP_NGINX_E2E_WEB_IMAGE: smart-erp/web:ci-nginx-e2e
+        # 失败时把断言原文转成 annotation：Actions 日志需要登录才能看，而
+        # annotation 经公共 API 可读。否则红了只能靠猜（2026-11-11 已吃一次亏）。
+        run: |
+          set -o pipefail
+          status=0
+          python -m pytest tests/deploy/test_nginx_runtime.py -q -o addopts="" -rs \
+            2>&1 | tee /tmp/nginx-e2e.log || status=$?
+          if [ "$status" -ne 0 ]; then
+            grep -E '^(E |FAILED )' /tmp/nginx-e2e.log | head -40 | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+          fi
+          exit "$status"
 
   # ---------------------------------------------------------------------------
   # 2. shell lint：发布脚本是本流的交付物，语法与常见坑必须机器把关
@@ -581,6 +612,23 @@ jobs:
           docker build --file "${{ matrix.dockerfile }}" --tag "smart-erp/${{ matrix.image }}:${tag}" ${EXTRA_ARGS} .
           docker image inspect "smart-erp/${{ matrix.image }}:${tag}" \
             --format '构建成功：${{ matrix.image }} {{.Id}} {{.Size}} bytes'
+
+      # 漏包防线前移：镜像 build 成功 ≠ 能启动。2026-11-11 main 新增 observability/
+      # 但 packages.find.include 没加，四个镜像 build 全绿，api 容器一启动就
+      # ModuleNotFoundError，拖到 deploy-static 的真容器用例才暴露成 4 条 setup error。
+      # 这里直接导入各自的入口模块；scheduler/worker 与 api 共用 app 镜像，一并覆盖。
+      - name: 启动冒烟（${{ matrix.image }}）
+        run: |
+          set -euo pipefail
+          tag="ci-${GITHUB_SHA}"
+          image="smart-erp/${{ matrix.image }}:${tag}"
+          case "${{ matrix.image }}" in
+            app)          docker run --rm "$image" python -c "import apps.main" ;;
+            connector-gw) docker run --rm "$image" python -c "import apps.connectors.gateway" ;;
+            doc)          docker run --rm --entrypoint python "$image" \
+                            -c "import apps.docparse, pypdfium2" ;;
+            web)          docker run --rm --entrypoint nginx "$image" -t ;;
+          esac
 
   # ---------------------------------------------------------------------------
   # 6. 镜像离线包（T806 后半）：用发布脚本 scripts/build-images.sh 真跑一次

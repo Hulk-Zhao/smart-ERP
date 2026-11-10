@@ -8,8 +8,8 @@
 #   docker build -f projects/smart-ERP/docker/api.Dockerfile \
 #                -t smart-erp/app:$(git rev-parse HEAD) .
 #
-# 构建输入：pyproject.toml、apps/、core/、tools/、alembic.ini、db/migrations
-#   （仓库根为构建上下文）；缺任一项 build-images.sh 会先报错，不会构建出一半。
+# 构建输入：pyproject.toml、apps/、core/、tools/、observability/、alembic.ini、
+# db/migrations（仓库根为构建上下文）；缺任一项 build-images.sh 会先报错，不会构建出一半。
 # =============================================================================
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 
