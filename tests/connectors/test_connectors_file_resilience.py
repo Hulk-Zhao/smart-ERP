@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import tempfile
 import time
 from pathlib import Path
 
@@ -15,7 +14,7 @@ from apps.connectors.ratelimit import ActionRateLimiter
 from apps.connectors.retry import RetryPolicy
 from apps.platform.connectors.sdk import ReadQuery
 from apps.platform.policy.levels import RateLimit
-from tests.connectors.file_support import FILE_FIXTURES, make_file_stack, run
+from tests.connectors.file_support import make_file_stack, run
 from tests.connectors.support import FakeClock
 
 
@@ -91,7 +90,7 @@ def test_permanent_error_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None
     assert stack.breaker.failures == 1
 
 
-def test_idempotent_read_parses_once_and_content_change_invalidates() -> None:
+def test_idempotent_read_replays_same_content_only() -> None:
     stack = make_file_stack()
 
     first = _read(stack, "statement_utf8.csv")
@@ -100,17 +99,26 @@ def test_idempotent_read_parses_once_and_content_change_invalidates() -> None:
     assert first.items == second.items
     assert stack.transport.parse_count == 1, "同一份内容重复读必须命中幂等，不重复解析"
 
-    # 内容变 → 哈希变 → 键变，返回新的解析结果。
-    source = (FILE_FIXTURES / "statement_utf8.csv").read_text(encoding="utf-8")
-    modified = source.replace("100,PCS,12.5,1250", "120,PCS,12.5,1500")
-    with tempfile.TemporaryDirectory() as tmp:
-        copy = Path(tmp) / "statement_utf8.csv"
-        copy.write_text(modified, encoding="utf-8")
-        changed_stack = make_file_stack(root=Path(tmp))
-        changed = _read(changed_stack, "statement_utf8.csv")
-        assert changed_stack.transport.parse_count == 1
 
-    assert changed.items[0]["total_amount"]["amount"] == "1900.0000"
+def test_same_path_overwritten_content_forces_reparse(tmp_path: Path) -> None:
+    """负向用例：路径不变、内容原地覆盖时，必须重新解析，不能命中旧幂等键。"""
+
+    path = tmp_path / "statement.csv"
+    header = "doc_no,doc_date,supplier_code,item_code,qty,unit,unit_price,amount\n"
+    path.write_text(header + "ST-1,2026-10-31,SUP-1,IT-1,100,PCS,12.5,1250\n", encoding="utf-8")
+
+    stack = make_file_stack(root=tmp_path)
+    first = _read(stack, "statement.csv")
+    assert stack.transport.parse_count == 1
+    assert first.items[0]["total_amount"]["amount"] == "1250.0000"
+
+    # 同一个文件、同一个逻辑路径，只改内容。
+    path.write_text(header + "ST-1,2026-10-31,SUP-1,IT-1,120,PCS,12.5,1500\n", encoding="utf-8")
+    second = _read(stack, "statement.csv")
+
+    assert stack.transport.parse_count == 2, "内容已变却命中旧幂等键 = 读回旧数据"
+    assert second.items[0]["total_amount"]["amount"] == "1500.0000"
+    assert second.items[0]["lines"][0]["quantity"] == "120.000000"
 
 
 def test_breaker_opens_and_stops_file_access(tmp_path: Path) -> None:
