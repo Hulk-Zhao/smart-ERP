@@ -17,11 +17,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
+
+import file_digest
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "fixtures" / "recon" / "golden" / "golden_500.json"
@@ -34,10 +35,6 @@ MIN_ROWS = 80
 
 def _ref(row: dict[str, Any]) -> str:
     return f"{row['system']}:{row['doc_no']}#{row['line_no']}"
-
-
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _base_unit_map(batch: dict[str, Any]) -> dict[str, str | None]:
@@ -282,7 +279,7 @@ def build_holdout() -> dict[str, Any]:
         "carve_version": "1.0.0",
         "label_version": payload["label_version"],
         "source_fixture": "fixtures/recon/golden/golden_500.json",
-        "source_sha256": _sha256(FIXTURE),
+        "source_sha256": file_digest.sha256_file(FIXTURE),
         "discipline": (
             "调参期间未查看本文件；引擎冻结后第一次、且只跑一次。"
             "若必须按本批调参，则本批并入训练集并另切第 2 轮留出集，不得复用本轮指标。"
@@ -676,13 +673,13 @@ def main() -> None:
         "supplier", holdout["totals"]["supplier_lines"],
         "our", holdout["totals"]["our_lines"],
         "scenarios", holdout["totals"]["scenario_tags"],
-        "sha256", _sha256(HOLDOUT),
+        "sha256", file_digest.sha256_file(HOLDOUT),
     )
     print(
         "adversarial:", ADVERSARIAL.name,
         "batches", adversarial["totals"]["batches"],
         "supplier", adversarial["totals"]["supplier_lines"],
-        "sha256", _sha256(ADVERSARIAL),
+        "sha256", file_digest.sha256_file(ADVERSARIAL),
     )
 
 

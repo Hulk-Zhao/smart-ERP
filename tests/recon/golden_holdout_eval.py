@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -21,6 +20,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import file_digest
 from golden_eval import _by_supplier_ref, _judge_supplier, evaluate
 
 from apps.recon import build_request, reconcile
@@ -70,10 +70,6 @@ HOLDOUT_CAVEAT = (
     "批次为单据组子集，批次级差异率会与训练集不同（如 B07 0.2000 vs 0.2300），"
     "因此留出集满分不等于训练集结论可外推。它不能替代真实新数据。"
 )
-
-
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _run(payload: dict[str, Any]) -> dict[str, Any]:
@@ -174,7 +170,7 @@ def build_report() -> dict[str, Any]:
         "engine_changes": ENGINE_CHANGES,
         "training": {
             "file": "fixtures/recon/golden/golden_500.json",
-            "sha256": _sha256(TRAIN_FIXTURE),
+            "sha256": file_digest.sha256_file(TRAIN_FIXTURE),
             "supplier_lines": 500,
             "match_denominator": 375,
             "engine_frozen": True,
@@ -182,7 +178,7 @@ def build_report() -> dict[str, Any]:
         },
         "holdout": {
             "file": "fixtures/recon/golden/golden_holdout.json",
-            "sha256": _sha256(HOLDOUT),
+            "sha256": file_digest.sha256_file(HOLDOUT),
             "holdout_version": holdout_payload["holdout_version"],
             "holdout_round": holdout_payload["holdout_round"],
             "carve_version": holdout_payload["carve_version"],
@@ -196,7 +192,7 @@ def build_report() -> dict[str, Any]:
         },
         "adversarial": {
             "file": "fixtures/recon/golden/golden_adversarial.json",
-            "sha256": _sha256(ADVERSARIAL),
+            "sha256": file_digest.sha256_file(ADVERSARIAL),
             "adversarial_version": adversarial_payload["adversarial_version"],
             "label_revision": adversarial_payload["label_revision"],
             "tuned_on": False,

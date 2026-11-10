@@ -6,10 +6,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
+import file_digest
 import golden_holdout_eval
 import golden_holdout_gen
 
@@ -42,10 +42,6 @@ def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def _ref(row: dict) -> str:
     return f"{row['system']}:{row['doc_no']}#{row['line_no']}"
 
@@ -64,7 +60,7 @@ def test_holdout_metadata_is_honest():
     assert holdout["holdout_round"] == 1
     assert holdout["holdout_version"]
     assert holdout["carve_version"]
-    assert holdout["source_sha256"] == _sha256(FIXTURE)
+    assert holdout["source_sha256"] == file_digest.sha256_file(FIXTURE)
     assert holdout["label_version"] == fixture["label_version"]
     assert holdout["totals"]["supplier_lines"] >= MIN_HOLDOUT_ROWS
     # 夹具实际 19 类场景，必须全覆盖；需求方口径的 24 类不存在于夹具
@@ -123,6 +119,6 @@ def test_report_is_reproducible():
     assert committed["training"]["match_denominator"] == 375
     assert committed["holdout"]["evaluated_times"] == 1
     assert committed["holdout"]["statistically_independent"] is False
-    assert committed["holdout"]["sha256"] == _sha256(HOLDOUT)
-    assert committed["adversarial"]["sha256"] == _sha256(ADVERSARIAL)
+    assert committed["holdout"]["sha256"] == file_digest.sha256_file(HOLDOUT)
+    assert committed["adversarial"]["sha256"] == file_digest.sha256_file(ADVERSARIAL)
     assert committed["adversarial"]["tuned_on"] is False

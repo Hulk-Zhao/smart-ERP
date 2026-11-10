@@ -27,6 +27,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import file_digest
+
 from apps.recon import build_request, reconcile
 from apps.recon.models import BatchStatus, MatchResultLine, ReconResult
 
@@ -373,7 +375,7 @@ def evaluate(payload: dict[str, Any], results: dict[str, ReconResult]) -> dict[s
         "fixture": {
             "path": "fixtures/recon/golden/golden_500.json",
             "label_version": payload["label_version"],
-            "sha256": hashlib.sha256(FIXTURE.read_bytes()).hexdigest(),
+            "sha256": file_digest.sha256_file(FIXTURE),
             "supplier_lines": payload["totals"]["supplier_lines"],
             "our_lines": payload["totals"]["our_lines"],
             "batches": payload["totals"]["batches"],
@@ -482,11 +484,11 @@ def evaluate(payload: dict[str, Any], results: dict[str, ReconResult]) -> dict[s
 
 
 def _engine_digest() -> str:
-    """引擎源码指纹：基线可追溯到具体实现版本。"""
+    """引擎源码指纹：基线可追溯到具体实现版本（按 LF 归一，跨平台一致）。"""
     digest = hashlib.sha256()
     for path in sorted((ROOT / "apps" / "recon").glob("*.py")):
         digest.update(path.name.encode("utf-8"))
-        digest.update(path.read_bytes())
+        digest.update(file_digest.normalize_eol(path.read_bytes()))
     return digest.hexdigest()
 
 
