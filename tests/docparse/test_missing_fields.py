@@ -32,7 +32,7 @@ def test_missing_amount_stays_null_not_zero(pipeline, fixtures_dir):
 
     first = result.lines[0]
     assert first.item_name.value == "冷轧钢板"
-    assert first.quantity.value == Decimal("60")
+    assert first.quantity.value == Decimal(60)
     assert first.unit_price.value is None
     assert first.amount.value is None
     assert first.amount.confidence == 0.0

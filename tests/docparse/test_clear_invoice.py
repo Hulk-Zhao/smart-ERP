@@ -35,7 +35,7 @@ def test_clear_invoice_is_parsed_ok(pipeline, fixtures_dir):
     assert first.item_name.value == "不锈钢螺钉M6"
     assert first.spec.value == "M6*20"
     assert first.unit.value == "个"
-    assert first.quantity.value == Decimal("1000")
+    assert first.quantity.value == Decimal(1000)
     assert first.unit_price.value == Decimal("0.85")
     assert first.amount.value == Decimal("850.00")
     assert first.tax_rate.value == Decimal("0.13")

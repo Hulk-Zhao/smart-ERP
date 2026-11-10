@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from apps.docparse.detection import FileKind, detect_file_kind, is_page_marker, page_marker_number
+from apps.docparse.detection import (
+    FileKind,
+    detect_file_kind,
+    is_page_marker,
+    page_marker_number,
+)
 
 
 @pytest.mark.parametrize(

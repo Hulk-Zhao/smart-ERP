@@ -24,7 +24,7 @@ def validate_consistency(header: DocHeader, lines: list[DocLine]) -> list[Valida
     if lines and header.subtotal.value is not None and all(
         amount is not None for amount in line_amounts
     ):
-        expected = sum((amount for amount in line_amounts if amount is not None), Decimal("0"))
+        expected = sum((amount for amount in line_amounts if amount is not None), Decimal(0))
         actual = header.subtotal.value
         if abs(expected - actual) > CENT:
             issues.append(

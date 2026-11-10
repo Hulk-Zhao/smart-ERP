@@ -29,9 +29,37 @@ class EmptyDocumentError(DocParseError):
 class ExtractorNotAvailableError(DocParseError):
     """抽取器为桩实现，未接入真实能力。"""
 
-    def __init__(self, extractor: str, required_plugin: str) -> None:
+    def __init__(
+        self, extractor: str, required_plugin: str, message: str | None = None
+    ) -> None:
         self.extractor = extractor
         self.required_plugin = required_plugin
+        super().__init__(message or f"解析器未接入（桩）：{extractor}，需要 {required_plugin}")
+
+
+class PdfSupportUnavailableError(ExtractorNotAvailableError):
+    """未安装 ``[pdf]`` extra：明确提示安装方式，不得静默返回空文本。"""
+
+    def __init__(self) -> None:
         super().__init__(
-            f"解析器未接入（桩）：{extractor}，需要 {required_plugin}"
+            "pdf.pypdfium2",
+            "pypdfium2",
+            message=(
+                "缺少 PDF 支持：未安装 pypdfium2，请安装 `[pdf]` extra"
+                '（pip install -e ".[pdf]"）'
+            ),
+        )
+
+
+class PdfTextLayerMissingError(ExtractorNotAvailableError):
+    """PDF 没有文本层（通常是扫描件）：需要 OCR，而 OCR 尚未接入。"""
+
+    def __init__(self, pages: int) -> None:
+        super().__init__(
+            "pdf.pypdfium2",
+            "OCR",
+            message=(
+                f"PDF 共 {pages} 页均无可提取文本层（疑似扫描件），需 OCR；"
+                "当前未接入 OCR 能力（PaddleOCR PP-Structure），未用空文本冒充解析成功"
+            ),
         )
