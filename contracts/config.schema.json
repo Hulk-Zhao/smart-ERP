@@ -493,8 +493,10 @@
     },
     "ERP_METERING_CAP_AMOUNT": {
       "type": "string",
-      "scope": "code",
-      "services": [],
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
       "required": false,
       "secret": false,
       "phase": "startup",
@@ -503,8 +505,10 @@
     },
     "ERP_METERING_CURRENCY": {
       "type": "string",
-      "scope": "code",
-      "services": [],
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
       "required": false,
       "secret": false,
       "phase": "startup",
@@ -513,8 +517,10 @@
     },
     "ERP_METERING_PRIOR_AMOUNT": {
       "type": "string",
-      "scope": "code",
-      "services": [],
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
       "required": false,
       "secret": false,
       "phase": "startup",
@@ -523,8 +529,10 @@
     },
     "ERP_METERING_UNIT_LABEL": {
       "type": "string",
-      "scope": "code",
-      "services": [],
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
       "required": false,
       "secret": false,
       "phase": "startup",
@@ -533,8 +541,10 @@
     },
     "ERP_METERING_UNIT_PRICE": {
       "type": "string",
-      "scope": "code",
-      "services": [],
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
       "required": false,
       "secret": false,
       "phase": "startup",
