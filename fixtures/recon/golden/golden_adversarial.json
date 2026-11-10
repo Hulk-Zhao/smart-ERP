@@ -1,0 +1,1001 @@
+{
+  "name": "golden_adversarial",
+  "adversarial_version": "1.2.0",
+  "note": "对抗样本独立于留出集，只报指标、不用于调参；每批含 1~2 行，期望值按业务原则写死，失败项如实保留。",
+  "label_revision": [
+    {
+      "version": "1.0.0 -> 1.1.0",
+      "when": "首跑之后",
+      "engine_changed": false,
+      "changes": [
+        "ADV-E2：原期望 no_conclusion 改为 auto_match。原因：全角数字可被 Decimal 解析且金额一致，属正确归一化；原期望与「应归一化」业务原则自相矛盾，是标注错误。",
+        "ADV-D3：原期望 auto_match 改为 no_conclusion。原因：金额含字母 O 无可靠推导依据，按「宁可不出结论」应整批降级；该帧仍因解析崩溃判 FAIL（异常一律算失败），未放宽判定。"
+      ],
+      "disclosure": "两处均为标注修正，非引擎调参；对抗集不参与调参，样本行一字未改。"
+    },
+    {
+      "version": "1.1.0 -> 1.2.0",
+      "when": "P0-1 / P0-2 修复之后",
+      "engine_changed": true,
+      "changes": [
+        "ADV-D3、ADV-E1：期望由「整批无法对账」改为「行级 unparseable + 整批待人工」。这是需求方对 P0-2 的要求，不是为迁就实现的放宽：判定仍要求状态为不可解析且批次为待人工，崩溃或静默当 0 仍然判 FAIL。",
+        "ADV-C：期望维持 review，补写判定依据——同单号、数量与金额字面相等但 BOX≠PCS，换算后数量 1000 vs 100 不闭合，必须转人工。"
+      ],
+      "disclosure": "本轮修复为引擎改动（单位守门、解析降级），对抗集样本行未改，指标变化在基线中如实记录。"
+    }
+  ],
+  "totals": {
+    "batches": 10,
+    "supplier_lines": 11
+  },
+  "batches": [
+    {
+      "batch_id": "ADV-A1",
+      "name": "same_doc_same_amount_other_period",
+      "adversarial_kind": "same_doc_other_batch",
+      "expected_no_conclusion": false,
+      "input": {
+        "scope": {
+          "org_id": "ORG-ADV",
+          "period": "2026-10",
+          "system_ids": [
+            "ERP",
+            "STATEMENT"
+          ]
+        },
+        "suppliers": [
+          "SUP-ADV"
+        ],
+        "options": {
+          "tolerance": {
+            "amount": "0.01",
+            "price": "0.0001",
+            "qty": "0.0001"
+          }
+        },
+        "master_data": {
+          "suppliers": [
+            {
+              "code": "SUP-ADV",
+              "name": "虚构供应商 SUP-ADV"
+            }
+          ],
+          "items": [
+            {
+              "code": "IT-ADV-A",
+              "name": "对抗物料 A",
+              "base_unit": "PCS"
+            }
+          ],
+          "unit_conversions": []
+        },
+        "our_lines": [
+          {
+            "system": "ERP",
+            "doc_no": "INV-ADV-A",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-A",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "125.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ],
+        "supplier_lines": [
+          {
+            "system": "STATEMENT",
+            "doc_no": "INV-ADV-A",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-A",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "125.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ]
+      },
+      "labels": {
+        "supplier": {
+          "STATEMENT:INV-ADV-A#1": {
+            "scenario": "adv_clean",
+            "scenario_tag": "adv_clean",
+            "expected_verdict": "auto_match",
+            "expected_our_refs": [
+              "ERP:INV-ADV-A#1"
+            ],
+            "expected_diff_types": [],
+            "needs_aggregation": false,
+            "forbid_auto_match": false,
+            "tolerated_amount": "0.0000",
+            "note": "同号同额，本期应正常匹配"
+          }
+        },
+        "our": {}
+      }
+    },
+    {
+      "batch_id": "ADV-A2",
+      "name": "same_doc_same_amount_other_period",
+      "adversarial_kind": "same_doc_other_batch",
+      "expected_no_conclusion": false,
+      "input": {
+        "scope": {
+          "org_id": "ORG-ADV",
+          "period": "2026-09",
+          "system_ids": [
+            "ERP",
+            "STATEMENT"
+          ]
+        },
+        "suppliers": [
+          "SUP-ADV"
+        ],
+        "options": {
+          "tolerance": {
+            "amount": "0.01",
+            "price": "0.0001",
+            "qty": "0.0001"
+          }
+        },
+        "master_data": {
+          "suppliers": [
+            {
+              "code": "SUP-ADV",
+              "name": "虚构供应商 SUP-ADV"
+            }
+          ],
+          "items": [
+            {
+              "code": "IT-ADV-A",
+              "name": "对抗物料 A",
+              "base_unit": "PCS"
+            }
+          ],
+          "unit_conversions": []
+        },
+        "our_lines": [
+          {
+            "system": "ERP",
+            "doc_no": "INV-ADV-A",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-A",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "125.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-09"
+          }
+        ],
+        "supplier_lines": [
+          {
+            "system": "STATEMENT",
+            "doc_no": "INV-ADV-A",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-A",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "125.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-09"
+          }
+        ]
+      },
+      "labels": {
+        "supplier": {
+          "STATEMENT:INV-ADV-A#1": {
+            "scenario": "adv_clean",
+            "scenario_tag": "adv_clean",
+            "expected_verdict": "auto_match",
+            "expected_our_refs": [
+              "ERP:INV-ADV-A#1"
+            ],
+            "expected_diff_types": [],
+            "needs_aggregation": false,
+            "forbid_auto_match": false,
+            "tolerated_amount": "0.0000",
+            "note": "跨批同号，不得与上期串成重复"
+          }
+        },
+        "our": {}
+      }
+    },
+    {
+      "batch_id": "ADV-B",
+      "name": "price_four_decimals",
+      "adversarial_kind": "price_4dp",
+      "expected_no_conclusion": false,
+      "input": {
+        "scope": {
+          "org_id": "ORG-ADV",
+          "period": "2026-10",
+          "system_ids": [
+            "ERP",
+            "STATEMENT"
+          ]
+        },
+        "suppliers": [
+          "SUP-ADV"
+        ],
+        "options": {
+          "tolerance": {
+            "amount": "0.01",
+            "price": "0.0001",
+            "qty": "0.0001"
+          }
+        },
+        "master_data": {
+          "suppliers": [
+            {
+              "code": "SUP-ADV",
+              "name": "虚构供应商 SUP-ADV"
+            }
+          ],
+          "items": [
+            {
+              "code": "IT-ADV-B1",
+              "name": "对抗物料 B1",
+              "base_unit": "PCS"
+            },
+            {
+              "code": "IT-ADV-B2",
+              "name": "对抗物料 B2",
+              "base_unit": "PCS"
+            }
+          ],
+          "unit_conversions": []
+        },
+        "our_lines": [
+          {
+            "system": "ERP",
+            "doc_no": "PO-ADV-B1",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-B1",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.3456",
+            "amount": "123.4560",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          },
+          {
+            "system": "ERP",
+            "doc_no": "PO-ADV-B2",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-B2",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.3456",
+            "amount": "123.4560",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ],
+        "supplier_lines": [
+          {
+            "system": "STATEMENT",
+            "doc_no": "PO-ADV-B1",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-B1",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.3457",
+            "amount": "123.4570",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          },
+          {
+            "system": "STATEMENT",
+            "doc_no": "PO-ADV-B2",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-B2",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.3460",
+            "amount": "123.4600",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ]
+      },
+      "labels": {
+        "supplier": {
+          "STATEMENT:PO-ADV-B1#1": {
+            "scenario": "adv_clean",
+            "scenario_tag": "adv_clean",
+            "expected_verdict": "auto_match",
+            "expected_our_refs": [
+              "ERP:PO-ADV-B1#1"
+            ],
+            "expected_diff_types": [],
+            "needs_aggregation": false,
+            "forbid_auto_match": false,
+            "tolerated_amount": "0.0000",
+            "note": "第 4 位差 0.0001 在价格容差内"
+          },
+          "STATEMENT:PO-ADV-B2#1": {
+            "scenario": "adv_clean",
+            "scenario_tag": "adv_clean",
+            "expected_verdict": "auto_match",
+            "expected_our_refs": [
+              "ERP:PO-ADV-B2#1"
+            ],
+            "expected_diff_types": [
+              "单价不一致"
+            ],
+            "needs_aggregation": false,
+            "forbid_auto_match": false,
+            "tolerated_amount": "0.0000",
+            "note": "第 4 位差 0.0004 应归因单价"
+          }
+        },
+        "our": {}
+      }
+    },
+    {
+      "batch_id": "ADV-C",
+      "name": "uom_scale_off_by_one_digit",
+      "adversarial_kind": "uom_magnitude",
+      "expected_no_conclusion": false,
+      "input": {
+        "scope": {
+          "org_id": "ORG-ADV",
+          "period": "2026-10",
+          "system_ids": [
+            "ERP",
+            "STATEMENT"
+          ]
+        },
+        "suppliers": [
+          "SUP-ADV"
+        ],
+        "options": {
+          "tolerance": {
+            "amount": "0.01",
+            "price": "0.0001",
+            "qty": "0.0001"
+          }
+        },
+        "master_data": {
+          "suppliers": [
+            {
+              "code": "SUP-ADV",
+              "name": "虚构供应商 SUP-ADV"
+            }
+          ],
+          "items": [
+            {
+              "code": "IT-ADV-C",
+              "name": "对抗物料 C",
+              "base_unit": "PCS"
+            }
+          ],
+          "unit_conversions": [
+            {
+              "item": "IT-ADV-C",
+              "from_unit": "BOX",
+              "to_unit": "PCS",
+              "factor": "10"
+            }
+          ]
+        },
+        "our_lines": [
+          {
+            "system": "ERP",
+            "doc_no": "PO-ADV-C",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-C",
+            "qty": "100.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "1250.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ],
+        "supplier_lines": [
+          {
+            "system": "STATEMENT",
+            "doc_no": "PO-ADV-C",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-C",
+            "qty": "100.0000",
+            "unit": "BOX",
+            "unit_price": "12.5000",
+            "amount": "1250.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ]
+      },
+      "labels": {
+        "supplier": {
+          "STATEMENT:PO-ADV-C#1": {
+            "scenario": "adv_unit_mismatch",
+            "scenario_tag": "adv_unit_mismatch",
+            "expected_verdict": "review",
+            "expected_our_refs": [],
+            "expected_diff_types": [],
+            "needs_aggregation": false,
+            "forbid_auto_match": false,
+            "tolerated_amount": "0.0000",
+            "note": "同单号、数量与金额字面相等，但 BOX≠PCS：换算后数量 1000 vs 100 不闭合，必须转人工"
+          }
+        },
+        "our": {}
+      }
+    },
+    {
+      "batch_id": "ADV-D1",
+      "name": "ocr_doc_no_zero_as_o",
+      "adversarial_kind": "ocr_doc_no",
+      "expected_no_conclusion": false,
+      "input": {
+        "scope": {
+          "org_id": "ORG-ADV",
+          "period": "2026-10",
+          "system_ids": [
+            "ERP",
+            "STATEMENT"
+          ]
+        },
+        "suppliers": [
+          "SUP-ADV"
+        ],
+        "options": {
+          "tolerance": {
+            "amount": "0.01",
+            "price": "0.0001",
+            "qty": "0.0001"
+          }
+        },
+        "master_data": {
+          "suppliers": [
+            {
+              "code": "SUP-ADV",
+              "name": "虚构供应商 SUP-ADV"
+            }
+          ],
+          "items": [
+            {
+              "code": "IT-ADV-D1",
+              "name": "对抗物料 D1",
+              "base_unit": "PCS"
+            }
+          ],
+          "unit_conversions": []
+        },
+        "our_lines": [
+          {
+            "system": "ERP",
+            "doc_no": "PO-ADV-D01",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-D1",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "125.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ],
+        "supplier_lines": [
+          {
+            "system": "STATEMENT",
+            "doc_no": "PO-ADV-DO1",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-D1",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "125.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ]
+      },
+      "labels": {
+        "supplier": {
+          "STATEMENT:PO-ADV-DO1#1": {
+            "scenario": "adv_clean",
+            "scenario_tag": "adv_clean",
+            "expected_verdict": "auto_match",
+            "expected_our_refs": [
+              "ERP:PO-ADV-D01#1"
+            ],
+            "expected_diff_types": [],
+            "needs_aggregation": false,
+            "forbid_auto_match": false,
+            "tolerated_amount": "0.0000",
+            "note": "单号 0/O 混淆，应按物料+数量+金额模糊配"
+          }
+        },
+        "our": {}
+      }
+    },
+    {
+      "batch_id": "ADV-D2",
+      "name": "ocr_item_code_zero_as_o",
+      "adversarial_kind": "ocr_item_code",
+      "expected_no_conclusion": true,
+      "input": {
+        "scope": {
+          "org_id": "ORG-ADV",
+          "period": "2026-10",
+          "system_ids": [
+            "ERP",
+            "STATEMENT"
+          ]
+        },
+        "suppliers": [
+          "SUP-ADV"
+        ],
+        "options": {
+          "tolerance": {
+            "amount": "0.01",
+            "price": "0.0001",
+            "qty": "0.0001"
+          }
+        },
+        "master_data": {
+          "suppliers": [
+            {
+              "code": "SUP-ADV",
+              "name": "虚构供应商 SUP-ADV"
+            }
+          ],
+          "items": [
+            {
+              "code": "IT-ADV-D02",
+              "name": "对抗物料 D02",
+              "base_unit": "PCS"
+            }
+          ],
+          "unit_conversions": []
+        },
+        "our_lines": [
+          {
+            "system": "ERP",
+            "doc_no": "PO-ADV-D02",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-D02",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "125.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ],
+        "supplier_lines": [
+          {
+            "system": "STATEMENT",
+            "doc_no": "PO-ADV-D02",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-DO2",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "125.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10",
+            "item_name": "对抗物料 D02"
+          }
+        ]
+      },
+      "labels": {
+        "supplier": {
+          "STATEMENT:PO-ADV-D02#1": {
+            "scenario": "adv_no_conclusion",
+            "scenario_tag": "adv_no_conclusion",
+            "expected_verdict": "no_conclusion",
+            "expected_our_refs": [],
+            "expected_diff_types": [],
+            "needs_aggregation": false,
+            "forbid_auto_match": false,
+            "tolerated_amount": "0.0000",
+            "note": "物料码未绑定，按「禁猜测」应整批降级"
+          }
+        },
+        "our": {}
+      }
+    },
+    {
+      "batch_id": "ADV-D3",
+      "name": "ocr_amount_zero_as_o",
+      "adversarial_kind": "ocr_amount",
+      "expected_no_conclusion": false,
+      "input": {
+        "scope": {
+          "org_id": "ORG-ADV",
+          "period": "2026-10",
+          "system_ids": [
+            "ERP",
+            "STATEMENT"
+          ]
+        },
+        "suppliers": [
+          "SUP-ADV"
+        ],
+        "options": {
+          "tolerance": {
+            "amount": "0.01",
+            "price": "0.0001",
+            "qty": "0.0001"
+          }
+        },
+        "master_data": {
+          "suppliers": [
+            {
+              "code": "SUP-ADV",
+              "name": "虚构供应商 SUP-ADV"
+            }
+          ],
+          "items": [
+            {
+              "code": "IT-ADV-D3",
+              "name": "对抗物料 D3",
+              "base_unit": "PCS"
+            }
+          ],
+          "unit_conversions": []
+        },
+        "our_lines": [
+          {
+            "system": "ERP",
+            "doc_no": "PO-ADV-D03",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-D3",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "125.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ],
+        "supplier_lines": [
+          {
+            "system": "STATEMENT",
+            "doc_no": "PO-ADV-D03",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-D3",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "1O25.00",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ]
+      },
+      "labels": {
+        "supplier": {
+          "STATEMENT:PO-ADV-D03#1": {
+            "scenario": "adv_unparseable",
+            "scenario_tag": "adv_unparseable",
+            "expected_verdict": "unparseable",
+            "expected_our_refs": [],
+            "expected_diff_types": [],
+            "needs_aggregation": false,
+            "forbid_auto_match": false,
+            "tolerated_amount": "0.0000",
+            "note": "金额含字母 O 不可解析：该行降级为不可解析，整批待人工，不得崩溃或静默当 0"
+          }
+        },
+        "our": {}
+      }
+    },
+    {
+      "batch_id": "ADV-E1",
+      "name": "fullwidth_amount",
+      "adversarial_kind": "fullwidth_amount",
+      "expected_no_conclusion": false,
+      "input": {
+        "scope": {
+          "org_id": "ORG-ADV",
+          "period": "2026-10",
+          "system_ids": [
+            "ERP",
+            "STATEMENT"
+          ]
+        },
+        "suppliers": [
+          "SUP-ADV"
+        ],
+        "options": {
+          "tolerance": {
+            "amount": "0.01",
+            "price": "0.0001",
+            "qty": "0.0001"
+          }
+        },
+        "master_data": {
+          "suppliers": [
+            {
+              "code": "SUP-ADV",
+              "name": "虚构供应商 SUP-ADV"
+            }
+          ],
+          "items": [
+            {
+              "code": "IT-ADV-E1",
+              "name": "对抗物料 E1",
+              "base_unit": "PCS"
+            }
+          ],
+          "unit_conversions": []
+        },
+        "our_lines": [
+          {
+            "system": "ERP",
+            "doc_no": "PO-ADV-E1",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-E1",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "125.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ],
+        "supplier_lines": [
+          {
+            "system": "STATEMENT",
+            "doc_no": "PO-ADV-E1",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-E1",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "１２５．００００",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ]
+      },
+      "labels": {
+        "supplier": {
+          "STATEMENT:PO-ADV-E1#1": {
+            "scenario": "adv_unparseable",
+            "scenario_tag": "adv_unparseable",
+            "expected_verdict": "unparseable",
+            "expected_our_refs": [],
+            "expected_diff_types": [],
+            "needs_aggregation": false,
+            "forbid_auto_match": false,
+            "tolerated_amount": "0.0000",
+            "note": "全角金额（含全角句点）当前不可解析：行级降级 + 整批待人工，不得崩溃"
+          }
+        },
+        "our": {}
+      }
+    },
+    {
+      "batch_id": "ADV-E2",
+      "name": "fullwidth_qty",
+      "adversarial_kind": "fullwidth_qty",
+      "expected_no_conclusion": false,
+      "input": {
+        "scope": {
+          "org_id": "ORG-ADV",
+          "period": "2026-10",
+          "system_ids": [
+            "ERP",
+            "STATEMENT"
+          ]
+        },
+        "suppliers": [
+          "SUP-ADV"
+        ],
+        "options": {
+          "tolerance": {
+            "amount": "0.01",
+            "price": "0.0001",
+            "qty": "0.0001"
+          }
+        },
+        "master_data": {
+          "suppliers": [
+            {
+              "code": "SUP-ADV",
+              "name": "虚构供应商 SUP-ADV"
+            }
+          ],
+          "items": [
+            {
+              "code": "IT-ADV-E2",
+              "name": "对抗物料 E2",
+              "base_unit": "PCS"
+            }
+          ],
+          "unit_conversions": []
+        },
+        "our_lines": [
+          {
+            "system": "ERP",
+            "doc_no": "PO-ADV-E2",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-E2",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "125.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ],
+        "supplier_lines": [
+          {
+            "system": "STATEMENT",
+            "doc_no": "PO-ADV-E2",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-E2",
+            "qty": "１０.００００",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "125.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ]
+      },
+      "labels": {
+        "supplier": {
+          "STATEMENT:PO-ADV-E2#1": {
+            "scenario": "adv_clean",
+            "scenario_tag": "adv_clean",
+            "expected_verdict": "auto_match",
+            "expected_our_refs": [
+              "ERP:PO-ADV-E2#1"
+            ],
+            "expected_diff_types": [],
+            "needs_aggregation": false,
+            "forbid_auto_match": false,
+            "tolerated_amount": "0.0000",
+            "note": "数量全角应归一化后匹配；引擎可解析即算正确"
+          }
+        },
+        "our": {}
+      }
+    },
+    {
+      "batch_id": "ADV-F",
+      "name": "supplier_name_extra_space",
+      "adversarial_kind": "supplier_name_space",
+      "expected_no_conclusion": false,
+      "input": {
+        "scope": {
+          "org_id": "ORG-ADV",
+          "period": "2026-10",
+          "system_ids": [
+            "ERP",
+            "STATEMENT"
+          ]
+        },
+        "suppliers": [
+          "SUP-ADV"
+        ],
+        "options": {
+          "tolerance": {
+            "amount": "0.01",
+            "price": "0.0001",
+            "qty": "0.0001"
+          }
+        },
+        "master_data": {
+          "suppliers": [
+            {
+              "code": "SUP-ADV",
+              "name": "虚构供应商 SUP-ADV "
+            }
+          ],
+          "items": [
+            {
+              "code": "IT-ADV-F",
+              "name": "对抗物料 F",
+              "base_unit": "PCS"
+            }
+          ],
+          "unit_conversions": []
+        },
+        "our_lines": [
+          {
+            "system": "ERP",
+            "doc_no": "PO-ADV-F",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-F",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "125.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ],
+        "supplier_lines": [
+          {
+            "system": "STATEMENT",
+            "doc_no": "PO-ADV-F",
+            "line_no": 1,
+            "supplier_code": "SUP-ADV",
+            "item_code": "IT-ADV-F",
+            "qty": "10.0000",
+            "unit": "PCS",
+            "unit_price": "12.5000",
+            "amount": "125.0000",
+            "tax_rate": "0.1300",
+            "tax_included": true,
+            "period": "2026-10"
+          }
+        ]
+      },
+      "labels": {
+        "supplier": {
+          "STATEMENT:PO-ADV-F#1": {
+            "scenario": "adv_clean",
+            "scenario_tag": "adv_clean",
+            "expected_verdict": "auto_match",
+            "expected_our_refs": [
+              "ERP:PO-ADV-F#1"
+            ],
+            "expected_diff_types": [],
+            "needs_aggregation": false,
+            "forbid_auto_match": false,
+            "tolerated_amount": "0.0000",
+            "note": "名称多空格不应影响按编码绑定"
+          }
+        },
+        "our": {}
+      }
+    }
+  ]
+}

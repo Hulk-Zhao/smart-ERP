@@ -147,6 +147,103 @@ def test_duplicate_billing_is_intercepted(make_request, make_line):
     assert result.metrics.auto_disposal_allowed is False
 
 
+def test_rounding_difference_is_tolerated_and_auditable(make_request, make_line):
+    """数量/单价一致、金额按角取整差 0.03：容差类放行，不算无法归因。"""
+    request = make_request(
+        [make_line(doc_no="PO-1", qty="10", unit_price="5", amount="50")],
+        [
+            make_line(
+                system="STATEMENT", doc_no="PO-1", qty="10", unit_price="5", amount="50.03"
+            )
+        ],
+    )
+    result = reconcile(request)
+
+    rounding = [diff for diff in result.diffs if diff.type is DiffType.ROUNDING_TOLERANCE]
+    assert len(rounding) == 1
+    assert rounding[0].amount.amount == Decimal("0.03")
+    assert rounding[0].owner is DiffOwner.SYSTEM
+    assert "容差" in rounding[0].suggestion
+    assert result.unattributed == ()
+    assert result.batch_status is BatchStatus.RECONCILED
+    assert result.metrics.rounding_lines == 1
+    # 容差调整不进差异金额/差异单，避免虚高差异率与向供应商重复要钱
+    assert result.metrics.diff_amount == 0
+    assert result.discrepancy_drafts == ()
+
+
+def test_amount_diff_beyond_rounding_tolerance_stays_unattributed(make_request, make_line):
+    """差额超容差（0.06 > 0.05）不得放行，仍按无法归因转人工。"""
+    request = make_request(
+        [make_line(doc_no="PO-1", qty="10", unit_price="5", amount="50")],
+        [
+            make_line(
+                system="STATEMENT", doc_no="PO-1", qty="10", unit_price="5", amount="50.06"
+            )
+        ],
+    )
+    result = reconcile(request)
+
+    assert [diff.type for diff in result.diffs] == []
+    assert len(result.unattributed) == 1
+    assert result.metrics.rounding_lines == 0
+    assert result.batch_status is BatchStatus.NEEDS_REVIEW
+
+
+def test_rounding_escalates_when_batch_total_exceeds_limit(make_request, make_line):
+    """单行都在容差内，但整批累计 1.05 > 1.00：疑似系统性凑整，转人工。"""
+    our = []
+    supplier = []
+    for index in range(1, 22):
+        qty = Decimal(10 + index)
+        our.append(
+            make_line(
+                doc_no=f"PO-{index}", qty=str(qty), unit_price="5", amount=str(qty * 5)
+            )
+        )
+        supplier.append(
+            make_line(
+                system="STATEMENT",
+                doc_no=f"PO-{index}",
+                qty=str(qty),
+                unit_price="5",
+                amount=str(qty * 5 + Decimal("0.05")),
+            )
+        )
+    result = reconcile(make_request(our, supplier))
+
+    assert result.metrics.rounding_lines == 21
+    assert result.metrics.rounding_amount == Decimal("1.05")
+    assert result.metrics.rounding_escalated is True
+    assert result.metrics.auto_disposal_allowed is False
+    assert result.batch_status is BatchStatus.NEEDS_REVIEW
+    assert "舍入容差累计超限" in result.status_reason
+
+
+def test_same_doc_conflicting_content_is_duplicate_not_missing(make_request, make_line):
+    """同单号同物料但单价被改：识别为重复计费并指出冲突列，不能落成缺单。"""
+    request = make_request(
+        [make_line(doc_no="PO-1", qty="10", unit_price="5", amount="50")],
+        [
+            make_line(
+                system="STATEMENT", doc_no="PO-1", line_no=1, qty="10", unit_price="5", amount="50"
+            ),
+            make_line(
+                system="STATEMENT", doc_no="PO-1", line_no=2, qty="10", unit_price="5.2", amount="52"
+            ),
+        ],
+    )
+    result = reconcile(request)
+
+    duplicates = [line for line in result.lines if line.status.value == "重复计费"]
+    assert len(duplicates) == 1
+    assert "内容冲突" in duplicates[0].note
+    diff = next(diff for diff in result.diffs if diff.type is DiffType.DUPLICATE)
+    assert "冲突列" in diff.suggestion
+    assert "单价" in diff.suggestion
+    assert all(item.type is not DiffType.MISSING_DOC for item in result.diffs)
+
+
 def test_confidence_below_threshold_requires_manual():
     low = DiffItem(
         type=DiffType.UNIT_PRICE,

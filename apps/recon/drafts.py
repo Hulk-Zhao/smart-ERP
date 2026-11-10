@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from .models import (
     DiffItem,
+    DiffType,
     DiscrepancyDraft,
     Money,
     ReconRequest,
@@ -19,6 +20,9 @@ def build_discrepancy_drafts(
     order: list[tuple[str, str]] = []
     grouped: dict[tuple[str, str], list[DiffItem]] = {}
     for diff in diffs:
+        # 舍入容差是已放行的容差调整，不对外发差异单（否则会向供应商重复要钱）
+        if diff.type is DiffType.ROUNDING_TOLERANCE:
+            continue
         key = (diff.supplier_code or "UNASSIGNED", diff.type.value)
         if key not in grouped:
             grouped[key] = []
