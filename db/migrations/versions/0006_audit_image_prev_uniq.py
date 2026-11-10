@@ -15,10 +15,17 @@ Create Date: 2026-11-11
 - ``ticket(id, tenant_id)`` 唯一 + ``audit_image`` / ``ticket_event`` 复合外键：
   防止「写错租户却挂到正确工单」把影像/事件挂进另一个租户的链。同样先检查存量，
   有跨租户挂载就带计数报错退出。
-- ``erp.credential_lease`` 收回整表 UPDATE/DELETE，只留 SELECT/INSERT：当前代码
-  没有任何 UPDATE 路径（吊销列尚未建模），整表 UPDATE 等于让应用角色能改
-  scope/narrowed_fields。将来若做吊销，先加 ``revoked_at`` / ``revoked_reason``
-  列，再只授这两列的 UPDATE。
+- ``erp.credential_lease`` 收回整表 UPDATE/DELETE，只留 SELECT/INSERT。
+  **当前的失效机制是「读时判定」**：``CredentialLease.expires_at`` 在取用凭据时与
+  ``now`` 比较（``apps/security/identity.py``），库里没有任何 UPDATE 路径
+  （``CredentialLeaseRow`` 除定义外无调用方），所以整表 UPDATE 只是净风险。
+  将来若需要续约/吊销/抢占，**不要给这张表开 UPDATE**：应改为 append-only 的
+  lease event 表（每次签发/续约/吊销各追加一行，读时取最后一行），否则「租约
+  被谁改过」将没有证据。详见 ``apps/audit/MIGRATION_NEEDS.md``。
+- ``erp.ticket_event`` 收回 UPDATE/DELETE/TRUNCATE（只留 SELECT/INSERT）：
+  它的行级不可改本来由 ``fn_ticket_event_guard`` 兜着，授权层同步收紧后，
+  即使有人临时禁用触发器也改不动。**链机制本身未动**（持 ticket 行锁 +
+  ``seq = 链尾 + 1`` + ``uq_ticket_event_seq`` 兜底，fail-closed）。
 - ``erp.ticket_step`` **不加** append-only 触发器，按「可变执行投影、不是证据」
   处理：``AppStore.mark_step`` 需要更新 ``state`` / ``response_snapshot`` /
   ``error_code`` / ``latency_ms`` / ``before_ref`` / ``after_ref``，加触发器会
@@ -147,6 +154,9 @@ def upgrade() -> None:
                 REVOKE UPDATE, DELETE ON {SCHEMA}.credential_lease FROM erp_app;
                 GRANT SELECT, INSERT ON {SCHEMA}.credential_lease TO erp_app;
 
+                REVOKE UPDATE, DELETE, TRUNCATE ON {SCHEMA}.ticket_event FROM erp_app;
+                GRANT SELECT, INSERT ON {SCHEMA}.ticket_event TO erp_app;
+
                 REVOKE UPDATE, DELETE, TRUNCATE ON {SCHEMA}.ticket_step FROM erp_app;
                 GRANT SELECT, INSERT ON {SCHEMA}.ticket_step TO erp_app;
                 GRANT UPDATE ({columns}) ON {SCHEMA}.ticket_step TO erp_app;
@@ -164,6 +174,7 @@ def downgrade() -> None:
         BEGIN
             IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'erp_app') THEN
                 GRANT UPDATE, DELETE ON {SCHEMA}.credential_lease TO erp_app;
+                GRANT UPDATE, DELETE ON {SCHEMA}.ticket_event TO erp_app;
                 REVOKE UPDATE ({columns}) ON {SCHEMA}.ticket_step FROM erp_app;
                 GRANT UPDATE, DELETE ON {SCHEMA}.ticket_step TO erp_app;
             END IF;

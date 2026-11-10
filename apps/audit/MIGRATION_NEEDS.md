@@ -171,20 +171,49 @@ CREATE TRIGGER audit_image_chain_guard
     FOR EACH ROW EXECUTE FUNCTION erp.fn_audit_image_chain_guard();
 ```
 
-> 并发：同一租户的追加应使用 `pg_advisory_xact_lock(hashtext('audit:' || tenant_id))`
-> 或串行 worker，否则两个并发事务可能读到同一链尾；触发器会拒绝后到者而不是分叉。
+> 并发：已由 `0006_audit_image_prev_uniq` 的 `UNIQUE (tenant_id, prev_hash)` 兜底
+> （库层保证，不依赖调用方加锁）：两个并发事务读到同一链尾时，后提交者被唯一约束
+> 拒绝，`AuditLedger.append_image` 重读链尾重试一次后接在链上。
+> 触发器 `fn_audit_image_chain_guard` 继续负责「prev_hash 必须等于当前链尾」。
 
 ## 4. 账号授权（NFR-C-01）
 
 ```sql
-REVOKE UPDATE, DELETE, TRUNCATE ON erp.audit_image    FROM erp_app;
-REVOKE UPDATE, DELETE, TRUNCATE ON erp.audit_anchor   FROM erp_app;
+-- 0002：四张审计表
+REVOKE UPDATE, DELETE, TRUNCATE ON erp.audit_image     FROM erp_app;
+REVOKE UPDATE, DELETE, TRUNCATE ON erp.audit_anchor    FROM erp_app;
 REVOKE UPDATE, DELETE, TRUNCATE ON erp.approval_record FROM erp_app;
-REVOKE UPDATE, DELETE, TRUNCATE ON erp.config_change  FROM erp_app;
+REVOKE UPDATE, DELETE, TRUNCATE ON erp.config_change   FROM erp_app;
 GRANT INSERT, SELECT ON erp.audit_image, erp.audit_anchor,
       erp.approval_record, erp.config_change TO erp_app;
-GRANT INSERT, SELECT, UPDATE ON erp.credential_lease TO erp_app;  -- 仅吊销/过期标记
+
+-- 0006：事件链与租约表
+REVOKE UPDATE, DELETE, TRUNCATE ON erp.ticket_event FROM erp_app;
+GRANT INSERT, SELECT ON erp.ticket_event TO erp_app;
+REVOKE UPDATE, DELETE ON erp.credential_lease FROM erp_app;
+GRANT INSERT, SELECT ON erp.credential_lease TO erp_app;
+
+-- 0006：步骤表只保留列级 UPDATE（可变执行投影）
+REVOKE UPDATE, DELETE, TRUNCATE ON erp.ticket_step FROM erp_app;
+GRANT SELECT, INSERT ON erp.ticket_step TO erp_app;
+GRANT UPDATE (state, response_snapshot, error_code, latency_ms,
+              before_ref, after_ref) ON erp.ticket_step TO erp_app;
 ```
+
+> 守卫：`tests/security/test_privilege_guard.py` 扫整个 `erp` schema，证据类表一旦
+> 有写权限就红；非证据表要写权限必须逐表登记理由。新增审计表漏 REVOKE 会立刻失败，
+> 不再依赖「记得」。
+
+### 4.1 `credential_lease` 为什么收回 UPDATE
+
+当前租约的失效是**读时判定**：`CredentialLease.expires_at` 在取用凭据时与 `now`
+比较（`apps/security/identity.py`），`CredentialLeaseRow` 除定义外没有任何调用方，
+库里不存在 UPDATE 路径。整表 UPDATE 只意味着「应用角色能改 scope / 有效期」。
+
+**若将来需要吊销、续约或抢占，不要给这张表开 UPDATE**：应改为 append-only 的
+lease event 表（每次签发 / 续约 / 吊销各追加一行，读时取最后一行并校验
+`expires_at`）。理由与 `ticket_step` 相同——给可变表开写权限，等于把「谁改过租约」
+这件事从证据里抹掉。
 
 ## 5. 代码侧已实现、待迁移落地后联调
 

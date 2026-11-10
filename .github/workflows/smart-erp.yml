@@ -344,8 +344,17 @@ jobs:
             # -o addopts="" 覆盖 pyproject 的 -q：否则 -q + -q = -qq 会把
             # "N passed / M skipped" 汇总行吞掉，skip 再次变成静默（本次事故的根因之一）。
             # 只改输出详略，不改退出码语义：任何非 0 仍然失败。
-            if ! python -m pytest "${d}" -q -o addopts="" -rs; then
+            status=0
+            out=$(python -m pytest "${d}" -q -o addopts="" -rs 2>&1) || status=$?
+            echo "$out"
+            if [ "$status" -ne 0 ]; then
               echo "::error::pytest ${d} 失败"
+              rc=1
+            fi
+            # tests/security 是审计表权限证据的唯一来源（以 erp_app 真实身份连接）。
+            # 角色缺失/口令改不了时用例会带原因 skip —— 那种「绿但一条没跑」必须红。
+            if [ "$d" = "tests/security" ] && echo "$out" | grep -Eq '[0-9]+ skipped'; then
+              echo "::error::tests/security 出现 skipped：权限证据被静默跳过，检查 erp_app 角色是否在迁移前创建"
               rc=1
             fi
             echo "::endgroup::"
