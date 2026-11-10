@@ -175,23 +175,24 @@ jobs:
         #      模块收集失败。
         # 分目录 = 每个进程只收集一个目录，两个问题同时消失，且新增同名文件也不会再炸。
         # 待各流把 tests/ 改成正规包（__init__.py + 相对导入）后，可退回单进程全量收集。
+        # tests/web 放的是前端 vitest 用例（由下面的 web-checks 跑），pytest 不收集；
+        # 其余目录零容忍：任何非 0 退出即失败，不再有「无用例可容忍」的例外。
         run: |
-          # actions 默认 shell 是 `bash -e`，pytest 返回 5（目录无用例）会直接中止，
-          # 下面的「5 可容忍」判断永远到不了；先关掉 errexit 再自行判定。
-          set +e -uo pipefail
+          set -uo pipefail
           rc=0
           for d in tests/*/; do
             d="${d%/}"
             [ -d "$d" ] || continue
+            if [ "$d" = "tests/web" ]; then
+              echo "跳过 ${d}：前端用例由 web-checks 执行"
+              continue
+            fi
             echo "::group::pytest ${d}"
-            python -m pytest "${d}" -q
-            code=$?
-            echo "::endgroup::"
-            if [ "$code" -ne 0 ] && [ "$code" -ne 5 ]; then
-              # 5 = 该目录暂无用例（例如 tests/web）
-              echo "::error::pytest ${d} 失败（exit=${code}）"
+            if ! python -m pytest "${d}" -q; then
+              echo "::error::pytest ${d} 失败"
               rc=1
             fi
+            echo "::endgroup::"
           done
           exit "$rc"
 
@@ -209,3 +210,35 @@ jobs:
 
       - name: 导入边界契约（C2）
         run: lint-imports
+
+  # ---------------------------------------------------------------------------
+  # 4. 前端工作台：契约生成物漂移、单元测试、生产构建
+  #    web/ 首次进主干后，这是唯一能拦住前端回归的门禁；三者任一失败即红。
+  # ---------------------------------------------------------------------------
+  web-checks:
+    name: 前端契约 / 测试 / 构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 安装依赖（npm ci）
+        run: npm ci
+
+      - name: 契约生成物漂移检查
+        run: npm run gen:api -- --check
+
+      - name: 单元测试
+        run: npm test -- --run
+
+      - name: 生产构建
+        run: npm run build
