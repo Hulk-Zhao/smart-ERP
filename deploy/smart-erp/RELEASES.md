@@ -17,6 +17,16 @@
 
 原「仍不登记 v0.2.0」的两条理由已消除：`web/` 与 `core/`、`tools/`、迁移 `0003`–`0005` 均已进主干；B-S8-01 的运行态四项已于 2026-11-11 在 `e1926cf` 上通过。登记条见下方「v0.2.0 — 2026-11-11」。下方「准入条款」第 1–3 条为 P0 期间的临时约束，自本登记起由「v0.2.0 登记条」取代（四镜像、demo/full 两档同时验证）。
 
+## 已知缺陷与影响面（2026-11-11 复核；分条记，不要合并）
+
+| # | 缺陷 | 影响面 | 证据 / 状态 |
+|---|---|---|---|
+| 1 | web 容器的 `proxy_pass` 用变量且带 URI，`/erp/api/*` 被压成 `/`，web→api 全 404（本机 8088 预览最直观，compose demo 档相同） | **仅影响本机 8088 预览与 compose demo 档，不影响客户**：生产香港 nginx 是 `location /erp/api/ { proxy_pass http://127.0.0.1:8010/; }`，直连广州宿主 `erp_api`，**不经过 web 容器** | 自 `v0.2.0`（`e1926cf`）起存在；`#75` 只改了 URI、未改变量语义。已由 PR #82 修复（B 方案：保留 `resolver ... ipv6=off` + `rewrite` 剥前缀 + 变量式 `proxy_pass` 不带 URI），**已合 `9079728`**；验收只看 main push run 的 `deploy-static` 真容器断言 |
+| 2 | **从 `main ≥ 45572f7` 构建的 app 镜像起不来**：`apps.main` 导入期依赖 `observability/`，而 `pyproject.toml` 的 `packages.find.include` 手写为 `["apps*","core*","tools*"]`，漏了新增的一等包 | 影响所有「拿新镜像验证」的结论：新镜像起不来不等于 nginx 有缺陷；旧镜像上的绿也不能当新镜像的证据。**`v0.2.0` 的 `e1926cf` 镜像不含该导入，不受影响** | 证据：run `42920934799`（head `8a96e24`）`state=exited exit=1`，`ModuleNotFoundError: No module named 'observability'`（`apps/api/container.py:34`）。已由 PR #82 `157929d`→`2ad1e1d` 修复（补 `observability*`、加「磁盘一等包反查 `find_packages`」用例、`api.Dockerfile` 输入清单、build 后立即导入入口模块），**已合 `9079728`**；**下次发版必须包含该修复之后的重建** |
+| 3 | **补偿与回滚能力有实现、有测试，但当前部署没有执行进程**：`TicketRuntime` / `AgentShell` 在生产代码中零构造；`erp_scheduler` 只回收 `erp.job_queue`；worker 只注册 `echo` / `sleep` 两种 job kind | **「写入后自动回滚」在 v0.2.0 不可兑现**。补偿任务的认领、重试、`compensation_seq`、失败回收都没有进程执行；租约续期、未解决工单、时钟偏移同属未运行 | 证据（基线 `45572f7`）：`git grep "TicketRuntime("` 仅命中 `tests/agents/support.py`；`apps/agents/shell.py` 自身也只在测试中构造；`core/runtime/scheduler.py::tick` 只碰 `erp.job_queue`；`core/runtime/worker.py` 仅注册 `echo` / `sleep`。属设计题（谁在哪个进程里跑工单/补偿运行时），须单独评审，**不在任何指标接线 PR 里顺手补** |
+
+> 判读纪律：镜像 build 绿 ≠ 能起；打包清单是手写的，新增一等包必漏，所以补了反查用例。
+
 
 ## v0.2.0 准入条款（2026-11-11 定，硬性）
 
