@@ -1,0 +1,42 @@
+[
+  {
+    "cCode": "RV202611010001",
+    "dDate": "2026-11-01",
+    "cVenCode": "V001",
+    "cVenName": "苏州精密铸造有限公司",
+    "cMemo": "委外回货入库",
+    "details": [
+      {
+        "iArrivalVouchsID": 1,
+        "cInvCode": "M-1001",
+        "cInvName": "法兰盘毛坯",
+        "cComUnitName": "件",
+        "iQuantity": 60,
+        "iTaxPrice": 35.5,
+        "iUnitPrice": 31.4159,
+        "iTaxRate": 13,
+        "iMoney": 2130
+      }
+    ]
+  },
+  {
+    "cCode": "RV202611010002",
+    "dDate": "2026-11-01",
+    "cVenCode": "V002",
+    "cVenName": "无锡华通机械有限公司",
+    "cMemo": "行单位与物料基本单位不一致",
+    "details": [
+      {
+        "iArrivalVouchsID": 1,
+        "cInvCode": "M-2001",
+        "cInvName": "毛坯钢锭",
+        "cComUnitName": "箱",
+        "iQuantity": 2,
+        "iTaxPrice": 990,
+        "iUnitPrice": 876.1062,
+        "iTaxRate": 13,
+        "iMoney": 1980
+      }
+    ]
+  }
+]

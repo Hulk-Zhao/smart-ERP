@@ -1,0 +1,48 @@
+{
+  "contract": "write-levels",
+  "critical_readonly_fields": [
+    "bank_account",
+    "gl_account",
+    "payment_amount",
+    "posted_voucher",
+    "stock_amount",
+    "stock_qty",
+    "tax_rate"
+  ],
+  "forbidden_action_verbs": [
+    "approve_document",
+    "certify_invoice",
+    "create_bank_account",
+    "delete_document",
+    "execute_payment",
+    "post_voucher"
+  ],
+  "levels": [
+    {
+      "executable": true,
+      "level": "W0",
+      "meaning": "只读/建议",
+      "value": 0
+    },
+    {
+      "executable": true,
+      "level": "W1",
+      "meaning": "草稿类写入，可补偿",
+      "value": 1
+    },
+    {
+      "executable": true,
+      "level": "W2",
+      "meaning": "需审批的写入",
+      "value": 2
+    },
+    {
+      "executable": false,
+      "level": "W3",
+      "meaning": "资金/过账/认证，只识别只拒绝",
+      "value": 3
+    }
+  ],
+  "resolution": "min(scene_cap, connector_cap, action_level, breaker_cap); W3 为吸收元",
+  "version": "1.0"
+}

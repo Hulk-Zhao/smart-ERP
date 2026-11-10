@@ -1,0 +1,12 @@
+# 只含格式/风格变更的提交清单：git blame 时跳过，避免功能历史被一条样式提交淹没。
+#
+# 启用方式（每份本地克隆执行一次）：
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub 网页端的 blame 视图会自动读取本文件，无需额外设置。
+#
+# 收录规则：仅收录「语义无变化」的提交（纯格式化 / 纯 lint 自动修复 / 纯 import 排序）。
+# 任何包含逻辑改动的提交不得写入本文件。
+
+# ruff 风格项清零：187 类可安全自动修复项 + 手修 17 处（UP046/UP047、SIM102/103/117、
+# RUF007、PIE810、C401、RUF059、F841、FURB192、ISC004），不改业务逻辑（PR #23）
+42d72fb4a349bd36ebd95b701db8ab3da6d7d63f

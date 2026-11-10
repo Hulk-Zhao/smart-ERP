@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="http://example.com/einvoice/v1">
+  <Title>增值税专用发票</Title>
+  <InvoiceNo>88231007</InvoiceNo>
+  <InvoiceDate>2026-03-05</InvoiceDate>
+  <SellerName>东莞市恒泰五金制品有限公司</SellerName>
+  <BuyerName>深圳华南电子有限公司</BuyerName>
+  <Items>
+    <Item>
+      <Seq>1</Seq>
+      <ItemName>不锈钢螺钉M6</ItemName>
+      <Spec>M6*20</Spec>
+      <Unit>个</Unit>
+      <Quantity>1000</Quantity>
+      <UnitPrice>0.85</UnitPrice>
+      <Amount>850.00</Amount>
+      <TaxRate>13%</TaxRate>
+    </Item>
+    <Item>
+      <Seq>2</Seq>
+      <ItemName>平垫片</ItemName>
+      <Spec>6mm</Spec>
+      <Unit>个</Unit>
+      <Quantity>2500</Quantity>
+      <UnitPrice>0.12</UnitPrice>
+      <Amount>300.00</Amount>
+      <TaxRate>13%</TaxRate>
+    </Item>
+  </Items>
+  <SubTotal>1150.00</SubTotal>
+  <TaxAmount>149.50</TaxAmount>
+  <TotalAmount>1299.50</TotalAmount>
+</Invoice>

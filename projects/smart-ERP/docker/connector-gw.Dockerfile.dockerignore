@@ -1,0 +1,15 @@
+# connector-gw.Dockerfile 的构建上下文过滤
+.git
+.gitignore
+.github
+docs
+tests
+deploy
+.screenshots
+**/__pycache__
+**/*.py[cod]
+.venv
+venv
+node_modules
+dist
+*.log

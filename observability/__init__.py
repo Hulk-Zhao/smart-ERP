@@ -1,0 +1,95 @@
+"""S7 观测层：统一埋点、trace 还原与成本归因。
+
+对外只暴露这些小入口；业务代码不要直接依赖内部模块。
+"""
+
+from observability.cost import CostLedger, UsageError, UsageRecord
+from observability.exporter import (
+    DEFAULT_TRACE_FILE,
+    JsonlExporter,
+    MemoryExporter,
+    SpanExporter,
+    exporter_from_env,
+)
+from observability.gateway import TracedConnector, audit_write_span
+from observability.metrics import (
+    FAILURE_CLASSES,
+    RECON_RESULTS,
+    STAGE_BUCKETS,
+    TICKET_STATUSES,
+    WRITE_STAGES,
+    Counter,
+    Gauge,
+    Histogram,
+    MetricError,
+    MetricLabelError,
+    MetricsEndpoint,
+    MetricsRegistry,
+    install_metrics,
+    render_metrics,
+)
+from observability.render import (
+    CHAIN_PHASES,
+    DecisionChain,
+    StepChain,
+    build_decision_chain,
+    render_decision_chain,
+    render_trace,
+)
+from observability.trace import (
+    KNOWN_SPANS,
+    REQUIRED_ATTRIBUTES,
+    STEP_ATTRIBUTES,
+    Span,
+    Trace,
+    TraceConventionError,
+    Tracer,
+    format_traceparent,
+    new_span_id,
+    new_trace_id,
+    parse_traceparent,
+)
+
+__all__ = [
+    "CHAIN_PHASES",
+    "DEFAULT_TRACE_FILE",
+    "FAILURE_CLASSES",
+    "KNOWN_SPANS",
+    "RECON_RESULTS",
+    "REQUIRED_ATTRIBUTES",
+    "STAGE_BUCKETS",
+    "STEP_ATTRIBUTES",
+    "TICKET_STATUSES",
+    "WRITE_STAGES",
+    "CostLedger",
+    "Counter",
+    "DecisionChain",
+    "Gauge",
+    "Histogram",
+    "JsonlExporter",
+    "MemoryExporter",
+    "MetricError",
+    "MetricLabelError",
+    "MetricsEndpoint",
+    "MetricsRegistry",
+    "Span",
+    "SpanExporter",
+    "StepChain",
+    "Trace",
+    "TraceConventionError",
+    "TracedConnector",
+    "Tracer",
+    "UsageError",
+    "UsageRecord",
+    "audit_write_span",
+    "build_decision_chain",
+    "exporter_from_env",
+    "format_traceparent",
+    "install_metrics",
+    "new_span_id",
+    "new_trace_id",
+    "parse_traceparent",
+    "render_decision_chain",
+    "render_metrics",
+    "render_trace",
+]
