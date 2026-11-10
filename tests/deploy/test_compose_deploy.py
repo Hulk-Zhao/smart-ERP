@@ -45,9 +45,13 @@ DOCKER_DIR = REPO_ROOT / "projects" / "smart-ERP" / "docker"
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 TEST_ENV_FILE = Path(__file__).resolve().parent / "compose.env"
 
-EXPECTED_SERVICES = {"api", "worker", "scheduler", "connector-gw", "web"}
-FORBIDDEN_SERVICES = {"pg", "postgres", "redis", "cache", "minio", "doc"}
+DEMO_SERVICES = {"api", "worker", "scheduler", "connector-gw", "web"}
+FULL_ONLY_SERVICES = {"doc", "worker-agent", "worker-io", "migrate"}
+EXPECTED_SERVICES = DEMO_SERVICES | FULL_ONLY_SERVICES
+# 任何档位都不许出现的容器（共用 PG15，队列在 PG，对象存储走本地卷/MinIO 外部）
+FORBIDDEN_SERVICES = {"pg", "postgres", "redis", "cache", "minio"}
 MEMORY_BUDGET_MIB = 1200
+FULL_MEMORY_CEILING_MIB = 8 * 1024
 HEALTHCONTRACT_PATHS = {"/healthz", "/readyz"}
 
 TAG_PATTERN = r"^\s*ERP_IMAGE_TAG=(.*)$"
@@ -103,7 +107,11 @@ def _usable_bash():
             continue
         try:
             probe = subprocess.run(
-                [candidate, "-n"], input=b"set -e\necho ok\n", capture_output=True, timeout=30
+                [candidate, "-n"],
+                input=b"set -e\necho ok\n",
+                capture_output=True,
+                timeout=30,
+                check=False,
             )
         except (OSError, subprocess.SubprocessError):
             continue
@@ -127,26 +135,64 @@ class ComposeStaticTest(unittest.TestCase):
         self.assertEqual(set(self.services), EXPECTED_SERVICES)
         self.assertFalse(
             FORBIDDEN_SERVICES & set(self.services),
-            "demo 档不得包含 pg/redis/doc/minio 等容器",
+            "不得包含 pg/redis/minio 等容器（共用 PG15、队列在 PG、对象存储走卷）",
         )
 
-    def test_all_services_in_demo_profile(self):
-        for name, svc in self.services.items():
+    def test_profiles_partition(self):
+        """demo 档 5 个服务，full 档额外 4 个；两档都覆盖的常驻服务列 demo+full。"""
+        for name in DEMO_SERVICES:
             with self.subTest(service=name):
-                self.assertIn("demo", svc.get("profiles", []))
+                profiles = self.services[name]["profiles"]
+                self.assertIn("demo", profiles)
+                if name != "worker":  # full 档把 worker 拆成 worker-agent/worker-io
+                    self.assertIn("full", profiles, f"{name} 在 full 档也要常驻")
+        for name in FULL_ONLY_SERVICES:
+            with self.subTest(service=name):
+                self.assertEqual(self.services[name]["profiles"], ["full"])
+        self.assertEqual(self.services["worker"]["profiles"], ["demo"])
 
-    def test_memory_budget(self):
+    def test_demo_memory_budget(self):
+        """§1A.3：demo 档常驻合计恰好 1200MiB；full 档另算（≤8G 整机）。"""
         total = 0.0
+        demo_total = 0.0
         for name, svc in self.services.items():
             with self.subTest(service=name):
                 self.assertIn("mem_limit", svc, f"{name} 必须显式声明 mem_limit")
                 # 不放水：不用 memswap_limit（§1A.3）
                 self.assertNotIn("memswap_limit", svc)
-                total += _parse_mib(svc["mem_limit"])
+                size = _parse_mib(svc["mem_limit"])
+                total += size
+                if "demo" in svc["profiles"]:
+                    demo_total += size
+        self.assertEqual(demo_total, MEMORY_BUDGET_MIB, "demo 档内存预算应与 §1A.3 的 1200MiB 对齐")
         self.assertLessEqual(
-            total, MEMORY_BUDGET_MIB, f"内存合计 {total:.0f}MiB 超过 {MEMORY_BUDGET_MIB}MiB 预算"
+            total, FULL_MEMORY_CEILING_MIB, f"两档服务合计 {total:.0f}MiB 超过 8G 整机预算"
         )
-        self.assertEqual(total, MEMORY_BUDGET_MIB, "内存预算应与 §1A.3 的 1200MiB 对齐")
+
+    def test_full_profile_topology(self):
+        """full 档差异项：doc 3G / worker 拆 agent-io / migrate 一次性。"""
+        doc = self.services["doc"]
+        self.assertEqual(_parse_mib(doc["mem_limit"]), 3072)
+        self.assertIn("smart-erp/doc:", doc["image"])
+        self.assertEqual(str(doc["healthcheck"]["start_period"]), "300s")
+        self.assertIn("8020", [str(p) for p in doc.get("expose", [])])
+        self.assertNotIn("ports", doc, "8020 只在内网，不发布到宿主")
+
+        for name, queue in (("worker-agent", "agent"), ("worker-io", "io")):
+            with self.subTest(service=name):
+                command = " ".join(str(part) for part in self.services[name]["command"])
+                self.assertIn(f"--queues={queue}", command)
+                self.assertIn(f"ERP_WORKER_QUEUES: {queue}", COMPOSE_FILE.read_text(encoding="utf-8"))
+
+        migrate = self.services["migrate"]
+        self.assertEqual(migrate["restart"], "no", "migrate 必须是一次性服务")
+        self.assertEqual(
+            " ".join(str(part) for part in migrate["command"]),
+            "alembic -c /app/alembic.ini upgrade head",
+        )
+        # 键仍是 ERP_DATABASE_URL（应用只认这个键），值必须来自迁移角色变量
+        self.assertIn("ERP_MIGRATION_DATABASE_URL", migrate["environment"]["ERP_DATABASE_URL"])
+        self.assertIn("erp_migrator", migrate["environment"]["ERP_DATABASE_URL"])
 
     def test_image_tag_is_forced(self):
         raw = COMPOSE_FILE.read_text(encoding="utf-8")
@@ -170,7 +216,10 @@ class ComposeStaticTest(unittest.TestCase):
     def test_restart_policy(self):
         for name, svc in self.services.items():
             with self.subTest(service=name):
-                self.assertEqual(svc.get("restart"), "unless-stopped")
+                if name == "migrate":  # 一次性迁移，绝不能重启（见 test_full_profile_topology）
+                    self.assertEqual(svc.get("restart"), "no")
+                else:
+                    self.assertEqual(svc.get("restart"), "unless-stopped")
 
     def test_required_env_in_services(self):
         for name in ("api", "worker", "scheduler"):
@@ -216,11 +265,11 @@ class ComposeStaticTest(unittest.TestCase):
         self.assertTrue(db_net.get("external"), "共用 PG 必须挂外部网络")
         self.assertIn("hulkai-gz-api_default", db_net["name"])
 
-        # 最小权限：只有需要连库的三个进程挂 DB 网络
-        for name in ("api", "worker", "scheduler"):
+        # 最小权限：只有需要连库的进程挂 DB 网络
+        for name in ("api", "worker", "scheduler", "worker-agent", "worker-io", "migrate"):
             with self.subTest(service=name):
                 self.assertIn("erp-db-net", self.services[name].get("networks", []))
-        for name in ("connector-gw", "web"):
+        for name in ("connector-gw", "web", "doc"):
             with self.subTest(service=name):
                 self.assertNotIn("erp-db-net", self.services[name].get("networks", []))
 
@@ -237,12 +286,16 @@ class ComposeStaticTest(unittest.TestCase):
     def test_healthchecks_hit_contract_paths(self):
         for name, svc in self.services.items():
             with self.subTest(service=name):
+                if name == "migrate":
+                    # 一次性任务：没有常驻进程可探，不许挂 healthcheck
+                    self.assertNotIn("healthcheck", svc)
+                    continue
                 hc = svc.get("healthcheck")
                 self.assertIsNotNone(hc, f"{name} 缺 healthcheck")
                 self.assertIn("start_period", hc, f"{name} 缺 start_period")
                 command = " ".join(str(part) for part in hc["test"])
 
-                if name in ("worker", "scheduler"):
+                if name in ("worker", "worker-agent", "worker-io", "scheduler"):
                     # 心跳探针：不依赖 HTTP，也不触发业务写
                     self.assertIn("tools.health", command)
                     continue
@@ -298,6 +351,44 @@ class ComposeStaticTest(unittest.TestCase):
                     f"config.py 里找不到 {key} 的读取点",
                 )
 
+    def test_connector_gw_entrypoint_is_locked(self):
+        """gw 入口必须是 `python -m apps.connectors.gateway`，且端口走 ERP_CONNECTOR_GW_PORT。
+
+        历史坑：S1 交付前这里写的是 `python -m connectors.gateway`（不存在的模块），
+        容器必然 ModuleNotFoundError。加这条断言防止以后又写回旧路径。
+        """
+        gw = self.services["connector-gw"]
+
+        command = " ".join(str(part) for part in gw["command"])
+        self.assertEqual(
+            command,
+            "python -m apps.connectors.gateway",
+            f"gw 的 command 必须是 python -m apps.connectors.gateway，实际：{command}",
+        )
+        self.assertNotIn(" -m connectors.gateway", command, "不得回退到旧入口 connectors.gateway")
+
+        # 端口：环境变量与 expose 必须同为 8012，不允许两处各写一份
+        env = gw["environment"]
+        self.assertIn("ERP_CONNECTOR_GW_PORT", env)
+        self.assertIn(":-8012}", str(env["ERP_CONNECTOR_GW_PORT"]))
+        self.assertNotIn("ERP_GW_PORT", env, "旧键 ERP_GW_PORT 已被 ERP_CONNECTOR_GW_PORT 取代")
+        self.assertIn("8012", [str(p) for p in gw.get("expose", [])])
+
+        # 入口模块真的存在，且确实读这个环境变量
+        gateway_py = REPO_ROOT / "apps" / "connectors" / "gateway.py"
+        self.assertTrue(gateway_py.is_file(), "apps/connectors/gateway.py 未落地")
+        source = gateway_py.read_text(encoding="utf-8")
+        self.assertIn("ERP_CONNECTOR_GW_PORT", source)
+        self.assertIn("DEFAULT_PORT = 8012", source)
+
+        # 镜像自带的 CMD 不能与 compose 打架
+        dockerfile = (DOCKER_DIR / "connector-gw.Dockerfile").read_text(encoding="utf-8")
+        self.assertRegex(
+            dockerfile,
+            r'CMD\s+\[\s*"python"\s*,\s*"-m"\s*,\s*"apps\.connectors\.gateway"\s*\]',
+            "connector-gw.Dockerfile 的 CMD 必须与 compose command 一致",
+        )
+
     def test_startup_order(self):
         self.assertIn("depends_on", self.services["web"])
         self.assertEqual(
@@ -313,7 +404,12 @@ class ArtifactsTest(unittest.TestCase):
     """Dockerfile / 脚本 / 开通 SQL 的静态断言。"""
 
     def test_dockerfiles_exist_and_are_multi_stage_nonroot(self):
-        for filename in ("api.Dockerfile", "connector-gw.Dockerfile", "web.Dockerfile"):
+        for filename in (
+            "api.Dockerfile",
+            "connector-gw.Dockerfile",
+            "docparse.Dockerfile",
+            "web.Dockerfile",
+        ):
             path = DOCKER_DIR / filename
             with self.subTest(dockerfile=filename):
                 self.assertTrue(path.is_file(), f"缺少 {path}")
@@ -331,6 +427,15 @@ class ArtifactsTest(unittest.TestCase):
                     text, r":latest\b", "不得用 latest 承担发布语义"
                 )
 
+    def test_docparse_image_installs_pdf_extra(self):
+        """doc 镜像必须装 [pdf] extra，否则 PDF 解析静默降级成「缺 PDF 支持」。"""
+        text = (DOCKER_DIR / "docparse.Dockerfile").read_text(encoding="utf-8")
+        self.assertRegex(
+            text,
+            r"pip\s+wheel\s+--wheel-dir\s+/wheels\s+\"\.\[pdf\]\"",
+            "docparse.Dockerfile 的 pip wheel 必须带 \".[pdf]\"（pypdfium2 依赖）",
+        )
+
     def test_scripts_are_syntactically_valid(self):
         bash = _usable_bash()
         if not bash:
@@ -341,7 +446,11 @@ class ArtifactsTest(unittest.TestCase):
                 self.assertTrue(path.is_file(), f"缺少 {path}")
                 # 用 stdin 传脚本，避开 Windows 路径在 WSL/Git Bash 之间的转译差异
                 result = subprocess.run(
-                    [bash, "-n"], input=path.read_bytes(), capture_output=True, timeout=60
+                    [bash, "-n"],
+                    input=path.read_bytes(),
+                    capture_output=True,
+                    timeout=60,
+                    check=False,
                 )
                 self.assertEqual(
                     result.returncode, 0,
@@ -383,23 +492,30 @@ class ArtifactsTest(unittest.TestCase):
 class ComposeRenderTest(unittest.TestCase):
     """用真实 docker 解析 compose：正向必须过，缺必填变量必须失败并指出变量名。"""
 
-    def _config(self, env_file: Path):
+    def _config(self, env_file: Path, profile: str = "demo"):
         cmd = [
             "docker", "compose",
             "--project-directory", str(DEPLOY_DIR),
             "--env-file", str(env_file),
             "--file", str(COMPOSE_FILE),
-            "--profile", "demo",
+            "--profile", profile,
             "config",
         ]
         env = {k: v for k, v in os.environ.items() if not k.startswith("ERP_")}
-        return subprocess.run(cmd, capture_output=True, text=True, env=env)
+        return subprocess.run(cmd, capture_output=True, text=True, env=env, check=False)
+
+    def test_positive_config_full_profile(self):
+        result = self._config(TEST_ENV_FILE, profile="full")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # full 档必须把 4 个差异服务渲染进来，且 demo 常驻服务仍在
+        for name in ("api", "web", "doc", "worker-agent", "worker-io", "migrate"):
+            self.assertIn(name, result.stdout, f"full 档缺少 {name}")
 
     def test_positive_config(self):
         result = self._config(TEST_ENV_FILE)
         self.assertEqual(result.returncode, 0, result.stderr)
         rendered = yaml.safe_load(result.stdout)
-        self.assertEqual(set(rendered["services"]), EXPECTED_SERVICES)
+        self.assertEqual(set(rendered["services"]), DEMO_SERVICES)
         self.assertEqual(
             rendered["services"]["api"]["image"],
             "smart-erp/app:0123456789abcdef0123456789abcdef01234567",

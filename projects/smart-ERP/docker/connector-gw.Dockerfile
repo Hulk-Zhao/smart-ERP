@@ -8,8 +8,13 @@
 #   docker build -f projects/smart-ERP/docker/connector-gw.Dockerfile \
 #                -t smart-erp/connector-gw:$(git rev-parse HEAD) .
 #
-# 未实测说明：同 api.Dockerfile —— 镜像构建依赖仓库根 pyproject.toml 与 apps/connectors/ 包。
-# 入口固定为 apps.connectors.gateway（包入口由 tests/deploy 的 entrypoint 用例锁定）。
+# 实测（2026-11-10）：构建通过，镜像 91.4MB，USER=app(10001)。
+# 入口已按 S1 交付物落地为 apps.connectors.gateway（`python -m apps.connectors.gateway`）：
+#   /healthz 不查依赖、/readyz 查下游（不可用返 503），端口读 ERP_CONNECTOR_GW_PORT（默认 8012）。
+# 启动冒烟（2026-11-11 实测）：tests/deploy/smoke_connector_gw.py → 镜像 88.3MiB，
+#   /healthz 200（3.3s），u8 连接器卡片与 allowlist hash 正常返回。改动入口后请复跑该脚本。
+#   同步位置：deploy/smart-erp/docker-compose.yml 的 connector-gw.command，
+#   以及 tests/deploy 的回归断言——三处必须一起改。
 # =============================================================================
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 
@@ -39,8 +44,10 @@ RUN groupadd --gid 10001 app \
  && useradd --uid 10001 --gid app --create-home --shell /usr/sbin/nologin app
 
 COPY --from=builder /wheels /wheels
+# /tmp/pycache 是 PYTHONPYCACHEPREFIX 的落点：装依赖时会把 .pyc（含第三方包自带的
+# test_*.pyc）写进去，运行期 /tmp 被 tmpfs 覆盖用不到，装完即删，避免白占镜像层。
 RUN python -m pip install --no-index --find-links=/wheels --no-cache-dir /wheels/*.whl \
- && rm -rf /wheels
+ && rm -rf /wheels /tmp/pycache
 
 WORKDIR /app
 # 网关根文件系统只读（compose read_only），只保留 /tmp 供 tmpfs 挂载
@@ -50,4 +57,4 @@ USER app
 
 EXPOSE 8012
 
-CMD ["python", "-m", "apps.connectors.gateway", "--host=0.0.0.0", "--port=8012"]
+CMD ["python", "-m", "apps.connectors.gateway"]

@@ -75,6 +75,15 @@ jobs:
             --file deploy/smart-erp/docker-compose.yml \
             --profile demo config --quiet
 
+      - name: compose 正向解析（full 档）
+        # full = demo 常驻服务 + doc / worker-agent / worker-io / migrate
+        run: |
+          docker compose \
+            --project-directory deploy/smart-erp \
+            --env-file tests/deploy/compose.env \
+            --file deploy/smart-erp/docker-compose.yml \
+            --profile full config --quiet
+
       - name: compose 负向校验（缺 ERP_IMAGE_TAG 必须失败）
         run: |
           set -euo pipefail
@@ -126,6 +135,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]" ruff pyyaml
+
+      - name: 许可证门禁（AGPL / GPL / SSPL 硬拒绝 + 白名单）
+        # 制度化的 AGPL 收口（docs/product/tech/01-技术架构.md §2.2）：
+        # pip-licenses 枚举已安装依赖的许可证，scripts/check_licenses.py 对照
+        # contracts/deps/license-allowlist.txt；失败时输出包名 + 许可证 + 反向依赖链。
+        # pip-licenses 自身是 MIT，只装在 CI 里，不进运行期依赖。
+        run: |
+          python -m pip install --disable-pip-version-check pip-licenses
+          python scripts/check_licenses.py
 
       - name: 锁文件漂移检查（存在 uv.lock 时）
         # CI 装依赖走的是 `pip install -e ".[dev]"`，根本不读 uv.lock，
