@@ -8,9 +8,8 @@
 #   docker build -f projects/smart-ERP/docker/api.Dockerfile \
 #                -t smart-erp/app:$(git rev-parse HEAD) .
 #
-# 未实测说明：本仓库当前不存在 pyproject.toml 与 apps/、core/ 等包目录，
-#   因此本 Dockerfile 只能静态校验（docker build --check），真实构建需等 S0
-#   落地依赖清单后执行。scripts/build-images.sh 会先做前置检查再决定是否调用 docker。
+# 构建输入：pyproject.toml、apps/、core/、tools/、alembic.ini、db/migrations
+#   （仓库根为构建上下文）；缺任一项 build-images.sh 会先报错，不会构建出一半。
 # =============================================================================
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 
@@ -52,6 +51,12 @@ RUN python -m pip install --no-index --find-links=/wheels --no-cache-dir /wheels
  && rm -rf /wheels
 
 WORKDIR /app
+# 迁移资产随镜像分发：compose 的 migrate 服务在容器内执行
+# `alembic -c /app/alembic.ini upgrade head`，服务器上没有源码目录可挂，必须打进镜像。
+# alembic.ini 的 script_location=%(here)s/db/migrations，两者保持 /app 下的相对位置。
+COPY alembic.ini /app/alembic.ini
+COPY db/migrations /app/db/migrations
+
 # 运行期可写目录只有卷挂载点；其余保持镜像只读语义（compose 里 gw 显式 read_only）
 RUN mkdir -p /app/logs /data/objects /app/config \
  && chown -R app:app /app /data
