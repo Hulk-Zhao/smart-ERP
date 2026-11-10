@@ -11,7 +11,7 @@ from apps.platform.policy.levels import RateLimit
 SYSTEM_NAME = "file"
 CONNECTOR_VERSION = "csv-v1"
 
-# 实体 → canonical ``Document.kind``（PRD 02 §3：单据类型含订单/收货/报工/发票/对账单）。
+# 实体 → canonical ``Document.kind``（PRD 02 §2.2：单据类型含订单/收货/报工/发票/对账单）。
 ENTITY_KINDS: dict[str, str] = {
     "supplier_statement": "supplier_statement",
     "delivery_note": "delivery_note",
