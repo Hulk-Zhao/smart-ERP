@@ -157,3 +157,90 @@ def test_conversion_factor_supports_inverse(make_request):
     assert conversion_factor(master, "IT-A", "PCS", "箱") == Decimal("0.01")
     assert conversion_factor(master, "IT-A", "箱", "PCS") == Decimal(100)
     assert conversion_factor(master, "IT-B", "箱", "PCS") is None
+
+
+def test_unparseable_amount_degrades_row_not_batch(make_request, make_line):
+    """P0-2：字母 O 混进金额不得抛异常——该行标不可解析、整批待人工，其余行照常对账。"""
+    request = make_request(
+        [
+            make_line(doc_no="PO-1", qty="10", unit_price="12.5", amount="125"),
+            make_line(doc_no="PO-2", qty="10", unit_price="5", amount="50"),
+        ],
+        [
+            make_line(
+                system="STATEMENT",
+                doc_no="PO-1",
+                qty="10",
+                unit_price="12.5",
+                amount="1O25.00",
+            ),
+            make_line(
+                system="STATEMENT", doc_no="PO-2", qty="10", unit_price="5", amount="50"
+            ),
+        ],
+    )
+
+    assert [issue.field for issue in request.parse_issues] == ["amount"]
+    assert request.parse_issues[0].raw == "1O25.00"
+
+    result = reconcile(request)
+    assert result.batch_status is BatchStatus.NEEDS_REVIEW
+    assert result.conclusive is False
+    assert "unparseable" in result.status_reason
+
+    bad = next(item for item in result.lines if item.supplier_ref == "STATEMENT:PO-1#1")
+    assert bad.status.value == "不可解析"
+    assert bad.our_ref == "ERP:PO-1#1"
+    assert "1O25.00" in bad.note
+    assert "amount" in bad.note
+
+    ok = next(item for item in result.lines if item.supplier_ref == "STATEMENT:PO-2#1")
+    assert ok.status.value == "已匹配"
+
+    # 不可解析行不得被当 0 计入「缺单」，也不得把对手行判成我方缺单
+    assert not any(diff.ref == "ERP:PO-1#1" for diff in result.diffs)
+
+
+def test_fullwidth_amount_degrades_row_without_crash(make_request, make_line):
+    """全角句点金额（OCR 常见）同样不得抛：行级降级 + 整批待人工。"""
+    request = make_request(
+        [make_line(doc_no="PO-1", qty="10", unit_price="12.5", amount="125")],
+        [
+            make_line(
+                system="STATEMENT",
+                doc_no="PO-1",
+                qty="10",
+                unit_price="12.5",
+                amount="１２５．００００",
+            )
+        ],
+    )
+
+    assert len(request.parse_issues) == 1
+    result = reconcile(request)
+
+    assert result.batch_status is BatchStatus.NEEDS_REVIEW
+    line = next(item for item in result.lines if item.supplier_ref)
+    assert line.status.value == "不可解析"
+    assert "１２５．００００" in line.note
+
+
+def test_fullwidth_qty_is_parsed_normally(make_request, make_line):
+    """全角数字（无全角句点）可被 Decimal 解析，属正常归一化，不降级。"""
+    request = make_request(
+        [make_line(doc_no="PO-1", qty="10", unit_price="12.5", amount="125")],
+        [
+            make_line(
+                system="STATEMENT",
+                doc_no="PO-1",
+                qty="１０.００００",
+                unit_price="12.5",
+                amount="125",
+            )
+        ],
+    )
+
+    assert request.parse_issues == ()
+    result = reconcile(request)
+    line = next(item for item in result.lines if item.supplier_ref)
+    assert line.status.value == "已匹配"

@@ -69,12 +69,17 @@ def _evidence(our: DocLine, supplier: DocLine, our_field: str, sup_field: str) -
 
 
 def _suspected(amount_diff: Decimal, amount_mine: Decimal, qty_diff: Decimal | None, qty_mine: Decimal | None) -> bool:
-    if amount_mine != 0 and abs(amount_diff) / abs(amount_mine) > ANOMALY_LINE_RATIO:
-        return True
-    qty_out_of_range = (
-        qty_diff is not None and qty_mine and abs(qty_diff) / abs(qty_mine) > ANOMALY_QTY_MULTIPLE
+    amount_exploded = (
+        amount_mine != 0
+        and abs(amount_diff) / abs(amount_mine) > ANOMALY_LINE_RATIO
     )
-    return bool(qty_out_of_range)
+    qty_exploded = (
+        qty_diff is not None
+        and qty_mine is not None
+        and qty_mine != 0
+        and abs(qty_diff) / abs(qty_mine) > ANOMALY_QTY_MULTIPLE
+    )
+    return amount_exploded or qty_exploded
 
 
 def attribute_pair(
@@ -231,6 +236,33 @@ def attribute_pair(
         )
         return result
 
+    # 金额舍入容差：数量与单价完全一致，残留仅来自金额取整。
+    # 这是「容差调整」而非七类业务归因：在明细里留痕可审计，但不生成差异单、
+    # 不阻断批次；超过容差或整批累计超限时仍走下面的 unattributed / 转人工。
+    if (
+        not qty_bad
+        and not price_bad
+        and not result.diffs
+        and tolerance.rounding > 0
+        and abs(residual) <= tolerance.rounding
+    ):
+        result.diffs.append(
+            DiffItem(
+                type=DiffType.ROUNDING_TOLERANCE,
+                amount=Money(residual, amount_diff.currency, amount_diff.tax_included),
+                owner=DiffOwner.SYSTEM,
+                suggestion=(
+                    f"数量/单价一致，金额差 {residual} 元在舍入容差"
+                    f" {tolerance.rounding} 元内（供应商按角取整），按容差放行"
+                ),
+                confidence=quantize_confidence(Decimal("0.95")),
+                evidence=_evidence(our, supplier, "amount", "amount"),
+                ref=supplier.ref,
+                supplier_code=supplier.supplier_code,
+            )
+        )
+        return result
+
     if result.diffs:
         result.unattributed = UnattributedItem(
             ref=supplier.ref,
@@ -276,15 +308,54 @@ def build_missing_doc_diff(
     )
 
 
-def build_duplicate_diff(line: DocLine, first: DocLine) -> DiffItem:
+def _conflict_columns(line: DocLine, first: DocLine) -> list[str]:
+    """同单号重复列示时，逐列指出与首次列示的冲突，便于供应商核对。"""
+    conflicts: list[str] = []
+    if line.qty != first.qty:
+        conflicts.append(f"数量 {first.qty}→{line.qty}")
+    if line.unit != first.unit:
+        conflicts.append(f"单位 {first.unit}→{line.unit}")
+    price_line, price_first = effective_price(line), effective_price(first)
+    if price_line != price_first:
+        conflicts.append(f"单价 {price_first}→{price_line}")
+    amount_line = effective_amount(line) or Money(Decimal(0))
+    amount_first = effective_amount(first) or Money(Decimal(0))
+    if amount_line.amount != amount_first.amount:
+        conflicts.append(f"金额 {amount_first.amount}→{amount_line.amount}")
+    if line.tax_rate != first.tax_rate:
+        conflicts.append(f"税率 {first.tax_rate}→{line.tax_rate}")
+    return conflicts
+
+
+def build_duplicate_diff(line: DocLine, first: DocLine, *, kind: str = "exact") -> DiffItem:
+    """重复计费差异。
+
+    ``kind="exact"``：整行重复（同单号同内容，或不同单号但内容完全相同）。
+    ``kind="conflict"``：同单号同物料二次列示但内容被改动——仍属重复计费，
+    但必须把冲突列写进建议，避免被当成「缺单」放过。
+    """
     amount = effective_amount(line) or Money(Decimal(0))
+    if kind == "conflict":
+        conflicts = "、".join(_conflict_columns(line, first)) or "内容不一致"
+        suggestion = (
+            f"与 {first.ref} 同单号同物料重复列示，冲突列：{conflicts}；"
+            "按重复计费处理，需供应商红冲或书面说明后再结"
+        )
+        confidence = Decimal("0.92")
+    else:
+        suggestion = f"与 {first.ref} 重复计费，要求删除重复行或下期红冲"
+        confidence = Decimal("0.96")
     return DiffItem(
         type=DiffType.DUPLICATE,
         amount=amount,
         owner=DiffOwner.SUPPLIER,
-        suggestion=f"与 {first.ref} 重复计费，要求删除重复行或下期红冲",
-        confidence=quantize_confidence(Decimal("0.96")),
-        evidence=(line.evidence("doc_no"), first.evidence("doc_no")),
+        suggestion=suggestion,
+        confidence=quantize_confidence(confidence),
+        evidence=(
+            line.evidence("doc_no"),
+            first.evidence("doc_no"),
+            line.evidence("amount"),
+        ),
         ref=line.ref,
         supplier_code=line.supplier_code,
     )

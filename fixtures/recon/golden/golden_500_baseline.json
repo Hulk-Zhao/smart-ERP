@@ -1,0 +1,541 @@
+{
+  "name": "golden_500_baseline",
+  "note": "由 tests/recon/golden_eval.py 生成；数字为引擎实测值，不达标即如实记录，不得通过调整夹具或放宽口径修改本文件。",
+  "engine_changes": {
+    "note": "夹具与 golden_500.json 一字未动（fixture.sha256 与上一版一致）。指标变化来自识别能力提升，不是放宽口径：没有任何阈值被下调，新增的容差类别只放行「数量、单价完全一致且差额在容差内」的行，超容差或整批累计超限仍转人工。最近一轮为 P0 修复：单位不同必须换算且数量金额同时闭合才可自动匹配；金额/数量不可解析不再抛异常，改为行级 unparseable + 整批待人工。",
+    "items": [
+      {
+        "change": "新增 DiffType.ROUNDING_TOLERANCE（金额舍入容差）",
+        "engine": "apps/recon/attribution.py + models.py + engine.py",
+        "metric": "rounding_tolerance 0/20 → 20/20；B05 由待人工复核 → 已对账",
+        "why": "数量/单价一致、仅金额按角取整产生 0.01~0.05 差，属正常业务，不应等同无法归因。容差默认 0.05 元（按角取整单行最大误差），单行超 0.05 或整批累计超 1 元 / 0.5% 仍转人工。该类别在差异明细可见、可审计，但不生成差异单、不计入归因分母。"
+      },
+      {
+        "change": "去重键改为「同供应商+期间+单据号+物料」并识别内容冲突",
+        "engine": "apps/recon/engine.py::_detect_duplicates + attribution.py",
+        "metric": "duplicate_same_doc 0/5 → 5/5；duplicate 总 5/10 → 10/10",
+        "why": "原实现只对整行哈希去重，同单号被改动的一行会漏成「缺单」。现按业务唯一键分组，第二条起判重复，并在差异建议里逐列写出冲突（如「单价 10.0000→10.2000」），安全来自识别而非巧合。"
+      },
+      {
+        "change": "新增聚合匹配层（多对一拆单 / 一对多合并）",
+        "engine": "apps/recon/matching.py + engine.py",
+        "metric": "split_invoice 5/10 → 10/10；aggregation 15/15；合并 5/5 仍转人工",
+        "why": "原实现一行对一行，拆单第二行必然落成缺单。现按同供应商+物料+期间+单位分组做合计闭合匹配，结果标 match_type=aggregated 并带 aggregate_refs，人工可区分直配与聚合。拆单合计闭合可自动放行；合并（一方多行）拆分口径不唯一，一律待人工。"
+      },
+      {
+        "change": "评分前先做单位换算，不可换算才降权并区分原因",
+        "engine": "apps/recon/matching.py::_comparable/_score + engine.py",
+        "metric": "uom_conversion 10/20 → 20/20",
+        "why": "原评分直接用供应商原始数量/单价，单位差异把相似度压到 0.55。现优先按主数据换算到我方单位口径再比；换算不可得时按中性 0.50 降权，并在 Candidate.reason 写明「单位不可换算」而非「相似度低」。"
+      },
+      {
+        "change": "P0-1 单位守门：不同单位必须换算且数量金额同时闭合才可自动匹配",
+        "engine": "apps/recon/matching.py::unit_guard + engine.py",
+        "metric": "训练集 375/375 不变（无回归）；对抗集 100 BOX↔100 PCS 由自动放行 → 候选待人工",
+        "why": "直配层以前只看单据号，同单号下 100 BOX 与 100 PCS 会被当同一笔自动放行，换算系数错一位会静默算错钱。现单位不同（仅忽略空白/大小写）必须命中主数据换算，且换算后数量与金额同时闭合；否则封顶 0.65、只给候选，原因码写明「单位不一致」及可核对数字。"
+      },
+      {
+        "change": "P0-2 解析降级：金额/数量不可解析不再抛异常",
+        "engine": "apps/recon/models.py + loader.py + engine.py",
+        "metric": "对抗集含字母 O / 全角金额由崩溃 → 行级「不可解析」+ 整批待人工；训练集不变",
+        "why": "以前 to_decimal 抛 ValueError 会打断整批，脏金额导致整批无结论。现 loader 逐字段捕获并记 ParseIssue（行号、字段、原值），该行从匹配中摘出（同单号同行号对手行一并摘出，避免误报缺单），整批转待人工，其余行照常对账；不静默当 0、不猜。"
+      }
+    ],
+    "regressions": "逐项对比见 fixtures/recon/GOLDEN_LABELING.md 第 7 节；原本达标的 clean_match/cross_period/price_diff/tax_*/scrap/missing_*/无法对账识别均未下降。"
+  },
+  "metrics": {
+    "fixture": {
+      "path": "fixtures/recon/golden/golden_500.json",
+      "label_version": "1.0.0",
+      "sha256": "a2dea53daa24a28340c542049bbaf05630f8644fd35952310ec30cce3520a00d",
+      "supplier_lines": 500,
+      "our_lines": 490,
+      "batches": 14,
+      "engine_sha256": "fa834635dce793f48f8fc8ee018e1d65811820dd773c87323991e6029da01585"
+    },
+    "match": {
+      "denominator": 375,
+      "correct": 375,
+      "wrong_pairing": 0,
+      "missed": 0,
+      "accuracy": "1.0000",
+      "mismatch_rate": "0.0000",
+      "needs_aggregation": {
+        "total": 10,
+        "correct": 10,
+        "accuracy": "1.0000"
+      }
+    },
+    "review": {
+      "denominator": 5,
+      "correctly_deferred": 5,
+      "auto_matched_unsafely": 0,
+      "rate": "1.0000"
+    },
+    "duplicate": {
+      "denominator": 10,
+      "correct": 10,
+      "accuracy": "1.0000",
+      "conflict": {
+        "denominator": 5,
+        "with_conflict_columns": 5,
+        "accuracy": "1.0000"
+      }
+    },
+    "rounding_tolerance": {
+      "denominator": 20,
+      "tolerated_and_released": 20,
+      "accuracy": "1.0000",
+      "wrongly_unattributed": []
+    },
+    "aggregation": {
+      "denominator": 15,
+      "marked_aggregated": 15,
+      "accuracy": "1.0000",
+      "split": {
+        "denominator": 10,
+        "correct": 10,
+        "accuracy": "1.0000"
+      },
+      "merge": {
+        "denominator": 5,
+        "correct": 5,
+        "accuracy": "1.0000"
+      }
+    },
+    "missing_doc": {
+      "supplier_side": {
+        "denominator": 10,
+        "correct": 10,
+        "accuracy": "1.0000"
+      },
+      "our_side": {
+        "denominator": 10,
+        "correct": 10,
+        "accuracy": "1.0000"
+      }
+    },
+    "attribution": {
+      "denominator": 99,
+      "exact_set_correct": 99,
+      "accuracy": "1.0000",
+      "by_type": {
+        "单价不一致": {
+          "expected": 20,
+          "detected": 20,
+          "tp": 20,
+          "fp": 0,
+          "fn": 0
+        },
+        "报废未扣": {
+          "expected": 12,
+          "detected": 12,
+          "tp": 12,
+          "fp": 0,
+          "fn": 0
+        },
+        "数量不符": {
+          "expected": 13,
+          "detected": 13,
+          "tp": 13,
+          "fp": 0,
+          "fn": 0
+        },
+        "税率口径": {
+          "expected": 24,
+          "detected": 24,
+          "tp": 24,
+          "fp": 0,
+          "fn": 0
+        },
+        "缺单": {
+          "expected": 20,
+          "detected": 20,
+          "tp": 20,
+          "fp": 0,
+          "fn": 0
+        },
+        "重复计费": {
+          "expected": 10,
+          "detected": 10,
+          "tp": 10,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    },
+    "no_conclusion": {
+      "batches_expected": 4,
+      "batches_correct": 4,
+      "supplier_rows": 100,
+      "supplier_rows_correct": 100,
+      "rate": "1.0000",
+      "false_downgrade_batches": []
+    },
+    "safety": {
+      "batches_concluded_reconciled": 8,
+      "false_auto_pass_batches": [],
+      "false_unattributed_refs": []
+    },
+    "prd_targets": {
+      "FR-103 匹配准确率≥0.92": {
+        "target": "0.9200",
+        "actual": "1.0000",
+        "met": true
+      },
+      "FR-104 归因准确率≥0.85": {
+        "target": "0.8500",
+        "actual": "1.0000",
+        "met": true
+      }
+    },
+    "scenarios": [
+      {
+        "scenario": "clean_match",
+        "tag": "完全匹配（含一单多行）",
+        "total": 236,
+        "correct": 236,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "cross_period",
+        "tag": "跨月挂账",
+        "total": 20,
+        "correct": 20,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "duplicate_exact",
+        "tag": "重复单号（整行重复）",
+        "total": 5,
+        "correct": 5,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "duplicate_same_doc",
+        "tag": "重复单号（同号不同内容）",
+        "total": 5,
+        "correct": 5,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "merged_billing",
+        "tag": "合并（多单并一行）",
+        "total": 5,
+        "correct": 5,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "missing_item_code",
+        "tag": "缺物料编码",
+        "total": 25,
+        "correct": 25,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "missing_line_data",
+        "tag": "行数据缺失",
+        "total": 25,
+        "correct": 25,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "missing_uom_conversion",
+        "tag": "单位换算缺失",
+        "total": 25,
+        "correct": 25,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "our_only",
+        "tag": "缺单（我方未列示）",
+        "total": 10,
+        "correct": 10,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "partial_receipt",
+        "tag": "部分收货（数量不符）",
+        "total": 13,
+        "correct": 13,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "price_diff",
+        "tag": "单价差异",
+        "total": 20,
+        "correct": 20,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "rounding_diff",
+        "tag": "金额四舍五入差",
+        "total": 20,
+        "correct": 20,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "scrap_not_deducted",
+        "tag": "报废未扣",
+        "total": 12,
+        "correct": 12,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "split_invoice",
+        "tag": "拆单（一单拆多行）",
+        "total": 10,
+        "correct": 10,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "supplier_only",
+        "tag": "缺单（供应商多计）",
+        "total": 10,
+        "correct": 10,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "tax_basis_diff",
+        "tag": "含税/不含税口径差异",
+        "total": 12,
+        "correct": 12,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "tax_rate_diff",
+        "tag": "税率差异",
+        "total": 12,
+        "correct": 12,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "unbound_supplier",
+        "tag": "供应商未绑定",
+        "total": 25,
+        "correct": 25,
+        "accuracy": "1.0000"
+      },
+      {
+        "scenario": "uom_conversion",
+        "tag": "单位换算",
+        "total": 20,
+        "correct": 20,
+        "accuracy": "1.0000"
+      }
+    ],
+    "batches": [
+      {
+        "batch_id": "B01",
+        "name": "clean_multi_line",
+        "expected_no_conclusion": false,
+        "actual_status": "已对账",
+        "supplier_lines": 40,
+        "our_lines": 40,
+        "matched": 40,
+        "diff_lines": 0,
+        "diff_rate": "0.0000",
+        "manual_lines": 0,
+        "unattributed": 0,
+        "suspected_anomaly": false,
+        "label_errors": 0
+      },
+      {
+        "batch_id": "B02",
+        "name": "price_difference",
+        "expected_no_conclusion": false,
+        "actual_status": "已对账",
+        "supplier_lines": 40,
+        "our_lines": 40,
+        "matched": 40,
+        "diff_lines": 20,
+        "diff_rate": "0.0300",
+        "manual_lines": 0,
+        "unattributed": 0,
+        "suspected_anomaly": false,
+        "label_errors": 0
+      },
+      {
+        "batch_id": "B03",
+        "name": "tax_basis",
+        "expected_no_conclusion": false,
+        "actual_status": "已对账",
+        "supplier_lines": 40,
+        "our_lines": 40,
+        "matched": 40,
+        "diff_lines": 24,
+        "diff_rate": "0.0600",
+        "manual_lines": 0,
+        "unattributed": 0,
+        "suspected_anomaly": false,
+        "label_errors": 0
+      },
+      {
+        "batch_id": "B04",
+        "name": "qty_and_scrap",
+        "expected_no_conclusion": false,
+        "actual_status": "已对账",
+        "supplier_lines": 40,
+        "our_lines": 40,
+        "matched": 40,
+        "diff_lines": 25,
+        "diff_rate": "0.0300",
+        "manual_lines": 0,
+        "unattributed": 0,
+        "suspected_anomaly": false,
+        "label_errors": 0
+      },
+      {
+        "batch_id": "B05",
+        "name": "rounding",
+        "expected_no_conclusion": false,
+        "actual_status": "已对账",
+        "supplier_lines": 40,
+        "our_lines": 40,
+        "matched": 40,
+        "diff_lines": 0,
+        "diff_rate": "0.0000",
+        "manual_lines": 0,
+        "unattributed": 0,
+        "suspected_anomaly": false,
+        "label_errors": 0
+      },
+      {
+        "batch_id": "B06",
+        "name": "uom_conversion",
+        "expected_no_conclusion": false,
+        "actual_status": "已对账",
+        "supplier_lines": 40,
+        "our_lines": 40,
+        "matched": 40,
+        "diff_lines": 0,
+        "diff_rate": "0.0000",
+        "manual_lines": 0,
+        "unattributed": 0,
+        "suspected_anomaly": false,
+        "label_errors": 0
+      },
+      {
+        "batch_id": "B07",
+        "name": "duplicates",
+        "expected_no_conclusion": false,
+        "actual_status": "待人工复核",
+        "supplier_lines": 45,
+        "our_lines": 35,
+        "matched": 35,
+        "diff_lines": 20,
+        "diff_rate": "0.2300",
+        "manual_lines": 0,
+        "unattributed": 0,
+        "suspected_anomaly": true,
+        "label_errors": 0
+      },
+      {
+        "batch_id": "B08",
+        "name": "split_and_merge",
+        "expected_no_conclusion": false,
+        "actual_status": "待人工复核",
+        "supplier_lines": 35,
+        "our_lines": 35,
+        "matched": 35,
+        "diff_lines": 0,
+        "diff_rate": "0.0000",
+        "manual_lines": 5,
+        "unattributed": 0,
+        "suspected_anomaly": false,
+        "label_errors": 0
+      },
+      {
+        "batch_id": "B09",
+        "name": "missing_docs",
+        "expected_no_conclusion": false,
+        "actual_status": "已对账",
+        "supplier_lines": 40,
+        "our_lines": 40,
+        "matched": 30,
+        "diff_lines": 20,
+        "diff_rate": "0.1700",
+        "manual_lines": 0,
+        "unattributed": 0,
+        "suspected_anomaly": false,
+        "label_errors": 0
+      },
+      {
+        "batch_id": "B10",
+        "name": "cross_period",
+        "expected_no_conclusion": false,
+        "actual_status": "已对账",
+        "supplier_lines": 40,
+        "our_lines": 40,
+        "matched": 40,
+        "diff_lines": 0,
+        "diff_rate": "0.0000",
+        "manual_lines": 0,
+        "unattributed": 0,
+        "suspected_anomaly": false,
+        "label_errors": 0
+      },
+      {
+        "batch_id": "B11",
+        "name": "missing_item_code",
+        "expected_no_conclusion": true,
+        "actual_status": "无法对账",
+        "supplier_lines": 25,
+        "our_lines": 25,
+        "matched": null,
+        "diff_lines": null,
+        "diff_rate": null,
+        "manual_lines": 0,
+        "unattributed": 0,
+        "suspected_anomaly": null,
+        "label_errors": 0
+      },
+      {
+        "batch_id": "B12",
+        "name": "missing_uom_conversion",
+        "expected_no_conclusion": true,
+        "actual_status": "无法对账",
+        "supplier_lines": 25,
+        "our_lines": 25,
+        "matched": null,
+        "diff_lines": null,
+        "diff_rate": null,
+        "manual_lines": 0,
+        "unattributed": 0,
+        "suspected_anomaly": null,
+        "label_errors": 0
+      },
+      {
+        "batch_id": "B13",
+        "name": "unbound_supplier",
+        "expected_no_conclusion": true,
+        "actual_status": "无法对账",
+        "supplier_lines": 25,
+        "our_lines": 25,
+        "matched": null,
+        "diff_lines": null,
+        "diff_rate": null,
+        "manual_lines": 0,
+        "unattributed": 0,
+        "suspected_anomaly": null,
+        "label_errors": 0
+      },
+      {
+        "batch_id": "B14",
+        "name": "missing_line_data",
+        "expected_no_conclusion": true,
+        "actual_status": "无法对账",
+        "supplier_lines": 25,
+        "our_lines": 25,
+        "matched": null,
+        "diff_lines": null,
+        "diff_rate": null,
+        "manual_lines": 0,
+        "unattributed": 0,
+        "suspected_anomaly": null,
+        "label_errors": 0
+      }
+    ],
+    "failures": []
+  }
+}

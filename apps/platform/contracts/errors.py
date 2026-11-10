@@ -22,6 +22,7 @@ class ErrorCode(str, Enum):
     POLICY_APPROVAL = "E-POLICY-APPROVAL"
     IDEM_CONFLICT = "E-IDEM-CONFLICT"
     STATE_ILLEGAL = "E-STATE-ILLEGAL"
+    RESOURCE_NOT_FOUND = "E-RESOURCE-NOTFOUND"
     DATA_MISSING = "E-DATA-MISSING"
     DATA_UNBOUND = "E-DATA-UNBOUND"
     DATA_AMBIGUOUS = "E-DATA-AMBIGUOUS"
@@ -45,6 +46,13 @@ class ErrorSpec:
     retriable: bool
     title: str
     next_step: str
+    also_statuses: tuple[int, ...] = ()
+
+    @property
+    def http_statuses(self) -> tuple[int, ...]:
+        """该码适用的全部 HTTP 状态码（主码 + 同语义的附加状态）。"""
+
+        return tuple(sorted({self.http_status, *self.also_statuses}))
 
 
 ERROR_SPECS: dict[ErrorCode, ErrorSpec] = {
@@ -69,8 +77,17 @@ ERROR_SPECS: dict[ErrorCode, ErrorSpec] = {
     ErrorCode.STATE_ILLEGAL: ErrorSpec(
         ErrorCode.STATE_ILLEGAL, 409, None, False, "非法状态迁移", "报障"
     ),
+    ErrorCode.RESOURCE_NOT_FOUND: ErrorSpec(
+        ErrorCode.RESOURCE_NOT_FOUND, 404, None, False, "对象不存在", "核对标识后重试"
+    ),
     ErrorCode.DATA_MISSING: ErrorSpec(
-        ErrorCode.DATA_MISSING, 422, "F1", False, "缺数据", "显示缺失清单（不猜）"
+        ErrorCode.DATA_MISSING,
+        422,
+        "F1",
+        False,
+        "缺数据",
+        "显示缺失清单（不猜）",
+        also_statuses=(503,),
     ),
     ErrorCode.DATA_UNBOUND: ErrorSpec(
         ErrorCode.DATA_UNBOUND, 422, "F4", False, "主数据未绑定", "绑定流程"
@@ -139,6 +156,7 @@ def error_contract() -> dict[str, object]:
             {
                 "code": spec.code.value,
                 "http_status": spec.http_status,
+                "http_statuses": list(spec.http_statuses),
                 "fail_code": spec.fail_code,
                 "retriable": spec.retriable,
                 "title": spec.title,

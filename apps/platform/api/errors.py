@@ -1,7 +1,7 @@
 """统一错误响应：所有异常都落成 RFC 9457 ``application/problem+json``，且带 ``trace_id``。
 
-错误码沿用 ``contracts/errors/codes.v1.json`` 的 17 个 ``E-*``（冻结契约，不新增、不改值）。
-传输层异常（404/405/500 等）没有专属业务码，按语义就近映射到现有码，响应状态码仍保留
+错误码沿用 ``contracts/errors/codes.v1.json`` 的 18 个 ``E-*``（冻结契约，改码必须先改契约）。
+传输层异常（405/500 等）没有专属业务码，按语义就近映射到现有码，响应状态码仍保留
 原始 HTTP 状态，避免为了包装层新增错误码而破坏冻结契约。
 """
 
@@ -22,7 +22,7 @@ _STATUS_TO_CODE: dict[int, ErrorCode] = {
     400: ErrorCode.PARSE_FAILED,
     401: ErrorCode.AUTHZ_SCOPE,
     403: ErrorCode.AUTHZ_SCOPE,
-    404: ErrorCode.DATA_MISSING,
+    404: ErrorCode.RESOURCE_NOT_FOUND,
     405: ErrorCode.STATE_ILLEGAL,
     409: ErrorCode.STATE_ILLEGAL,
     412: ErrorCode.CONFLICT_VERSION,

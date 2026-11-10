@@ -27,7 +27,7 @@ from apps.platform.contracts.export_contracts import ROOT
 from apps.platform.contracts.ticket import TICKET_STATES
 from apps.platform.db.registry import MODEL_MODULES, load_model_modules, table_names
 
-# 0001 + 0002 已交付的表（显式冻结；新增表走注册表对比，不必改这里）
+# 0001–0003 已交付的表（显式冻结；新增表走注册表对比，不必改这里）
 BASELINE_TABLES: frozenset[str] = frozenset(
     {
         "erp.job_queue",
@@ -43,6 +43,11 @@ BASELINE_TABLES: frozenset[str] = frozenset(
         "erp.approval_record",
         "erp.config_change",
         "erp.credential_lease",
+        # 0003_recon_persistence
+        "erp.recon_batch",
+        "erp.recon_line",
+        "erp.recon_line_event",
+        "erp.recon_line_link",
     }
 )
 

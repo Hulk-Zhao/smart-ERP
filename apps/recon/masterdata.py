@@ -19,6 +19,11 @@ from .models import (
 )
 
 
+def normalize_unit(unit: str | None) -> str:
+    """单位归一：只去空白与大小写差异；不把「箱/件」这类不同单位当等价。"""
+    return (unit or "").strip().upper()
+
+
 def conversion_factor(
     master_data: MasterData,
     item_code: str | None,
@@ -26,6 +31,8 @@ def conversion_factor(
     to_unit: str | None,
 ) -> Decimal | None:
     """返回 from_unit → to_unit 的乘数；换算关系缺失返回 None（不猜）。"""
+    from_unit = normalize_unit(from_unit)
+    to_unit = normalize_unit(to_unit)
     if not from_unit or not to_unit:
         return None
     if from_unit == to_unit:
@@ -37,10 +44,12 @@ def conversion_factor(
     for conv in master_data.unit_conversions:
         if conv.item != item_code or conv.factor == 0:
             continue
-        direct[(conv.from_unit, conv.to_unit)] = conv.factor
-        direct.setdefault((conv.to_unit, conv.from_unit), Decimal(1) / conv.factor)
-        neighbors.setdefault(conv.from_unit, set()).add(conv.to_unit)
-        neighbors.setdefault(conv.to_unit, set()).add(conv.from_unit)
+        left = normalize_unit(conv.from_unit)
+        right = normalize_unit(conv.to_unit)
+        direct[(left, right)] = conv.factor
+        direct.setdefault((right, left), Decimal(1) / conv.factor)
+        neighbors.setdefault(left, set()).add(right)
+        neighbors.setdefault(right, set()).add(left)
 
     if (from_unit, to_unit) in direct:
         return direct[(from_unit, to_unit)]

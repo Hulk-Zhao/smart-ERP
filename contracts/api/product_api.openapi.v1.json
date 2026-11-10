@@ -3,7 +3,7 @@
     "schemas": {
       "ActionIn": {
         "additionalProperties": false,
-        "description": "工单动作入参；``comment`` 同时承担审批意见 / 终止原因（FR-107）。",
+        "description": "工单动作入参；``comment`` 同时承担审批意见 / 终止原因（FR-107）。\n\n``reason`` 单列：回滚他人工单必须填写理由并留审计（FR-1303 / 权限矩阵 §4.5），\n不能复用 ``comment``——否则「没填理由」与「填了意见」在审计里无法区分。",
         "properties": {
           "comment": {
             "default": "",
@@ -35,6 +35,18 @@
               }
             ],
             "title": "Fail Code"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
           },
           "role": {
             "anyOf": [
@@ -478,6 +490,31 @@
         "title": "AuditImageOut",
         "type": "object"
       },
+      "BillingBucket": {
+        "description": "行/差异的计费桶：与计量表四类计数共用同一分类函数，禁止第二处重算。",
+        "enum": [
+          "billable",
+          "auto_released",
+          "dispute_hold",
+          "other_unbillable"
+        ],
+        "title": "BillingBucket",
+        "type": "string"
+      },
+      "DiffTypeCode": {
+        "enum": [
+          "unit_price",
+          "qty",
+          "scrap",
+          "uom",
+          "tax",
+          "missing_doc",
+          "duplicate",
+          "rounding_tolerance"
+        ],
+        "title": "DiffTypeCode",
+        "type": "string"
+      },
       "DiscrepancyDraftOut": {
         "properties": {
           "amount": {
@@ -674,8 +711,16 @@
       "MeteringDataGapOut": {
         "description": "计量所需但当前数据模型提供不了的字段：如实报缺，不用默认值冒充。",
         "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
           "field": {
             "title": "Field",
+            "type": "string"
+          },
+          "owner_role": {
+            "title": "Owner Role",
             "type": "string"
           },
           "reason": {
@@ -685,7 +730,9 @@
         },
         "required": [
           "field",
-          "reason"
+          "reason",
+          "owner_role",
+          "action"
         ],
         "title": "MeteringDataGapOut",
         "type": "object"
@@ -770,6 +817,9 @@
               }
             ],
             "title": "Before Ref"
+          },
+          "billing_bucket": {
+            "$ref": "#/components/schemas/BillingBucket"
           },
           "confidence": {
             "title": "Confidence",
@@ -894,6 +944,7 @@
           "status",
           "auto_released",
           "needs_manual",
+          "billing_bucket",
           "confidence"
         ],
         "title": "MeteringLineOut",
@@ -1381,6 +1432,9 @@
             "title": "Batch Id",
             "type": "string"
           },
+          "billing_bucket": {
+            "$ref": "#/components/schemas/BillingBucket"
+          },
           "confidence": {
             "title": "Confidence",
             "type": "string"
@@ -1456,6 +1510,7 @@
           "suggestion",
           "confidence",
           "needs_manual",
+          "billing_bucket",
           "ref",
           "supplier_code",
           "batch_id"
@@ -1467,6 +1522,9 @@
         "properties": {
           "amount": {
             "$ref": "#/components/schemas/MoneyOut"
+          },
+          "billing_bucket": {
+            "$ref": "#/components/schemas/BillingBucket"
           },
           "confidence": {
             "title": "Confidence",
@@ -1516,6 +1574,7 @@
           "suggestion",
           "confidence",
           "needs_manual",
+          "billing_bucket",
           "ref",
           "supplier_code"
         ],
@@ -2092,8 +2151,7 @@
             "type": "string"
           },
           "state": {
-            "title": "State",
-            "type": "string"
+            "$ref": "#/components/schemas/TicketStateCode"
           },
           "steps": {
             "items": {
@@ -2194,8 +2252,7 @@
             "type": "string"
           },
           "state": {
-            "title": "State",
-            "type": "string"
+            "$ref": "#/components/schemas/TicketStateCode"
           },
           "systems": {
             "items": {
@@ -2250,6 +2307,24 @@
         ],
         "title": "TicketOut",
         "type": "object"
+      },
+      "TicketStateCode": {
+        "enum": [
+          "计划中",
+          "待确认",
+          "待审批",
+          "执行中",
+          "校验中",
+          "已完成",
+          "补偿中",
+          "已回滚",
+          "需人工处置",
+          "已锁定",
+          "已终止",
+          "已驳回"
+        ],
+        "title": "TicketStateCode",
+        "type": "string"
       },
       "TicketStepOut": {
         "properties": {
@@ -2481,7 +2556,7 @@
     }
   },
   "info": {
-    "description": "Smart-ERP 产品 API（C16）。所有路径都挂在 `/erp/api` 下，即本文件的 `servers` + `/v1`。\n\n## 装配\napp 装配由平台底座负责：`apps/main.py` 调用 `install_platform(app)`，本模块只向\n`apps.platform.api.router.api_router` 注册 `/v1` 业务路由（导入 `apps.api` 即完成挂载），\n不修改 `apps/main.py`。`trace_id` 与 problem+json 由平台中间件/异常处理器统一注入。\n\n## 认证与会话\n- 请求头 `X-Session-Token: <token>`（或 `Authorization: Bearer <token>`）。\n- 缺失/过期/注销统一 401；令牌只映射到服务端会话，不接受客户端自报身份。\n\n## 数据范围（G-05）\n- 所有接口都必须携带 `org_id`、`period`、`system_ids`（查询参数或请求体 `scope`）。\n- scope 只能收窄，不能越权放大：请求 scope 不在授权范围内返回 403 `E-AUTHZ-001`。\n\n## 写操作治理\n- 每个写动作先过 `AccessGate` 四道闸（身份/范围/等级/审批），再执行：\n  - 外部写入只能经 `WriteGateway.execute()`（或回滚链路 `RollbackService`）；\n  - W3 一律拒绝（`E-POLICY-W3FORBIDDEN`），拒绝时连接器零写入；\n  - 内部对象追加（审批记录、状态推进、审计影像）不产生外部写入，只过 `AccessGate`。\n- 审批与执行分离：审批人用 `/approvals/*` 落意见；发起人/执行体用\n  `/tickets/{id}/actions/approve` 统一过闸并执行已锁定的写计划。\n\n## 计量（结果计费，W0 只读）\n- `GET /v1/metering/batches/{batch_id}/statement` 只输出程序性事实（是否自动放行、\n  是否需人工、有无证据链），不判断「结论是否正确」；`format=csv` 导出逐行明细。\n- 缺失字段（已确认错放行/客户原因/是否被人改过/工单号/前像后像）返回 null，并在\n  `data_gaps` 写明；单行单价只从 `ERP_METERING_UNIT_PRICE` 读取，未配置返回 503。\n\n## 幂等与分页\n- 写接口（POST）必须带 `Idempotency-Key`：同键同参回放首次响应，同键不同参 409；\n  缺失 400 `E-IDEM-CONFLICT`。\n- 列表统一 `{items, next_cursor}`，`limit` 默认 20、上限 100；游标不透明，\n  非法游标 422 `E-PARSE-FAILED`。\n\n## 错误格式\n`application/problem+json`，字段：`type`、`title`、`status`、`detail`、`code`、\n`trace_id`、`retriable`、`fail_code`。常用映射：\n\n| HTTP | code | 含义 |\n| --- | --- | --- |\n| 400 | E-IDEM-CONFLICT | 写接口缺少 Idempotency-Key |\n| 401 | E-AUTHZ-001 | 会话缺失/失效 |\n| 403 | E-AUTHZ-001 | 超出授权 scope |\n| 403 | E-AUTHZ-002 | 字段范围越界 |\n| 403 | E-POLICY-W3FORBIDDEN | W3 或需要更高权限 |\n| 403 | E-POLICY-LEVEL | 动作未注册/等级不足 |\n| 409 | E-POLICY-APPROVAL | 审批未满足、审批意见缺失、重复审批 |\n| 409 | E-IDEM-CONFLICT | 同键不同参 |\n| 409 | E-STATE-ILLEGAL | 状态迁移/重放非法 |\n| 409 | E-VERIFY-MISMATCH | 写入校验或审计链校验不一致 |\n| 422 | E-DATA-MISSING | 缺数据（含工单/批次不存在） |\n| 422 | E-PARSE-FAILED | 入参/游标/金额解析失败 |\n| 503 | E-CONN-UNAVAILABLE | 连接器不可用或凭据交换失败 |\n| 503 | E-DATA-MISSING | 计量配置缺失（未配置 ERP_METERING_UNIT_PRICE） |\n",
+    "description": "Smart-ERP 产品 API（C16）。所有路径都挂在 `/erp/api` 下，即本文件的 `servers` + `/v1`。\n\n## 装配\napp 装配由平台底座负责：`apps/main.py` 调用 `install_platform(app)`，本模块只向\n`apps.platform.api.router.api_router` 注册 `/v1` 业务路由（导入 `apps.api` 即完成挂载），\n不修改 `apps/main.py`。`trace_id` 与 problem+json 由平台中间件/异常处理器统一注入。\n\n## 认证与会话\n- 请求头 `X-Session-Token: <token>`（或 `Authorization: Bearer <token>`）。\n- 缺失/过期/注销统一 401；令牌只映射到服务端会话，不接受客户端自报身份。\n\n## 数据范围（G-05）\n- 所有接口都必须携带 `org_id`、`period`、`system_ids`（查询参数或请求体 `scope`）。\n- scope 只能收窄，不能越权放大：请求 scope 不在授权范围内返回 403 `E-AUTHZ-001`。\n\n## 写操作治理\n- 每个写动作先过 `AccessGate` 四道闸（身份/范围/等级/审批），再执行：\n  - 外部写入只能经 `WriteGateway.execute()`（或回滚链路 `RollbackService`）；\n  - W3 一律拒绝（`E-POLICY-W3FORBIDDEN`），拒绝时连接器零写入；\n  - 内部对象追加（审批记录、状态推进、审计影像）不产生外部写入，只过 `AccessGate`。\n- 审批与执行分离：审批人用 `/approvals/*` 落意见；发起人/执行体用\n  `/tickets/{id}/actions/approve` 统一过闸并执行已锁定的写计划。\n\n## 计量（结果计费，W0 只读）\n- `GET /v1/metering/batches/{batch_id}/statement` 只输出程序性事实（是否自动放行、\n  是否需人工、有无证据链），不判断「结论是否正确」；`format=csv` 导出逐行明细。\n- 逐行 `billing_bucket`（`billable / auto_released / dispute_hold / other_unbillable`）\n  与 statement 的四类计数由**同一个分类函数**产出；差异列表同样返回该字段并支持\n  `billing_bucket=` 过滤，避免「计数说争议挂起 2、列表却有 3 行」。\n- 缺失字段（已确认错放行/客户原因/是否被人改过/工单号/前像后像）返回 null，并在\n  `data_gaps` 写明 `owner_role`（谁负责提供）与 `action`（需要提供什么）；\n  单行单价只从 `ERP_METERING_UNIT_PRICE` 读取，未配置返回 503。\n\n## 对账结果留存（append-only）\n- `POST /v1/recon/runs` 成功后，批次头与逐行快照落库，statement 读持久化快照；\n  进程重启/容器重建后同一批次的数字不变。\n- 批次与行快照只追加：库上不可 UPDATE/DELETE（触发器兜底），\n  **改判只能显式重跑开新批次**，原批次数据永久保持不变。\n- 按原批次重跑：同时提供 `rerun_of`（原批次 id）与 `rerun_reason`（非空原因），\n  服务端生成新的批次 id 并在新批次上记录 `rerun_of`；两者都是可选字段，\n  不带时行为与旧版一致。\n- 幂等：同租户/组织/期间/输入指纹只允许一个首次执行，重复提交 409 `E-IDEM-CONFLICT`；\n  行级人工事件的去重键为「租户+操作人+行+事件+10 分钟时间窗」，\n  重试返回原事件 `seq`，不因重试把 `seq` 撑大。\n- 上线切换：旧进程内存里的历史批次**不迁移**，发布后不可查询，需重新发起对账生成；\n  结果数据保留期 ≥24 个月（清理任务尚未实现，已在台账留 TODO）。\n\n## 幂等与分页\n- 写接口（POST）必须带 `Idempotency-Key`：同键同参回放首次响应，同键不同参 409；\n  缺失 400 `E-IDEM-CONFLICT`。\n- 列表统一 `{items, next_cursor}`，`limit` 默认 20、上限 100；游标不透明，\n  非法游标 422 `E-PARSE-FAILED`。\n\n## 错误格式\n`application/problem+json`，字段：`type`、`title`、`status`、`detail`、`code`、\n`trace_id`、`retriable`、`fail_code`。常用映射：\n\n| HTTP | code | 含义 |\n| --- | --- | --- |\n| 400 | E-IDEM-CONFLICT | 写接口缺少 Idempotency-Key |\n| 401 | E-AUTHZ-001 | 会话缺失/失效 |\n| 403 | E-AUTHZ-001 | 超出授权 scope |\n| 403 | E-AUTHZ-002 | 字段范围越界 |\n| 403 | E-POLICY-W3FORBIDDEN | W3 或需要更高权限 |\n| 403 | E-POLICY-LEVEL | 动作未注册/等级不足 |\n| 404 | E-RESOURCE-NOTFOUND | 对象不存在（工单/对账批次/差异；跨租户同样 404） |\n| 409 | E-POLICY-APPROVAL | 审批未满足、审批意见缺失、重复审批 |\n| 409 | E-IDEM-CONFLICT | 同键不同参 |\n| 409 | E-STATE-ILLEGAL | 状态迁移/重放非法 |\n| 409 | E-VERIFY-MISMATCH | 写入校验或审计链校验不一致 |\n| 422 | E-DATA-MISSING | 缺数据（数据集为空、原因/分类等必填项缺失） |\n| 422 | E-PARSE-FAILED | 入参/游标/金额解析失败 |\n| 503 | E-CONN-UNAVAILABLE | 连接器不可用或凭据交换失败 |\n| 503 | E-DATA-MISSING | 计量配置缺失（未配置 ERP_METERING_UNIT_PRICE） |\n\n`E-DATA-MISSING` 只表示「数据/配置缺失」（422 请求侧缺必填数据、503 服务侧配置缺失）；\n凡「对象不存在」一律 404 `E-RESOURCE-NOTFOUND`，客户端不必再用字符串猜语义。\n",
     "title": "Smart-ERP 产品 API",
     "version": "1.0.0",
     "x-contract-id": "C16",
@@ -3222,7 +3297,7 @@
     },
     "/v1/recon/runs": {
       "post": {
-        "description": "按 scope 收窄后调用对账引擎；数据行须由 dataset 显式提供或事先登记，缺数据直接 422，不猜取数来源。发起本身无外部写入（W0）。",
+        "description": "按 scope 收窄后调用对账引擎；数据行须由 dataset 显式提供或事先登记，缺数据直接 422，不猜取数来源。发起本身无外部写入（W0）。\n\n**按原批次重跑**：批次与行快照 append-only，改判不能原地修改，只能显式重跑。重跑必须同时给 `rerun_of`（原批次 id）与 `rerun_reason`（非空原因），服务端生成**新批次 id**，新批次的 `rerun_of` 指向原批次；原批次数据保持不变。同租户/组织/期间/输入指纹的首次执行只允许一次，重复提交 409 `E-IDEM-CONFLICT`。",
         "operationId": "create_run_v1_recon_runs_post",
         "parameters": [
           {
@@ -3370,7 +3445,7 @@
     },
     "/v1/recon/runs/{batch_id}/diffs": {
       "get": {
-        "description": "按差异类型（ASCII 码）、是否需人工、供应商过滤，游标分页。",
+        "description": "按差异类型、是否需人工、供应商、计费桶过滤，游标分页。`billing_bucket` 与计量表四类计数同源，避免「计数说 2、点进去 3 行」。",
         "operationId": "list_diffs_v1_recon_runs__batch_id__diffs_get",
         "parameters": [
           {
@@ -3384,20 +3459,20 @@
             }
           },
           {
-            "description": "unit_price / qty / scrap / uom / tax / missing_doc / duplicate",
+            "description": "差异类型（枚举由引擎 DiffType 派生，含 rounding_tolerance）",
             "in": "query",
             "name": "diff_type",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/DiffTypeCode"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "unit_price / qty / scrap / uom / tax / missing_doc / duplicate",
+              "description": "差异类型（枚举由引擎 DiffType 派生，含 rounding_tolerance）",
               "title": "Diff Type"
             }
           },
@@ -3435,6 +3510,24 @@
               ],
               "description": "供应商编码",
               "title": "Supplier Code"
+            }
+          },
+          {
+            "description": "计费桶：billable / auto_released / dispute_hold / other_unbillable",
+            "in": "query",
+            "name": "billing_bucket",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/BillingBucket"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "计费桶：billable / auto_released / dispute_hold / other_unbillable",
+              "title": "Billing Bucket"
             }
           },
           {

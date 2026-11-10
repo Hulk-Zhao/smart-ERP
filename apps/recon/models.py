@@ -210,16 +210,27 @@ class MasterData:
 
 @dataclass(frozen=True)
 class Tolerance:
-    """差异比较容差，来自 options.tolerance（PRD AG-1 输入契约）。"""
+    """差异比较容差，来自 options.tolerance（PRD AG-1 输入契约）。
+
+    ``rounding``：金额「舍入容差」单行上限，默认 0.05 元。依据：供应商对账单
+    普遍按角（0.1 元）取整，单行取整最大误差为 0.05 元；超过该值的差额不再是
+    舍入噪声，必须按真实差异归因或转人工。
+    ``rounding_batch_limit``：整批舍入差累计上限，默认 1.00 元。依据：单行都在
+    容差内但行数多时可能系统性放大（例如整批按角向上取整），累计超过 1 元即不再
+    视为噪声，转人工确认，避免「凑整」被静默放过。
+    """
 
     amount: Decimal = EQUALITY_TOLERANCE
     price: Decimal = Decimal("0.0001")
     qty: Decimal = Decimal("0.0001")
+    rounding: Decimal = Decimal("0.05")
+    rounding_batch_limit: Decimal = Decimal("1.00")
 
 
 class MatchType(str, Enum):
     EXACT = "exact"          # 单据号直配
     FUZZY = "fuzzy"          # 业务键模糊配
+    AGGREGATED = "aggregated"  # 多行合计匹配（拆单/合并），需单独标注
     CANDIDATE = "candidate"  # 候选，不自动选
     UNMATCHED = "unmatched"
 
@@ -232,10 +243,16 @@ class LineStatus(str, Enum):
     UNMATCHED_OURS = "我方未匹配"
     UNMATCHED_SUPPLIER = "供应商未匹配"
     DUPLICATE = "重复计费"
+    # 金额/数量无法解析：该行不参与对账，整批转人工（不静默当 0，也不抛异常）
+    UNPARSEABLE = "不可解析"
 
 
 class DiffType(str, Enum):
-    """七类归因口径（FR-104 / 01-技术架构 ag1.reconcile.output）。"""
+    """七类归因口径（FR-104 / 01-技术架构 ag1.reconcile.output）。
+
+    ``ROUNDING_TOLERANCE`` 是**容差调整类**，不属于七类业务归因：它只在差异明细
+    里留痕（金额、阈值、证据齐全，可审计），不生成差异单、不计入归因准确率。
+    """
 
     UNIT_PRICE = "单价不一致"
     QTY = "数量不符"
@@ -244,6 +261,7 @@ class DiffType(str, Enum):
     TAX = "税率口径"
     MISSING_DOC = "缺单"
     DUPLICATE = "重复计费"
+    ROUNDING_TOLERANCE = "金额舍入容差"
 
 
 class DiffOwner(str, Enum):
@@ -287,9 +305,15 @@ class MissingItem:
 class Candidate:
     line: DocLine
     confidence: Decimal
+    # 低分原因：用于区分「单位不可换算（降权）」与「业务键相似度低」，供人工判断
+    reason: str = ""
 
     def to_dict(self) -> dict:
-        return {"ref": self.line.ref, "confidence": f"{self.confidence:.2f}"}
+        return {
+            "ref": self.line.ref,
+            "confidence": f"{self.confidence:.2f}",
+            "reason": self.reason,
+        }
 
 
 @dataclass(frozen=True)
@@ -397,6 +421,8 @@ class MatchResultLine:
     candidates: tuple[Candidate, ...] = ()
     diffs: tuple[DiffItem, ...] = ()
     note: str = ""
+    # 聚合匹配时覆盖的我方行（拆单为 1 个、合并为多个），便于人工复核区分
+    aggregate_refs: tuple[str, ...] = ()
 
     @property
     def needs_manual(self) -> bool:
@@ -421,6 +447,7 @@ class MatchResultLine:
             "supplier_ref": self.supplier_ref,
             "candidates": [c.to_dict() for c in self.candidates],
             "diffs": [d.to_dict() for d in self.diffs],
+            "aggregate_refs": list(self.aggregate_refs),
             "needs_manual": self.needs_manual,
             "note": self.note,
         }
@@ -439,6 +466,13 @@ class ReconMetrics:
     diff_amount: Decimal
     suspected_anomaly: bool
     auto_disposal_allowed: bool
+    # 聚合匹配行数（拆单/合并）
+    aggregated: int = 0
+    # 舍入容差行数与金额（仅在明细里留痕，不计入七类归因/差异单）
+    rounding_lines: int = 0
+    rounding_amount: Decimal = Decimal(0)
+    # 舍入差累计是否超限，超限时整批转人工
+    rounding_escalated: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -453,6 +487,34 @@ class ReconMetrics:
             "diff_amount": f"{self.diff_amount:.4f}",
             "suspected_anomaly": self.suspected_anomaly,
             "auto_disposal_allowed": self.auto_disposal_allowed,
+            "aggregated": self.aggregated,
+            "rounding_lines": self.rounding_lines,
+            "rounding_amount": f"{self.rounding_amount:.4f}",
+            "rounding_escalated": self.rounding_escalated,
+        }
+
+
+@dataclass(frozen=True)
+class ParseIssue:
+    """行内金额/数量无法解析：留下行号与原值，供人工核对，绝不静默当 0。"""
+
+    ref: str
+    side: str  # "our" | "supplier"
+    field: str
+    raw: str
+    supplier_code: str = ""
+    doc_no: str = ""
+    line_no: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "ref": self.ref,
+            "side": self.side,
+            "field": self.field,
+            "raw": self.raw,
+            "supplier_code": self.supplier_code,
+            "doc_no": self.doc_no,
+            "line_no": self.line_no,
         }
 
 
@@ -464,6 +526,8 @@ class ReconRequest:
     supplier_lines: tuple[DocLine, ...]
     master_data: MasterData
     tolerance: Tolerance = field(default_factory=Tolerance)
+    # 解析失败的行（loader 采集，引擎据此做行级降级，不向外抛异常）
+    parse_issues: tuple[ParseIssue, ...] = ()
 
 
 @dataclass(frozen=True)
