@@ -5,12 +5,11 @@
 
 from __future__ import annotations
 
-from typing import Iterator
+from collections.abc import Iterator
 
 import pytest
-from fastapi.testclient import TestClient
-
 from e2e_support import E2E_PREFIX, Harness, build_harness_app
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture()

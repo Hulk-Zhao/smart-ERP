@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from apps.audit.store import (
@@ -35,7 +36,7 @@ from apps.platform.contracts.audit import (
 class AuditChainError(Exception):
     """哈希链/锚点校验失败：按安全事件处理，不自动修复。"""
 
-    def __init__(self, message: str, verification: "ChainVerification | None" = None) -> None:
+    def __init__(self, message: str, verification: ChainVerification | None = None) -> None:
         super().__init__(message)
         self.verification = verification
 
@@ -139,7 +140,7 @@ class AuditLedger:
     ) -> None:
         self._store = store or InMemoryAuditStore()
         self._snapshots = snapshots or InMemorySnapshotStore()
-        self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     @property
     def store(self) -> AuditStore:
@@ -321,8 +322,8 @@ def _as_utc(value: datetime) -> datetime:
     """哈希含 created_at 的字符串形态，必须统一到 UTC，避免 PG 往返后时区漂移。"""
 
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _normalize_diff(

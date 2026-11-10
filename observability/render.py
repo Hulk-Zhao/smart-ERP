@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from observability.trace import Span, Trace
 
@@ -128,8 +128,10 @@ def render_trace(source: Trace | Sequence[Span], *, include_events: bool = False
     duration = sum(span.duration_ms or 0.0 for span in spans)
 
     lines = [
-        f"trace {trace_id} ticket={ticket_id} agent={agent} "
-        f"spans={len(spans)} status={status} duration={duration:.1f}ms"
+        (
+            f"trace {trace_id} ticket={ticket_id} agent={agent} "
+            f"spans={len(spans)} status={status} duration={duration:.1f}ms"
+        )
     ]
 
     by_id = {span.span_id: span for span in spans}

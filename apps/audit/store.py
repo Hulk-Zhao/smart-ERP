@@ -124,9 +124,7 @@ class InMemoryAuditStore:
             return False
         if query.since is not None and image.created_at < query.since:
             return False
-        if query.until is not None and image.created_at > query.until:
-            return False
-        return True
+        return query.until is None or image.created_at <= query.until
 
 
 class SqlAuditStore:

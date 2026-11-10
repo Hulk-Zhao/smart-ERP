@@ -17,9 +17,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Callable, Literal
+from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from apps.platform.connectors.sdk import ConnectorMeta
@@ -133,7 +134,7 @@ class TokenBroker:
             raise ValueError("令牌 TTL 必须为正")
         self._session_ttl = session_ttl
         self._lease_ttl = lease_ttl
-        self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._clock = clock or (lambda: datetime.now(UTC))
         self._degradations: list[DegradationRecord] = []
 
     @property
@@ -235,6 +236,6 @@ def connector_security_level(meta: ConnectorMeta) -> Literal["A", "B"]:
 
 
 def _utc(value: datetime) -> datetime:
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(
-        timezone.utc
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(
+        UTC
     )

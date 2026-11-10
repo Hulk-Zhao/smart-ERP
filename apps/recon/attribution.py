@@ -9,17 +9,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Optional
 
 from .models import (
     MIN_CONFIDENCE,
+    MONEY_EXP,
     DiffItem,
     DiffOwner,
     DiffType,
     DocLine,
     Evidence,
     MatchPair,
-    MONEY_EXP,
     Money,
     Tolerance,
     UnattributedItem,
@@ -29,13 +28,13 @@ from .models import (
 # 差异金额占本行金额超过该比例 → 疑似数据异常，阻断自动处置（FR-104 异常）
 ANOMALY_LINE_RATIO = Decimal("0.20")
 # 数量差超过我方数量 10 倍 → 疑似数据异常
-ANOMALY_QTY_MULTIPLE = Decimal("10")
+ANOMALY_QTY_MULTIPLE = Decimal(10)
 
 
 @dataclass
 class PairAttribution:
     diffs: list[DiffItem] = field(default_factory=list)
-    unattributed: Optional[UnattributedItem] = None
+    unattributed: UnattributedItem | None = None
     suspected_anomaly: bool = False
 
     @property
@@ -45,7 +44,7 @@ class PairAttribution:
         return any(diff.needs_manual for diff in self.diffs)
 
 
-def effective_price(line: DocLine) -> Optional[Decimal]:
+def effective_price(line: DocLine) -> Decimal | None:
     """单价缺失时可由 金额 / 数量 反算（算术推导，不是猜测）。"""
     if line.unit_price is not None:
         return line.unit_price
@@ -54,7 +53,7 @@ def effective_price(line: DocLine) -> Optional[Decimal]:
     return None
 
 
-def effective_amount(line: DocLine) -> Optional[Money]:
+def effective_amount(line: DocLine) -> Money | None:
     if line.amount is not None:
         return line.amount
     price = effective_price(line)
@@ -69,20 +68,20 @@ def _evidence(our: DocLine, supplier: DocLine, our_field: str, sup_field: str) -
     return (our.evidence(our_field), supplier.evidence(sup_field))
 
 
-def _suspected(amount_diff: Decimal, amount_mine: Decimal, qty_diff: Optional[Decimal], qty_mine: Optional[Decimal]) -> bool:
+def _suspected(amount_diff: Decimal, amount_mine: Decimal, qty_diff: Decimal | None, qty_mine: Decimal | None) -> bool:
     if amount_mine != 0 and abs(amount_diff) / abs(amount_mine) > ANOMALY_LINE_RATIO:
         return True
-    if qty_diff is not None and qty_mine:
-        if abs(qty_diff) / abs(qty_mine) > ANOMALY_QTY_MULTIPLE:
-            return True
-    return False
+    qty_out_of_range = (
+        qty_diff is not None and qty_mine and abs(qty_diff) / abs(qty_mine) > ANOMALY_QTY_MULTIPLE
+    )
+    return bool(qty_out_of_range)
 
 
 def attribute_pair(
     pair: MatchPair,
     tolerance: Tolerance,
-    supplier_qty: Optional[Decimal],
-    supplier_price: Optional[Decimal] = None,
+    supplier_qty: Decimal | None,
+    supplier_price: Decimal | None = None,
 ) -> PairAttribution:
     """对一对已匹配行做差异计算与归因。
 
@@ -125,7 +124,6 @@ def attribute_pair(
 
     qty_bad = abs(qty_diff) > tolerance.qty
     price_bad = abs(price_diff) > tolerance.price
-    amount_bad = abs(amount_diff.amount) > tolerance.amount
 
     result.suspected_anomaly = _suspected(
         amount_diff.amount, amount_mine_amount, qty_diff, qty_mine

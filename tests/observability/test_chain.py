@@ -5,8 +5,15 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from apps.platform.policy.gateway import WriteGateway
+from observability_support import (
+    PAYLOAD,
+    SCENE,
+    AllowAll,
+    FakeConnector,
+    make_action,
+)
 
+from apps.platform.policy.gateway import WriteGateway
 from observability import (
     CHAIN_PHASES,
     TracedConnector,
@@ -14,14 +21,6 @@ from observability import (
     build_decision_chain,
     render_decision_chain,
     render_trace,
-)
-
-from observability_support import (
-    PAYLOAD,
-    SCENE,
-    AllowAll,
-    FakeConnector,
-    make_action,
 )
 
 
@@ -110,7 +109,7 @@ def test_trace_tree_is_readable_and_nested() -> None:
     assert any("gateway.compensate" in line for line in lines)
 
     write_line = next(line for line in lines if "gateway.write" in line)
-    assert write_line.startswith("│  ├─") or write_line.startswith("│  └─")
+    assert write_line.startswith(("│  ├─", "│  └─"))
     assert "external_id=EXT-1" in write_line
 
 

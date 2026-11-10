@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from observability.trace import normalize
@@ -43,7 +43,7 @@ class UsageRecord:
     calls: int = 1
     duration_ms: float = 0.0
     trace_id: str | None = None
-    recorded_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    recorded_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
 
     def __post_init__(self) -> None:
         if not self.ticket_id.strip():

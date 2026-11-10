@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from collections import deque
 from decimal import Decimal
-from typing import Optional
 
 from .models import (
     DocLine,
@@ -22,10 +21,10 @@ from .models import (
 
 def conversion_factor(
     master_data: MasterData,
-    item_code: Optional[str],
-    from_unit: Optional[str],
-    to_unit: Optional[str],
-) -> Optional[Decimal]:
+    item_code: str | None,
+    from_unit: str | None,
+    to_unit: str | None,
+) -> Decimal | None:
     """返回 from_unit → to_unit 的乘数；换算关系缺失返回 None（不猜）。"""
     if not from_unit or not to_unit:
         return None
@@ -65,7 +64,7 @@ def conversion_factor(
     return None
 
 
-def _line_missing(line: DocLine) -> Optional[str]:
+def _line_missing(line: DocLine) -> str | None:
     if not line.item_code:
         return "缺少物料编码"
     if line.qty is None:

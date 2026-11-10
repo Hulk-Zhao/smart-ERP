@@ -5,7 +5,17 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+from security_support import (
+    ADMIN,
+    APPROVER,
+    CFO,
+    INITIATOR,
+    NOW,
+    REVIEWER,
+    principal,
+)
 
+from apps.platform.policy.levels import WriteLevel
 from apps.security.approvals import (
     ApprovalGateAdapter,
     ApprovalService,
@@ -17,16 +27,6 @@ from apps.security.approvals import (
     ThresholdBelowFloor,
     TicketFacts,
     W3NotApprovable,
-)
-from apps.platform.policy.levels import WriteLevel
-from security_support import (
-    ADMIN,
-    APPROVER,
-    CFO,
-    INITIATOR,
-    NOW,
-    REVIEWER,
-    principal,
 )
 
 
@@ -120,9 +120,9 @@ def test_amount_thresholds_derive_approval_chain():
 
 def test_threshold_below_g04_floor_is_rejected():
     with pytest.raises(ThresholdBelowFloor):
-        ApprovalThresholds(dual_amount=Decimal("90000"))
+        ApprovalThresholds(dual_amount=Decimal(90000))
     with pytest.raises(ThresholdBelowFloor):
-        ApprovalThresholds(cfo_amount=Decimal("400000"))
+        ApprovalThresholds(cfo_amount=Decimal(400000))
 
 
 def test_dual_review_requires_two_distinct_approvers():
@@ -196,7 +196,7 @@ def test_gateway_adapter_denies_unknown_ticket():
         service,
         {
             "T-1": TicketFacts(
-                amount=Decimal("1000"), touches_fund=False, initiator_id=INITIATOR
+                amount=Decimal(1000), touches_fund=False, initiator_id=INITIATOR
             )
         },
     )

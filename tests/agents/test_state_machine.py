@@ -6,9 +6,6 @@ from decimal import Decimal
 
 import pytest
 
-from apps.platform.contracts.errors import ErrorCode
-from apps.platform.contracts.ticket import TRANSITION_EDGES, TicketState
-
 from apps.agents.state_machine import (
     TRANSITION_RULES,
     GuardViolationError,
@@ -19,6 +16,8 @@ from apps.agents.state_machine import (
     resolve_transition,
     transition_contract,
 )
+from apps.platform.contracts.errors import ErrorCode
+from apps.platform.contracts.ticket import TRANSITION_EDGES, TicketState
 
 
 def test_runtime_table_matches_contract_edges() -> None:

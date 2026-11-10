@@ -10,8 +10,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from decimal import Decimal
-from typing import Iterable, Optional
 
 from .attribution import (
     attribute_pair,
@@ -33,7 +33,6 @@ from .models import (
     MatchPair,
     MatchResultLine,
     MatchType,
-    Money,
     ReconMetrics,
     ReconRequest,
     ReconResult,
@@ -75,7 +74,7 @@ def _detect_duplicates(
 
 def _supplier_in_our_unit(
     pair: MatchPair, request: ReconRequest
-) -> tuple[Optional[Decimal], Optional[Decimal]]:
+) -> tuple[Decimal | None, Decimal | None]:
     """把供应商数量/单价换算到我方单位口径；换算缺失返回 (None, None)。"""
     our, supplier = pair.our, pair.supplier
     if supplier.qty is None:
@@ -388,4 +387,4 @@ def empty_result(reason: str = "无输入行") -> ReconResult:
     )
 
 
-__all__ = ["reconcile", "empty_result"]
+__all__ = ["empty_result", "reconcile"]

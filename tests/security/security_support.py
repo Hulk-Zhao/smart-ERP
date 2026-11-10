@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from apps.platform.connectors.sdk import ConnectorMeta
 from apps.security.identity import TokenBroker, UserPrincipal
 from apps.security.scope import Scope, ScopeGrant
 
-NOW = datetime(2026, 11, 10, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
 
 TENANT = UUID("11111111-1111-1111-1111-111111111111")
 INITIATOR = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")

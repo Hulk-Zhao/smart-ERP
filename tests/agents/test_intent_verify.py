@@ -5,12 +5,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 
-from apps.platform.contracts.ticket import TicketState
-
-from apps.agents.runtime import PlannedStep
-
 from dbutil import db_env, prepare_executing
 from support import SCENE, ScriptedConnector, build_runtime, make_action
+
+from apps.agents.runtime import PlannedStep
+from apps.platform.contracts.ticket import TicketState
 
 PAYLOAD = {"supplier": "SUP-1", "amount": "10.00"}
 

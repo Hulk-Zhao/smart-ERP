@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Optional
 
 from .models import (
     AMBIGUITY_GAP,
@@ -40,7 +39,7 @@ class MatchOutcome:
     unmatched_our: list[DocLine] = field(default_factory=list)
 
 
-def _normalize_name(value: Optional[str]) -> str:
+def _normalize_name(value: str | None) -> str:
     if not value:
         return ""
     return "".join(value.split()).upper()
@@ -54,7 +53,7 @@ def _similarity(left: Decimal, right: Decimal) -> Decimal:
     return max(Decimal(0), Decimal(1) - ratio)
 
 
-def score_pair(our: DocLine, supplier: DocLine) -> Optional[Decimal]:
+def score_pair(our: DocLine, supplier: DocLine) -> Decimal | None:
     """业务键相似度；物料不可比（编码与名称都对不上）返回 None，不做跨物料匹配。"""
     if our.supplier_code != supplier.supplier_code:
         return None

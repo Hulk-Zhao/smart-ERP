@@ -12,9 +12,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Callable, Mapping
 
 from apps.platform.contracts.errors import ErrorCode
 from apps.platform.contracts.ticket import TRANSITION_EDGES, TicketState
@@ -61,7 +61,7 @@ class TransitionContext:
     compensation_failed: int = 0
 
     @classmethod
-    def from_mapping(cls, values: Mapping[str, object]) -> "TransitionContext":
+    def from_mapping(cls, values: Mapping[str, object]) -> TransitionContext:
         known = {field for field in cls.__dataclass_fields__}
         data = {key: value for key, value in values.items() if key in known}
         if isinstance(data.get("deviation_ratio"), str):
@@ -71,7 +71,7 @@ class TransitionContext:
         return cls(**data)  # type: ignore[arg-type]
 
     @classmethod
-    def of_steps(cls, states: tuple[str, ...], **kwargs: object) -> "TransitionContext":
+    def of_steps(cls, states: tuple[str, ...], **kwargs: object) -> TransitionContext:
         return cls(step_states=states, **kwargs)  # type: ignore[arg-type]
 
 

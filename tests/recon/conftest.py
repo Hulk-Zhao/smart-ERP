@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from apps.recon.loader import build_request  # noqa: E402
+from apps.recon.loader import build_request
 
 SCENARIO_DIR = ROOT / "fixtures" / "recon"
 

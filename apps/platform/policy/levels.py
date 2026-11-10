@@ -19,7 +19,7 @@ class WriteLevel(IntEnum):
     W3 = 3  # 资金/过账/认证：只识别、只拒绝，永不执行
 
     @classmethod
-    def parse(cls, value: "WriteLevel | int | str") -> "WriteLevel":
+    def parse(cls, value: WriteLevel | int | str) -> WriteLevel:
         if isinstance(value, WriteLevel):
             return value
         if isinstance(value, int) and not isinstance(value, bool):

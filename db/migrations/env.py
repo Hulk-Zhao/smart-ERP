@@ -16,8 +16,8 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import pool, text
 
-from apps.platform.db.base import SCHEMA, Base
 from apps.platform.db import models  # noqa: F401  注册表模型
+from apps.platform.db.base import SCHEMA, Base
 
 config = context.config
 

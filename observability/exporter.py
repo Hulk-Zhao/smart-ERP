@@ -47,12 +47,11 @@ class JsonlExporter:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             line = json.dumps(span.to_dict(), ensure_ascii=False, separators=(",", ":"))
-            with self._lock:
-                with self._path.open("a", encoding="utf-8") as handle:
-                    handle.write(line + "\n")
-                    if self._fsync:
-                        handle.flush()
-                        os.fsync(handle.fileno())
+            with self._lock, self._path.open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+                if self._fsync:
+                    handle.flush()
+                    os.fsync(handle.fileno())
         except OSError as exc:  # pragma: no cover - 磁盘异常不可在单测里稳定复现
             self._errors.append(f"{type(exc).__name__}: {exc}")
 

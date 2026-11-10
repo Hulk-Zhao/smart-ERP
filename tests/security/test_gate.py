@@ -6,6 +6,17 @@ from dataclasses import replace
 from decimal import Decimal
 
 import pytest
+from security_support import (
+    APPROVER,
+    INITIATOR,
+    NOW,
+    REVIEWER,
+    grant,
+    meta_a,
+    meta_b,
+    principal,
+    scope,
+)
 
 from apps.platform.policy.levels import WriteLevel
 from apps.security.approvals import ApprovalService
@@ -18,17 +29,6 @@ from apps.security.gate import (
 )
 from apps.security.identity import TokenBroker
 from apps.security.scope import Scope, ScopeViolation
-from security_support import (
-    APPROVER,
-    INITIATOR,
-    NOW,
-    REVIEWER,
-    grant,
-    meta_a,
-    meta_b,
-    principal,
-    scope,
-)
 
 
 def _gate() -> tuple[AccessGate, ApprovalService, TokenBroker]:
@@ -55,7 +55,7 @@ def _request(broker: TokenBroker, **overrides) -> AccessRequest:
         connector_meta=meta_a(),
         ticket_id="T-1",
         level=WriteLevel.W1,
-        amount=Decimal("1000"),
+        amount=Decimal(1000),
     )
     return replace(base, **overrides)
 

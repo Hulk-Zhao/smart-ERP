@@ -11,8 +11,8 @@ PG15 语法；不使用 ``any_value()`` / ``MERGE ... RETURNING`` 等 PG16 特�
 
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 from apps.platform.contracts.ticket import STEP_STATES, TICKET_STATES, TRANSITION_EDGES

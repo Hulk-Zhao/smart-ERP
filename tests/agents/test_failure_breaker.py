@@ -4,15 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from apps.platform.contracts.errors import ErrorCode
-from apps.platform.policy.gateway import (
-    ApprovalRequiredError,
-    PreviewFailedError,
-    VerifyMismatchError,
-    BreakerState,
-)
-from apps.platform.policy.levels import WriteLevel
-
 from apps.agents.breaker import BreakerPolicy, CircuitBreaker
 from apps.agents.failure import (
     FAILURES,
@@ -21,6 +12,14 @@ from apps.agents.failure import (
     classify_exception,
     failure_of,
 )
+from apps.platform.contracts.errors import ErrorCode
+from apps.platform.policy.gateway import (
+    ApprovalRequiredError,
+    BreakerState,
+    PreviewFailedError,
+    VerifyMismatchError,
+)
+from apps.platform.policy.levels import WriteLevel
 
 
 def test_all_eight_failures_declared() -> None:

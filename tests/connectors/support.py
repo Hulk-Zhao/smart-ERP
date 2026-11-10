@@ -7,20 +7,18 @@ import json
 import random
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 from apps.connectors.u8.actions import PO_CREATE_DRAFT
 from apps.connectors.u8.factory import AllowAllApprovals, U8Stack, build_u8_stack
 from apps.connectors.u8.mock import MockU8Backend
 from apps.platform.policy.levels import SceneSpec, WriteLevel
 
-T = TypeVar("T")
-
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "fixtures" / "connectors" / "u8"
 
 
-def run(coro: Awaitable[T]) -> T:
+def run[T](coro: Awaitable[T]) -> T:
     """仓库没有 pytest-asyncio，统一用 asyncio.run（与 tests/platform 一致）。"""
 
     return asyncio.run(coro)  # type: ignore[arg-type]

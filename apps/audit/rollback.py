@@ -12,16 +12,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Mapping, Sequence
 from uuid import UUID
 
 from apps.audit.ledger import AuditLedger
+from apps.platform.contracts.audit import AuditImage
 from apps.platform.policy.gateway import WriteGateway
 from apps.platform.policy.levels import ActionSpec, SceneSpec, WriteLevel
 from apps.platform.policy.registry import ActionRegistry
-from apps.platform.contracts.audit import AuditImage
 
 AUTO_COMPENSATIONS: frozenset[str] = frozenset(
     {"delete_draft", "release_reservation", "cancel_request"}
@@ -335,7 +335,7 @@ def _default_payload(item: RollbackItem) -> Mapping[str, object]:
     fields = item.action.writable_fields
     if not fields:
         raise RollbackRejected(f"{item.action.key} 未声明可写字段，无法生成反向入参")
-    key = "draft_id" if "draft_id" in fields else sorted(fields)[0]
+    key = "draft_id" if "draft_id" in fields else min(fields)
     return {key: item.step.audit_image.object_id}
 
 

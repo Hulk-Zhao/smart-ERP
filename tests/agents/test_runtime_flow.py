@@ -5,19 +5,17 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
-from apps.platform.contracts.ticket import TicketState
-from apps.platform.policy.gateway import BreakerState
-from apps.platform.policy.levels import WriteLevel
+from dbutil import db_env, prepare_executing
+from support import ScriptedConnector, build_runtime, make_action
 
 from apps.agents.breaker import BreakerPolicy, CircuitBreaker
 from apps.agents.events import replay
 from apps.agents.runtime import PlannedStep
 from apps.agents.scenes import scene_of
 from apps.agents.shell import AgentShell, BreakerOpenError, SceneLevelExceeded
-
-from dbutil import db_env, prepare_executing
-from support import ScriptedConnector, build_runtime, make_action
+from apps.platform.contracts.ticket import TicketState
+from apps.platform.policy.gateway import BreakerState
+from apps.platform.policy.levels import WriteLevel
 
 RAW_INPUT = {
     "scene_code": "AG-1",

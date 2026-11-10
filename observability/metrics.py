@@ -19,8 +19,9 @@ from __future__ import annotations
 import math
 import re
 import threading
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 # ---------------------------------------------------------------- 冻结口径
 
@@ -82,7 +83,7 @@ def _escape_label(value: str) -> str:
     return "".join(_LABEL_ESCAPE.get(char, char) for char in value)
 
 
-def _format_value(value: float | int) -> str:
+def _format_value(value: float) -> str:
     number = float(value)
     if not math.isfinite(number):
         raise MetricError(f"指标值必须是有限数，实际 {value!r}")

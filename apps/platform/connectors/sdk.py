@@ -9,8 +9,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping, Protocol, Sequence
+from typing import Any, Literal, Protocol
 
 from apps.platform.connectors.transport import NullTransport, TransportRequest
 from apps.platform.policy.levels import ActionSpec, RateLimit, VerifySpec

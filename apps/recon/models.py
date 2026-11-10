@@ -8,10 +8,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from enum import Enum
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any
 
 # 金额存储精度：4 位小数（G-12）
 MONEY_EXP = Decimal("0.0001")
@@ -25,7 +26,7 @@ MIN_CONFIDENCE = Decimal("0.70")
 AMBIGUITY_GAP = Decimal("0.10")
 
 
-def to_decimal(value: Any, *, places: Optional[Decimal] = None) -> Optional[Decimal]:
+def to_decimal(value: Any, *, places: Decimal | None = None) -> Decimal | None:
     """把外部输入（str/int/float/Decimal）转成 Decimal；空值返回 None，绝不补 0。"""
     if value is None:
         return None
@@ -63,34 +64,34 @@ class Money:
         value: Any,
         currency: str = "CNY",
         tax_included: bool = True,
-    ) -> Optional["Money"]:
+    ) -> Money | None:
         amount = to_decimal(value, places=MONEY_EXP)
         if amount is None:
             return None
         return cls(amount=amount, currency=currency, tax_included=tax_included)
 
-    def _check_currency(self, other: "Money") -> None:
+    def _check_currency(self, other: Money) -> None:
         if self.currency != other.currency:
             raise ValueError(
                 f"币种不一致，无法直接相减: {self.currency} vs {other.currency}"
             )
 
-    def __sub__(self, other: "Money") -> "Money":
+    def __sub__(self, other: Money) -> Money:
         self._check_currency(other)
         return Money(self.amount - other.amount, self.currency, self.tax_included)
 
-    def __add__(self, other: "Money") -> "Money":
+    def __add__(self, other: Money) -> Money:
         self._check_currency(other)
         return Money(self.amount + other.amount, self.currency, self.tax_included)
 
-    def __neg__(self) -> "Money":
+    def __neg__(self) -> Money:
         return Money(-self.amount, self.currency, self.tax_included)
 
     def is_zero(self, tolerance: Decimal = EQUALITY_TOLERANCE) -> bool:
         return abs(self.amount) <= tolerance
 
     def nearly_equal(
-        self, other: "Money", tolerance: Decimal = EQUALITY_TOLERANCE
+        self, other: Money, tolerance: Decimal = EQUALITY_TOLERANCE
     ) -> bool:
         self._check_currency(other)
         return abs(self.amount - other.amount) <= tolerance
@@ -110,7 +111,7 @@ class Evidence:
     system: str
     doc_no: str
     field: str
-    coord: Optional[Mapping[str, Any]] = None
+    coord: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict:
         payload: dict = {
@@ -131,16 +132,16 @@ class DocLine:
     doc_no: str
     line_no: int
     supplier_code: str
-    item_code: Optional[str] = None
-    item_name: Optional[str] = None
-    qty: Optional[Decimal] = None
-    unit: Optional[str] = None
-    unit_price: Optional[Decimal] = None
-    amount: Optional[Money] = None
-    tax_rate: Optional[Decimal] = None
-    scrap_qty: Optional[Decimal] = None
-    period: Optional[str] = None
-    coord: Optional[Mapping[str, Any]] = None
+    item_code: str | None = None
+    item_name: str | None = None
+    qty: Decimal | None = None
+    unit: str | None = None
+    unit_price: Decimal | None = None
+    amount: Money | None = None
+    tax_rate: Decimal | None = None
+    scrap_qty: Decimal | None = None
+    period: str | None = None
+    coord: Mapping[str, Any] | None = None
 
     @property
     def ref(self) -> str:
@@ -159,8 +160,8 @@ class DocLine:
 class Scope:
     """G-05 / §5.0：任何任务必须带组织、期间、系统范围。"""
 
-    org_id: Optional[str]
-    period: Optional[str]
+    org_id: str | None
+    period: str | None
     system_ids: tuple[str, ...] = ()
 
 
@@ -169,15 +170,15 @@ class SupplierMaster:
     code: str
     name: str
     aliases: tuple[str, ...] = ()
-    tax_no: Optional[str] = None
+    tax_no: str | None = None
 
 
 @dataclass(frozen=True)
 class ItemMaster:
     code: str
     name: str
-    base_unit: Optional[str] = None
-    spec: Optional[str] = None
+    base_unit: str | None = None
+    spec: str | None = None
 
 
 @dataclass(frozen=True)
@@ -196,12 +197,12 @@ class MasterData:
     items: Mapping[str, ItemMaster] = field(default_factory=dict)
     unit_conversions: tuple[UnitConversion, ...] = ()
 
-    def supplier(self, code: Optional[str]) -> Optional[SupplierMaster]:
+    def supplier(self, code: str | None) -> SupplierMaster | None:
         if not code:
             return None
         return self.suppliers.get(code)
 
-    def item(self, code: Optional[str]) -> Optional[ItemMaster]:
+    def item(self, code: str | None) -> ItemMaster | None:
         if not code:
             return None
         return self.items.get(code)
@@ -384,15 +385,15 @@ class UnattributedItem:
 
 @dataclass(frozen=True)
 class MatchResultLine:
-    item: Optional[str]
-    qty_mine: Optional[Decimal]
-    qty_supplier: Optional[Decimal]
-    amount: Optional[Money]
+    item: str | None
+    qty_mine: Decimal | None
+    qty_supplier: Decimal | None
+    amount: Money | None
     match_type: MatchType
     confidence: Decimal
     status: LineStatus
-    our_ref: Optional[str] = None
-    supplier_ref: Optional[str] = None
+    our_ref: str | None = None
+    supplier_ref: str | None = None
     candidates: tuple[Candidate, ...] = ()
     diffs: tuple[DiffItem, ...] = ()
     note: str = ""
@@ -475,7 +476,7 @@ class ReconResult:
     diffs: tuple[DiffItem, ...] = ()
     unattributed: tuple[UnattributedItem, ...] = ()
     discrepancy_drafts: tuple[DiscrepancyDraft, ...] = ()
-    metrics: Optional[ReconMetrics] = None
+    metrics: ReconMetrics | None = None
     evidence: tuple[Evidence, ...] = ()
 
     def to_dict(self) -> dict:

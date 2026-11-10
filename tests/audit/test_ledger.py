@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
+from audit_support import TENANT, TICKET, run
 
 from apps.audit.ledger import (
     AuditChainError,
@@ -21,7 +22,6 @@ from apps.platform.contracts.audit import (
     compute_image_hash,
     verify_chain,
 )
-from audit_support import TENANT, TICKET, run
 
 
 def _append(ledger: AuditLedger, *, ticket: UUID = TICKET, hour: int = 10, step: UUID | None = None):
@@ -35,13 +35,13 @@ def _append(ledger: AuditLedger, *, ticket: UUID = TICKET, hour: int = 10, step:
             object_id=f"D-{hour}",
             before={"amount": "100.00", "status": "new"},
             after={"amount": "120.00", "status": "draft"},
-            created_at=datetime(2026, 11, 10, hour, 0, tzinfo=timezone.utc),
+            created_at=datetime(2026, 11, 10, hour, 0, tzinfo=UTC),
         )
     )
 
 
 def test_hash_chain_is_verifiable_and_matches_contract():
-    ledger = AuditLedger(clock=lambda: datetime(2026, 11, 10, tzinfo=timezone.utc))
+    ledger = AuditLedger(clock=lambda: datetime(2026, 11, 10, tzinfo=UTC))
     first = _append(ledger, hour=10)
     second = _append(ledger, hour=11)
     third = _append(ledger, hour=12)
@@ -73,7 +73,7 @@ def test_field_diff_and_snapshots_are_stored():
 
 
 def test_db_roundtrip_preserves_hash_for_decimal_and_datetime_values():
-    ledger = AuditLedger(clock=lambda: datetime(2026, 11, 10, 12, tzinfo=timezone.utc))
+    ledger = AuditLedger(clock=lambda: datetime(2026, 11, 10, 12, tzinfo=UTC))
     image = run(
         ledger.append_image(
             tenant_id=TENANT,
@@ -144,8 +144,8 @@ def test_search_by_ticket_step_and_time_range():
         ledger.list_images(
             AuditQuery(
                 tenant_id=TENANT,
-                since=datetime(2026, 11, 10, 10, 30, tzinfo=timezone.utc),
-                until=datetime(2026, 11, 10, 11, 30, tzinfo=timezone.utc),
+                since=datetime(2026, 11, 10, 10, 30, tzinfo=UTC),
+                until=datetime(2026, 11, 10, 11, 30, tzinfo=UTC),
             )
         )
     )
@@ -226,7 +226,7 @@ def test_append_is_immutable_and_fork_is_rejected():
 
 
 def test_daily_anchor_detects_truncation():
-    fixed = datetime(2026, 11, 10, 23, 0, tzinfo=timezone.utc)
+    fixed = datetime(2026, 11, 10, 23, 0, tzinfo=UTC)
     ledger = AuditLedger(clock=lambda: fixed)
     _append(ledger, hour=10)
     _append(ledger, hour=11)

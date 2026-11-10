@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from apps.platform.contracts.audit import (
@@ -28,7 +28,7 @@ def _image(prev_hash: str, before: str, after: str) -> AuditImage:
         "diff_missing": False,
         "prev_hash": prev_hash,
         "hash": "0" * 64,
-        "created_at": datetime(2026, 11, 10, tzinfo=timezone.utc),
+        "created_at": datetime(2026, 11, 10, tzinfo=UTC),
     }
     image = AuditImage.model_validate(payload)
     digest = compute_image_hash(prev_hash, image.model_dump(mode="python"))

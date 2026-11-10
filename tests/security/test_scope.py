@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from security_support import grant, scope
 
 from apps.security.scope import (
     Scope,
@@ -12,7 +13,6 @@ from apps.security.scope import (
     intersect_grants,
     merge_grants,
 )
-from security_support import grant, scope
 
 
 @pytest.mark.parametrize(

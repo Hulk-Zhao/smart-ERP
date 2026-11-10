@@ -87,7 +87,7 @@ def test_low_confidence_stays_candidate_and_never_auto_passes(make_request, make
 
     assert outcome.pairs == []
     assert len(outcome.candidate_only) == 1
-    supplier, candidates = outcome.candidate_only[0]
+    _supplier, candidates = outcome.candidate_only[0]
     assert candidates[0].confidence < Decimal("0.70")
 
     result = reconcile(request)

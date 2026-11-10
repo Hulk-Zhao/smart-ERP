@@ -7,16 +7,14 @@ import hashlib
 import uuid
 
 import pytest
+from dbutil import db_env, prepare_executing
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
-
-from apps.platform.contracts.ticket import TicketState
+from support import SCENE, ScriptedConnector, build_runtime, make_action
 
 from apps.agents.runtime import PlannedStep
 from apps.agents.state_machine import TransitionContext
-
-from dbutil import db_env, prepare_executing
-from support import SCENE, ScriptedConnector, build_runtime, make_action
+from apps.platform.contracts.ticket import TicketState
 
 PAYLOAD = {"supplier": "SUP-1", "amount": "10.00"}
 

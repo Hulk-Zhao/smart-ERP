@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
-from typing import Generic, TypeVar
 
 from apps.connectors.canonical.models import (
     CanonicalRecord,
@@ -19,8 +18,6 @@ from apps.connectors.canonical.models import (
     MissingReason,
 )
 from apps.platform.contracts.canonical import Money
-
-T = TypeVar("T", bound=CanonicalRecord)
 
 AMOUNT_TOLERANCE = Decimal("0.01")  # G-12：比较时按容差 0.01 判定相等
 
@@ -44,7 +41,7 @@ class MappingContext:
 
 
 @dataclass
-class MappingOutcome(Generic[T]):
+class MappingOutcome[T: CanonicalRecord]:
     record: T | None
     issues: list[MissingField] = field(default_factory=list)
     blocked: bool = False

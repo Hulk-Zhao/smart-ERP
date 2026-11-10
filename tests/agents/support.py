@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
+from apps.agents.failure import TransientWriteError
+from apps.agents.runtime import TicketRuntime
 from apps.platform.connectors.sdk import (
     CapabilitySet,
     CompensateResult,
@@ -26,9 +29,6 @@ from apps.platform.policy.levels import (
     VerifySpec,
     WriteLevel,
 )
-
-from apps.agents.failure import TransientWriteError
-from apps.agents.runtime import TicketRuntime
 
 
 class ExternalEffectiveError(Exception):

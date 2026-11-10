@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Deque
 
 from apps.platform.policy.gateway import BREAKER_CAP, BreakerState
 from apps.platform.policy.levels import WriteLevel
@@ -40,7 +40,7 @@ class _Sample:
 
 @dataclass(slots=True)
 class _SceneSamples:
-    samples: Deque[_Sample] = field(default_factory=deque)
+    samples: deque[_Sample] = field(default_factory=deque)
     f6_streak: dict[str, int] = field(default_factory=dict)
 
 
