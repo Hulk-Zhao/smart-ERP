@@ -54,6 +54,8 @@ BASELINE_TABLES: frozenset[str] = frozenset(
         # 0005_worker_runtime
         "erp.worker_heartbeat",
         "erp.scheduler_lease",
+        # 0008_metering_price_book
+        "erp.metering_price_book",
     }
 )
 
