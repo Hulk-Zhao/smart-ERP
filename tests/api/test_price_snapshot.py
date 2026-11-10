@@ -125,6 +125,38 @@ def test_require_contract_price_without_price_returns_price_missing(env, monkeyp
     assert [call[1] for call in fake.calls] == ["CNY"]
 
 
+def test_price_503_is_counted_as_failure_without_faking_a_batch(env, monkeypatch):
+    """取价 503 与 metrics 计数必须在同一个请求里同时生效。
+
+    判断：**必须计入**。若不计，缺价请求既不在 ``recon_batches_total`` 里、也不在
+    ``recon_runs_failed_total`` 里，正好复现 #65 要修的「请求消失了」盲区。
+    ``stage`` 记 ``persist`` 而不是新增词表：``RECON_FAILURE_STAGES`` 是 #65 已合入的
+    封闭词表（input/engine/persist），stage 表示请求走到哪一步、code 表示为什么失败；
+    取价发生在 persist 阶段（快照已构造、落库前取价），原因由 ``E-PRICE-MISSING`` 标明。
+    """
+
+    monkeypatch.setenv("ERP_METERING_REQUIRE_CONTRACT_PRICE", "true")
+    monkeypatch.setenv("ERP_METERING_CURRENCY", "CNY")
+    env.container.price_book = FakePriceBook()
+
+    response = env.client.post(
+        f"{PREFIX}/recon/runs",
+        json=_body(env),
+        headers=env.headers("initiator", "k-price-metrics"),
+    )
+
+    assert response.status_code == 503, response.text
+    assert response.json()["code"] == "E-PRICE-MISSING"
+    assert env.container.metrics.recon_runs_failed_total.value(
+        stage="persist", code="E-PRICE-MISSING"
+    ) == 1
+    # 失败不冒充批次：结果计数保持为 0（与 #65 的失败用例同一口径）。
+    assert sum(
+        env.container.metrics.recon_batches_total.value(result=label)
+        for label in ("matched", "pending_manual", "unreconcilable")
+    ) == 0
+
+
 def test_currency_mismatch_is_a_distinct_code_and_does_not_leak_prices(env, monkeypatch):
     monkeypatch.setenv("ERP_METERING_REQUIRE_CONTRACT_PRICE", "true")
     monkeypatch.setenv("ERP_METERING_CURRENCY", "CNY")
