@@ -1,6 +1,6 @@
 # 观测层（S7）｜埋点约定、trace 还原与成本归因
 
-面向排障与验收的最小观测实现：**一个工单 = 一条 trace**，能看到「决策 → 预演 → 写入 → 校验 → 补偿」五段，能按工单 / Agent / 步骤算调用次数与耗时。
+面向排障与验收的最小观测实现：**一个工单 = 一条 trace**，能看到「决策 → 预演 → 写入 → 校验 → 补偿」五段，能按工单 / Agent / 步骤算调用次数与耗时；同时把 trace 折算成 Prometheus 指标、配套告警规则与 SLO 草案，供监控系统消费。
 
 不接 SaaS APM、不启动外部服务、不引第三方依赖（标准库实现）。导出只写本地 JSON Lines。
 
@@ -145,25 +145,178 @@ ledger.llm_usage_rows()   # 结构对齐 llm_usage 表
 
 ---
 
-## 6. 指标口径基础
+## 6. 指标映射与 `/metrics`
 
-NFR-O-01 需要的维度已由 span 属性覆盖：`ticket_id / agent / step_no / level / system / action_key / status / duration_ms`。
+指标在**标准库**里实现 Prometheus text exposition format 0.0.4，没有引入 `prometheus_client`（许可证与体积未报备前不新增依赖）。
 
-- Agent 成功率：`status != error` 的 `ticket.step` 占比（`rejected` 单独统计，避免把策略拒绝算成故障）；
-- 时延：`gateway.write` / `gateway.verify` 的 `duration_ms` 分布；
-- 越权与 W3：`status=rejected` + `reject_code` 计数（P0 告警输入）；
-- 连接器健康度、限流余量、熔断次数、队列积压：由各连接器 / worker 的端点与行数据提供，本包只提供埋点位。
+```python
+from observability import MetricsRegistry, install_metrics
 
-> 本里程碑未引入 OpenTelemetry SDK 与 `/metrics` 端口（避免新增第三方依赖、避免外网组件）。当前是**同语义的进程内 span 模型 + 本地 JSONL**；接 Prometheus / OTel Collector 时以本约定为唯一字段口径，不需要改业务埋点。
+registry = MetricsRegistry()
+mounted = install_metrics(app, registry)  # 默认读 ERP_METRICS_ENABLED，缺省不挂载
+if mounted:
+    log.info("metrics enabled at %s (internal only)", "/metrics")
+```
+
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `ERP_METRICS_ENABLED` | 关 | `1/true/yes/on` 才挂载；与 `ERP_TRACE_ENABLED` 同一原则，生产默认不暴露 |
+| `ERP_METRICS_PATH` | `/metrics` | 端点路径；必须先由反向代理/网络策略限定为内网 |
+
+`GET /metrics` 与 `HEAD` 返回文本，其他方法 405；不进入 OpenAPI schema。`apps/` 由其他流维护，本层只提供 `install_metrics()`，由接入方在装配处显式调用。
+
+### 6.0 暴露面：只允许内网
+
+- `/metrics` 是内部运维接口，**不得随业务公网端口发布**。开启后若挂在业务 app 上，它会继承业务端口的全部暴露面。
+- 反向代理**不得**把 `/metrics` 转发到公网。本仓库业务入口是 hk-web 的 nginx（`/erp/api/ → 127.0.0.1:8010`），因此 nginx 必须显式拒绝该路径：
+
+```nginx
+location = /erp/api/metrics { deny all; }   # 或 return 404;
+```
+
+- 本仓库现状（`deploy/smart-erp/docker-compose.yml`，main `e78422c`）：
+  - api 的发布是 `"${ERP_API_BIND:-127.0.0.1}:${ERP_API_PORT:-8010}:8010"`，**默认只绑回环**，宿主不监听 `0.0.0.0`；
+  - 公网流量只能经 hk-web 的 nginx 进入，所以 `/metrics` 的实际控制点是 **nginx 的 location 规则**，不是安全组；
+  - 若显式设置 `ERP_API_BIND=0.0.0.0`（演示机宿主直连），`/metrics` 就会落到宿主可达网络，此时**不得开启** `ERP_METRICS_ENABLED`；
+  - `ERP_METRICS_PORT` / 8011 独立监听在 `e1926cf` 已作为死键删除，**不存在**单独 metrics 端口，不要再按旧文档配置。
+- 推荐拓扑（任选其一）：
+  1. **同网络内抓取**（首选）：Prometheus 容器加入 `smart-erp-net`，直接抓 `api:8010/metrics`。容器端口 8010 在栈内本就可达，无需宿主发布，也不经过 nginx。
+  2. **宿主本地抓取**：Prometheus 跑在宿主上抓 `127.0.0.1:8010/metrics`，与默认回环绑定一致，公网不可达。
+  3. **经 nginx 暴露**：不推荐；如确需，必须 `deny` 上述精确 location，并在变更单里标注临时方案，不得作为长期配置。
+
+### 6.1 指标清单
+
+| 指标 | 类型 | 标签 | 多副本聚合 | 口径 |
+|---|---|---|---|---|
+| `smart_erp_tickets_total` | counter | `status`、`agent` | `sum()` / `sum by (status,agent)` | 工单终态计数；`status ∈ succeeded/failed/rejected`，`rejected` 是策略拒绝，独立于技术失败 |
+| `smart_erp_ticket_failures_total` | counter | `failure_class`、`agent` | `sum()` / `sum by (failure_class)` | 失败工单按 F1–F8 计数（口径见 PRD §5.0） |
+| `smart_erp_ticket_failures_unclassified_total` | counter | `agent` | `sum()` | 失败但未给 F 码的工单；这是**口径缺口**，应长期为 0 |
+| `smart_erp_write_stage_total` | counter | `stage` | `sum()` | `WriteGateway` 阶段执行次数，`stage ∈ preview/write/verify/compensate` |
+| `smart_erp_write_stage_failures_total` | counter | `stage` | `sum()` | 阶段失败次数（`error` 或 `rejected`），与上者相除即失败率 |
+| `smart_erp_write_stage_duration_seconds` | histogram | `stage` | 先 `sum by (le)` 再 `histogram_quantile` | 阶段耗时（秒），默认桶 5ms–10s |
+| `smart_erp_recon_batches_total` | counter | `result` | `sum()` / `sum by (result)` | 对账批次结果：`matched`（已对账）/`pending_manual`（待人工）/`unreconcilable`（无法对账） |
+| `smart_erp_recon_batch_duration_seconds` | histogram | — | 先 `sum by (le)` 再 `histogram_quantile` | 批次耗时（秒），默认桶 1s–600s |
+| `smart_erp_unresolved_tickets` | gauge | — | 全局口径 `max()`；分片队列 `sum()` | 当前 unresolved 工单数 |
+| `smart_erp_compensation_backlog` | gauge | — | `sum()` | 当前待处理补偿任务数（各副本各自的补偿队列相加） |
+| `smart_erp_audit_chain_broken` | gauge | — | `max()` | 审计链断链标志：0 正常 / 1 断链（P0） |
+
+> **多副本必须聚合**：以上指标都是**进程内累加**，N 个副本就产生 N 条同标签序列。只看单个 pod 的数字会低估全局量；Prometheus 查询必须按上表聚合。规则文件已按聚合口径编写（`sum(...)`、`sum by (le)`、`max(...)`）。
+
+span → 指标的折算规则：包含任一 `rejected` span 的 trace 计为 `rejected`，否则有 `error` 计为 `failed` 并取第一个 `failure_class`/`fail_code`，都没有则进 `unclassified`；`gateway.preview|write|verify|compensate` 分别累加到对应 `stage`。
+
+### 6.2 标签克制（硬约束）
+
+- `ticket_id`、`idem_key`、`external_id`、`trace_id`、`span_id`、`batch_id`、`doc_no` 以及任何 `*_id` 后缀**禁止**作为标签，传入即抛 `MetricLabelError`；
+- 未声明或缺失的标签同样报错，避免悄悄产生新序列；
+- 工单级细节留在 trace / JSONL 里按需检索，时序库只保留可聚合的低基数维度。
+
+### 6.3 真实输出片段（节选）
+
+```text
+smart_erp_tickets_total{status="failed",agent="AG-1"} 1
+smart_erp_tickets_total{status="rejected",agent="AG-2"} 1
+smart_erp_ticket_failures_total{failure_class="F6",agent="AG-1"} 1
+smart_erp_write_stage_total{stage="preview"} 2
+smart_erp_write_stage_total{stage="write"} 2
+smart_erp_write_stage_failures_total{stage="write"} 1
+smart_erp_write_stage_duration_seconds_bucket{stage="write",le="0.005"} 2
+smart_erp_write_stage_duration_seconds_bucket{stage="write",le="+Inf"} 2
+smart_erp_write_stage_duration_seconds_sum{stage="write"} 8e-06
+smart_erp_write_stage_duration_seconds_count{stage="write"} 2
+smart_erp_recon_batches_total{result="matched"} 1
+smart_erp_recon_batches_total{result="pending_manual"} 1
+smart_erp_recon_batch_duration_seconds_bucket{le="60"} 2
+smart_erp_unresolved_tickets 7
+smart_erp_compensation_backlog 3
+smart_erp_audit_chain_broken 0
+```
 
 ---
 
-## 7. 测试与验证
+## 7. 告警规则
+
+规则文件：[alerts.rules.yaml](./alerts.rules.yaml)（Prometheus rule file，`groups[0].rules` 共 6 条）。
+
+| 告警 | 级别 | `for` | 触发口径 | 为什么值得半夜叫醒人 |
+|---|---|---|---|---|
+| `SmartErpWriteFailureRateHigh` | P1 | 10m | `write` 阶段失败率 > 5% | 写入是唯一产生外部副作用的动作，失败即数据分叉，越晚核对范围越大 |
+| `SmartErpUnresolvedTicketsGrowing` | P1 | 10m | `max()` 后 30 分钟增量 > 5 且总量 > 10 | unresolved 只增不减 = 没人接住的失败在堆积，会变成对账差异与付款错误 |
+| `SmartErpCompensationBacklogHigh` | P1 | 10m | 10 分钟内积压 > 20 | 补偿积压意味着外部系统保留着该撤未撤的数据，可能已被下游消费 |
+| `SmartErpReconBatchFailureRateHigh` | P1 | 15m | 待人工 + 无法对账占比 > 2% | 对账是关账前置，夜间不修复会让人工队列指数级放大 |
+| `SmartErpAuditChainBroken` | **P0** | 1m | `max(smart_erp_audit_chain_broken) > 0` | 审计链断链后「谁改了什么」无法自证，每小时都产生新的不可信记录 |
+| `SmartErpReconBatchP95Slow` | P2 | 10m | 批次 P95 > 120s | 只影响速度不影响正确性，工作时间处理；与失败率告警同发时升级 P1 |
+
+每条规则都带 `annotations.why_paged` 与 `runbook`，解释「为什么叫醒」和「先看哪里」。
+
+**校验方式（两层，缺一不可）**：
+
+1. **YAML 结构**（PyYAML + 结构断言）：只证明文件能解析、字段齐全，**不证明 `expr` 里的 PromQL 合法**。
+2. **PromQL 真校验**（发布前必跑，需要 docker；镜像入口是 `prometheus`，必须用 `--entrypoint promtool`）：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/observability -q   # 18 条：约定 / 树 / 链路 / 成本 / 导出
+docker run --rm --entrypoint promtool `
+  -v "E:\tools\Factroy_Agents\smart-ERP:/rules" `
+  prom/prometheus:latest check rules /rules/observability/alerts.rules.yaml
+```
+
+本机实测输出：
+
+```text
+Checking /rules/observability/alerts.rules.yaml
+  SUCCESS: 6 rules found
+```
+
+> **没有 docker / 拉不到镜像时，不得宣称规则已验证**。此时只能写“YAML 结构已校验，PromQL 未验证”，并把它列为发布阻塞项；配置错误会让 Prometheus 拒绝加载整个 rules 文件，而不是跳过单条。
+
+P0 表达式另做真实指标快照求值（不依赖 docker，用于证明告警确实会触发）：
+
+```text
+audit_chain_broken=0  max()=0  firing=False
+audit_chain_broken=1  max()=1  firing=True
+```
+
+`/metrics` 里出现 `smart_erp_audit_chain_broken 1` 后，`max(...) > 0` 立即成立，配合 `for: 1m` 即触发 P0。
+
+---
+
+## 8. SLO 草案
+
+| SLO | 目标 | 指标口径（PromQL 形状） |
+|---|---|---|
+| SLO-1 工单成功率 | ≥ 99.5%（30 天滚动） | `1 - sum(rate(smart_erp_tickets_total{status="failed"}[30d])) / clamp_min(sum(rate(smart_erp_tickets_total{status="failed"}[30d])) + sum(rate(smart_erp_tickets_total{status="succeeded"}[30d])), 0.001)`；`rejected` 单列，不计入分母 |
+| SLO-2 对账批次 P95 耗时 | ≤ 120s | `histogram_quantile(0.95, sum by (le) (rate(smart_erp_recon_batch_duration_seconds_bucket[30d])))` |
+| SLO-3 审计链完整 | 100%，错误预算 0 | `avg_over_time(smart_erp_audit_chain_broken[30d]) == 0`；任一时刻为 1 即消耗全部预算 |
+
+错误预算：SLO-1 按 30 天窗口允许 0.5% 失败；预算耗尽后暂停 W1/W2 自动写入、只保留预演。SLO-2 超阈值不阻断业务，先扩批次切分与并发；SLO-3 无预算，触发即按 P0 冻结写入并保全现场。
+
+---
+
+## 9. 测试与验证
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/observability -q   # 52 条：约定 / 树 / 链路 / 成本 / 导出 / 指标 / 告警 / 暴露面
 .\.venv\Scripts\python.exe -m pytest tests/e2e -q             # 11 条：健康检查 / 只读 / W3 / 越权 / 审批 / 路由门禁
 ```
+
+全量回归（本次）：`tests=637 failures=0 errors=0 skipped=25`（跳过均为未提供 `ERP_TEST_DATABASE_URL` 的 PG 用例）。
+
+`tests/observability/test_metrics.py` 覆盖：高基数标签拒绝、文本格式与累计桶、span→指标折算（成功 / F6 / rejected / unclassified）、业务指标、`/metrics` 的 200 与 OpenAPI 排除、非 GET 405、默认不挂载与 `ERP_METRICS_ENABLED` 开关。
+`tests/observability/test_alerts.py` 覆盖：YAML 解析、规则数量与 `why_paged`、P0 审计断链的 `for: 1m`、表达式引用的指标全部存在、健康/断链两种快照下的触发求值。
+
+### 9.1 发布前检查（全部通过才可上线）
+
+1. `pytest tests/observability tests/e2e` 全绿；
+2. 规则文件必须跑真实 PromQL 校验：
+
+```powershell
+docker run --rm --entrypoint promtool `
+  -v "E:\tools\Factroy_Agents\smart-ERP:/rules" `
+  prom/prometheus:latest check rules /rules/observability/alerts.rules.yaml
+```
+
+必须看到 `SUCCESS: 6 rules found`。**没有 docker / 拉不到镜像时，不得宣称规则已验证**：只能标注“YAML 结构已校验，PromQL 未验证”，并按发布阻塞项处理。
+
+3. 确认 `ERP_METRICS_ENABLED` 目标状态：生产如未接入内网抓取就保持关闭；开启时确认 nginx 已 `deny /erp/api/metrics`、且未设置 `ERP_API_BIND=0.0.0.0`（§6.0）。
 
 E2E 说明：健康检查直接打真实的 `apps.main`；只读接口与写入接口是测试专用 `/_e2e/*` 路由，内部调用真实的 `AccessGate`（四道闸）与 `WriteGateway`（唯一写出口），连接器为进程内替身，不启动 PG / 网络。
 
@@ -171,9 +324,10 @@ E2E 说明：健康检查直接打真实的 `apps.main`；只读接口与写入�
 
 ---
 
-## 8. 边界
+## 10. 边界
 
 - 只读观测，不改变 `WriteGateway`、状态机、审计的任何行为；异常原样抛出。
 - W3 没有执行路径；`rejected` span 只证明「拒绝发生了」，不产生任何写入。
 - 不记录凭据明文：含 `credential/password/secret/authorization` 的键写为 `[REDACTED]`。
 - 不存全量输入；模型调用只记 `model`、`prompt_version`、实测 token / 成本（与 `agent_decision` 的「存输出不存全量输入」一致）。
+- `/metrics` 默认不挂载，必须由接入方用 `install_metrics()` 并显式开启 `ERP_METRICS_ENABLED`；该端点只允许内网访问，不得随公网端口发布。指标标签不含任何工单号 / 幂等键 / 外部单号，高基数细节只留在 trace。

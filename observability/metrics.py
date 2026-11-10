@@ -4,7 +4,8 @@
 
 - ``# HELP`` / ``# TYPE`` + 样本行；
 - 直方图输出 ``_bucket{le=...}``（累计）、``_sum``、``_count``；
-- ``/metrics`` 端点为纯 ASGI 应用，由接入方 ``install_metrics(app, registry)`` 挂载。
+- ``/metrics`` 端点为纯 ASGI 应用，由接入方 ``install_metrics(app, registry)`` 挂载；
+  默认读 ``ERP_METRICS_ENABLED``（缺省关闭），且只允许内网抓取。
 
 标签克制是本模块的硬约束：**工单号 / 幂等键 / 外部单号 / trace_id 一律禁止做标签**，
 遇到即抛 :class:`MetricLabelError`。高基数只进 trace，不进时序库。
@@ -17,6 +18,7 @@ F5 接口失败 / F6 校验不一致 / F7 并发冲突 / F8 外部已生效。
 from __future__ import annotations
 
 import math
+import os
 import re
 import threading
 from collections.abc import Mapping, Sequence
@@ -60,6 +62,12 @@ RECON_BUCKETS: tuple[float, ...] = (1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 60
 FORBIDDEN_LABELS: frozenset[str] = frozenset(
     {"ticket_id", "idem_key", "external_id", "trace_id", "span_id", "doc_no", "batch_id"}
 )
+
+#: ``/metrics`` 默认关闭（与 trace 默认关闭同一原则）；只有显式打开才挂载。
+METRICS_ENABLED_VAR = "ERP_METRICS_ENABLED"
+METRICS_PATH_VAR = "ERP_METRICS_PATH"
+DEFAULT_METRICS_PATH = "/metrics"
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 _METRIC_NAME_RE = re.compile(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$")
 _LABEL_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
@@ -283,15 +291,17 @@ class Histogram:
                 (key, list(state.bucket_counts), state.total, state.count)
                 for key, state in items
             ]
+        infinity_label = 'le="+Inf"'
         for key, counts, total, count in snapshot:
             for bucket, bucket_count in zip(self.buckets, counts):
                 le = _format_value(bucket)
+                bucket_label = 'le="' + le + '"'
                 lines.append(
-                    f"{self.name}_bucket{self._labels._render_labels(key, extra=f'le=\"{le}\"')} "
+                    f"{self.name}_bucket{self._labels._render_labels(key, extra=bucket_label)} "
                     f"{bucket_count}"
                 )
             lines.append(
-                f"{self.name}_bucket{self._labels._render_labels(key, extra='le=\"+Inf\"')} "
+                f"{self.name}_bucket{self._labels._render_labels(key, extra=infinity_label)} "
                 f"{count}"
             )
             lines.append(
@@ -519,17 +529,46 @@ async def _send_response(
     await send({"type": "http.response.body", "body": b"" if head else body})
 
 
-def install_metrics(app: Any, registry: MetricsRegistry, *, path: str = "/metrics") -> None:
-    """把 ``/metrics`` 挂到 FastAPI/Starlette 应用；不进入 OpenAPI schema。
+def metrics_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """``/metrics`` 是否开启；未配置即关闭，避免生产默认暴露内部指标。"""
 
-    ``apps/`` 归其他流维护，本层只提供挂载函数，由接入方显式调用一行。
+    source = os.environ if env is None else env
+    return str(source.get(METRICS_ENABLED_VAR, "")).strip().lower() in _TRUTHY
+
+
+def install_metrics(
+    app: Any,
+    registry: MetricsRegistry,
+    *,
+    path: str | None = None,
+    enabled: bool | None = None,
+    env: Mapping[str, str] | None = None,
+) -> bool:
+    """按显式配置把 ``/metrics`` 挂到 FastAPI/Starlette 应用。
+
+    默认**不挂载**：``enabled=None`` 时读 ``ERP_METRICS_ENABLED``（缺省关闭），
+    与 trace 的 ``ERP_TRACE_ENABLED`` 同一原则。返回是否真的挂载，便于启动日志留痕。
+
+    ``/metrics`` 只允许内网访问：挂载到业务 app 就会继承业务端口的暴露面，
+    因此生产应由反向代理拒绝该路径，或改用独立内网监听（见 README §6.0）。
     """
+
+    source = dict(os.environ) if env is None else dict(env)
+    if enabled is None:
+        enabled = metrics_enabled(source)
+    if not enabled:
+        return False
+
+    resolved = path or source.get(METRICS_PATH_VAR) or DEFAULT_METRICS_PATH
+    if not resolved.startswith("/"):
+        raise MetricError(f"metrics 路径必须以 / 开头，实际 {resolved!r}")
 
     from starlette.routing import Route
 
     app.router.routes.append(
-        Route(path, MetricsEndpoint(registry), methods=["GET", "HEAD"], include_in_schema=False)
+        Route(resolved, MetricsEndpoint(registry), methods=["GET", "HEAD"], include_in_schema=False)
     )
+    return True
 
 
 def render_metrics(registry: MetricsRegistry) -> str:
