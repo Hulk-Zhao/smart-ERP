@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from apps.connectors.errors import ConnectorError, ErrorKind
@@ -28,6 +30,23 @@ def test_gateway_registers_file_channel_only_with_inbox(
     # 文件通道不新增任何可写动作，U8 的动作集合不受影响。
     assert registry.actions
     assert all(not key.startswith("file.") for key in registry.allowlist)
+
+
+def test_gateway_treats_blank_inbox_as_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ERP_FILE_INBOX", "   ")
+    assert "file" not in build_default_registry().aliases
+
+
+def test_gateway_fails_fast_when_configured_inbox_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    missing = tmp_path / "no-such-inbox"
+    monkeypatch.setenv("ERP_FILE_INBOX", str(missing))
+
+    with pytest.raises(RuntimeError, match="ERP_FILE_INBOX"):
+        build_default_registry()
 
 
 def test_write_preview_verify_compensate_are_refused() -> None:
