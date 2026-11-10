@@ -1,0 +1,4310 @@
+{
+  "components": {
+    "schemas": {
+      "ActionIn": {
+        "additionalProperties": false,
+        "description": "工单动作入参；``comment`` 同时承担审批意见 / 终止原因（FR-107）。",
+        "properties": {
+          "comment": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Comment",
+            "type": "string"
+          },
+          "confirmed_manual": {
+            "default": false,
+            "title": "Confirmed Manual",
+            "type": "boolean"
+          },
+          "fail_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "F1",
+                  "F2",
+                  "F3",
+                  "F4",
+                  "F5",
+                  "F6",
+                  "F7"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fail Code"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "reviewer",
+                  "approver",
+                  "cfo"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ScopeIn"
+          }
+        },
+        "required": [
+          "scope"
+        ],
+        "title": "ActionIn",
+        "type": "object"
+      },
+      "ActionOut": {
+        "properties": {
+          "action": {
+            "enum": [
+              "approve",
+              "reject",
+              "cancel",
+              "compensate"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "executed_steps": {
+            "items": {
+              "$ref": "#/components/schemas/TicketStepOut"
+            },
+            "title": "Executed Steps",
+            "type": "array"
+          },
+          "manual_tasks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Manual Tasks",
+            "type": "array"
+          },
+          "missing_roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Roles",
+            "type": "array"
+          },
+          "required_roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Roles",
+            "type": "array"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "ticket_id": {
+            "format": "uuid",
+            "title": "Ticket Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ticket_id",
+          "action",
+          "state",
+          "version"
+        ],
+        "title": "ActionOut",
+        "type": "object"
+      },
+      "ApprovalDecisionIn": {
+        "additionalProperties": false,
+        "properties": {
+          "comment": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Comment",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "reviewer",
+              "approver",
+              "cfo"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ScopeIn"
+          }
+        },
+        "required": [
+          "scope",
+          "role"
+        ],
+        "title": "ApprovalDecisionIn",
+        "type": "object"
+      },
+      "ApprovalDecisionOut": {
+        "properties": {
+          "decided_at": {
+            "format": "date-time",
+            "title": "Decided At",
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "missing_roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Roles",
+            "type": "array"
+          },
+          "required_roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Roles",
+            "type": "array"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "satisfied": {
+            "title": "Satisfied",
+            "type": "boolean"
+          },
+          "ticket_id": {
+            "format": "uuid",
+            "title": "Ticket Id",
+            "type": "string"
+          },
+          "ticket_state": {
+            "title": "Ticket State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket_id",
+          "role",
+          "decision",
+          "decided_at",
+          "satisfied",
+          "required_roles",
+          "missing_roles",
+          "ticket_state"
+        ],
+        "title": "ApprovalDecisionOut",
+        "type": "object"
+      },
+      "ApprovalOut": {
+        "properties": {
+          "approver_id": {
+            "format": "uuid",
+            "title": "Approver Id",
+            "type": "string"
+          },
+          "comment": {
+            "title": "Comment",
+            "type": "string"
+          },
+          "decided_at": {
+            "format": "date-time",
+            "title": "Decided At",
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "approver_id",
+          "decision",
+          "comment",
+          "decided_at"
+        ],
+        "title": "ApprovalOut",
+        "type": "object"
+      },
+      "ApprovalTaskOut": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "business_key": {
+            "title": "Business Key",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "initiator_id": {
+            "format": "uuid",
+            "title": "Initiator Id",
+            "type": "string"
+          },
+          "missing_roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Roles",
+            "type": "array"
+          },
+          "required_roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Roles",
+            "type": "array"
+          },
+          "scene_code": {
+            "title": "Scene Code",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "ticket_id": {
+            "format": "uuid",
+            "title": "Ticket Id",
+            "type": "string"
+          },
+          "ticket_no": {
+            "title": "Ticket No",
+            "type": "string"
+          },
+          "touches_fund": {
+            "title": "Touches Fund",
+            "type": "boolean"
+          },
+          "write_level": {
+            "title": "Write Level",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket_id",
+          "ticket_no",
+          "scene_code",
+          "business_key",
+          "state",
+          "write_level",
+          "amount",
+          "touches_fund",
+          "initiator_id",
+          "required_roles",
+          "missing_roles",
+          "created_at"
+        ],
+        "title": "ApprovalTaskOut",
+        "type": "object"
+      },
+      "AuditChainOut": {
+        "properties": {
+          "broken_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broken At"
+          },
+          "checked": {
+            "title": "Checked",
+            "type": "integer"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "head_hash": {
+            "title": "Head Hash",
+            "type": "string"
+          },
+          "image_count": {
+            "title": "Image Count",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "ticket_id": {
+            "format": "uuid",
+            "title": "Ticket Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket_id",
+          "tenant_id",
+          "ok",
+          "checked",
+          "image_count",
+          "head_hash"
+        ],
+        "title": "AuditChainOut",
+        "type": "object"
+      },
+      "AuditImageOut": {
+        "properties": {
+          "after_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Ref"
+          },
+          "before_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Ref"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "diff_missing": {
+            "title": "Diff Missing",
+            "type": "boolean"
+          },
+          "field_diff": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Field Diff",
+            "type": "array"
+          },
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "image_id": {
+            "format": "uuid",
+            "title": "Image Id",
+            "type": "string"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "object_type": {
+            "title": "Object Type",
+            "type": "string"
+          },
+          "prev_hash": {
+            "title": "Prev Hash",
+            "type": "string"
+          },
+          "step_id": {
+            "format": "uuid",
+            "title": "Step Id",
+            "type": "string"
+          },
+          "system": {
+            "title": "System",
+            "type": "string"
+          },
+          "ticket_id": {
+            "format": "uuid",
+            "title": "Ticket Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_id",
+          "ticket_id",
+          "step_id",
+          "system",
+          "object_type",
+          "object_id",
+          "diff_missing",
+          "prev_hash",
+          "hash",
+          "created_at"
+        ],
+        "title": "AuditImageOut",
+        "type": "object"
+      },
+      "BillingBucket": {
+        "description": "行/差异的计费桶：与计量表四类计数共用同一分类函数，禁止第二处重算。",
+        "enum": [
+          "billable",
+          "auto_released",
+          "dispute_hold",
+          "other_unbillable"
+        ],
+        "title": "BillingBucket",
+        "type": "string"
+      },
+      "DiffTypeCode": {
+        "enum": [
+          "unit_price",
+          "qty",
+          "scrap",
+          "uom",
+          "tax",
+          "missing_doc",
+          "duplicate",
+          "rounding_tolerance"
+        ],
+        "title": "DiffTypeCode",
+        "type": "string"
+      },
+      "DiscrepancyDraftOut": {
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "string"
+          },
+          "diff_type": {
+            "title": "Diff Type",
+            "type": "string"
+          },
+          "draft_no": {
+            "title": "Draft No",
+            "type": "string"
+          },
+          "needs_manual": {
+            "title": "Needs Manual",
+            "type": "boolean"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Refs",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "suggestion": {
+            "title": "Suggestion",
+            "type": "string"
+          },
+          "supplier_code": {
+            "title": "Supplier Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "draft_no",
+          "supplier_code",
+          "period",
+          "diff_type",
+          "amount",
+          "owner",
+          "suggestion",
+          "confidence",
+          "needs_manual",
+          "refs",
+          "status"
+        ],
+        "title": "DiscrepancyDraftOut",
+        "type": "object"
+      },
+      "EvidenceOut": {
+        "properties": {
+          "coord": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coord"
+          },
+          "doc_no": {
+            "title": "Doc No",
+            "type": "string"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "system": {
+            "title": "System",
+            "type": "string"
+          }
+        },
+        "required": [
+          "system",
+          "doc_no",
+          "field"
+        ],
+        "title": "EvidenceOut",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ItemMasterIn": {
+        "additionalProperties": false,
+        "properties": {
+          "base_unit": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Unit"
+          },
+          "code": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "spec": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spec"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "ItemMasterIn",
+        "type": "object"
+      },
+      "MasterDataIn": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ItemMasterIn"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "suppliers": {
+            "items": {
+              "$ref": "#/components/schemas/SupplierMasterIn"
+            },
+            "title": "Suppliers",
+            "type": "array"
+          },
+          "unit_conversions": {
+            "items": {
+              "$ref": "#/components/schemas/UnitConversionIn"
+            },
+            "title": "Unit Conversions",
+            "type": "array"
+          }
+        },
+        "title": "MasterDataIn",
+        "type": "object"
+      },
+      "MeteringDataGapOut": {
+        "description": "计量所需但当前数据模型提供不了的字段：如实报缺，不用默认值冒充。",
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "owner_role": {
+            "title": "Owner Role",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "reason",
+          "owner_role",
+          "action"
+        ],
+        "title": "MeteringDataGapOut",
+        "type": "object"
+      },
+      "MeteringExcludedOut": {
+        "properties": {
+          "customer_reason": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Reason"
+          },
+          "dispute_hold": {
+            "title": "Dispute Hold",
+            "type": "integer"
+          },
+          "misrelease": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Misrelease"
+          },
+          "other_reasons": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Other Reasons",
+            "type": "object"
+          },
+          "other_unbillable": {
+            "title": "Other Unbillable",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "dispute_hold",
+          "other_unbillable"
+        ],
+        "title": "MeteringExcludedOut",
+        "type": "object"
+      },
+      "MeteringLineOut": {
+        "description": "按明细行的程序性事实；不判断「结论是否正确」。",
+        "properties": {
+          "after_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Ref"
+          },
+          "auto_released": {
+            "title": "Auto Released",
+            "type": "boolean"
+          },
+          "before_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Ref"
+          },
+          "billing_bucket": {
+            "$ref": "#/components/schemas/BillingBucket"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "string"
+          },
+          "diff_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Diff Types",
+            "type": "array"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceOut"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "excluded_reason": {
+            "default": "",
+            "title": "Excluded Reason",
+            "type": "string"
+          },
+          "human_modified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Modified"
+          },
+          "line_no": {
+            "title": "Line No",
+            "type": "integer"
+          },
+          "needs_manual": {
+            "title": "Needs Manual",
+            "type": "boolean"
+          },
+          "our_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Our Ref"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
+          "side": {
+            "enum": [
+              "supplier",
+              "our"
+            ],
+            "title": "Side",
+            "type": "string"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "supplier_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Code"
+          },
+          "supplier_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Ref"
+          },
+          "ticket_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticket No"
+          }
+        },
+        "required": [
+          "line_no",
+          "side",
+          "status",
+          "auto_released",
+          "needs_manual",
+          "billing_bucket",
+          "confidence"
+        ],
+        "title": "MeteringLineOut",
+        "type": "object"
+      },
+      "MeteringStatementOut": {
+        "description": "产品文档 07 §2.2.1 计量表字段；金额一律十进制文本。",
+        "properties": {
+          "auto_released_lines": {
+            "title": "Auto Released Lines",
+            "type": "integer"
+          },
+          "batch_id": {
+            "format": "uuid",
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "batch_status": {
+            "title": "Batch Status",
+            "type": "string"
+          },
+          "billable_basis": {
+            "title": "Billable Basis",
+            "type": "string"
+          },
+          "billable_lines": {
+            "title": "Billable Lines",
+            "type": "integer"
+          },
+          "calculation": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Calculation",
+            "type": "array"
+          },
+          "cap_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap Amount"
+          },
+          "cap_exceeded": {
+            "title": "Cap Exceeded",
+            "type": "boolean"
+          },
+          "cap_remaining": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap Remaining"
+          },
+          "computed_at": {
+            "format": "date-time",
+            "title": "Computed At",
+            "type": "string"
+          },
+          "conclusive": {
+            "title": "Conclusive",
+            "type": "boolean"
+          },
+          "confirmed_misrelease_lines": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed Misrelease Lines"
+          },
+          "cumulative_amount": {
+            "title": "Cumulative Amount",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "customer_reason_lines": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Reason Lines"
+          },
+          "data_gaps": {
+            "items": {
+              "$ref": "#/components/schemas/MeteringDataGapOut"
+            },
+            "title": "Data Gaps",
+            "type": "array"
+          },
+          "excluded_lines": {
+            "$ref": "#/components/schemas/MeteringExcludedOut"
+          },
+          "expected_lines": {
+            "title": "Expected Lines",
+            "type": "integer"
+          },
+          "human_reviewed_lines": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Reviewed Lines"
+          },
+          "line_accounting": {
+            "title": "Line Accounting",
+            "type": "string"
+          },
+          "line_count": {
+            "title": "Line Count",
+            "type": "integer"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/MeteringLineOut"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "period_amount": {
+            "title": "Period Amount",
+            "type": "string"
+          },
+          "prior_cumulative_amount": {
+            "title": "Prior Cumulative Amount",
+            "type": "string"
+          },
+          "supplier_scope": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Supplier Scope",
+            "type": "array"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "string"
+          },
+          "unit_price_source": {
+            "title": "Unit Price Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "batch_id",
+          "batch_status",
+          "conclusive",
+          "period",
+          "supplier_scope",
+          "expected_lines",
+          "auto_released_lines",
+          "billable_lines",
+          "billable_basis",
+          "excluded_lines",
+          "unit_price",
+          "unit_price_source",
+          "currency",
+          "period_amount",
+          "prior_cumulative_amount",
+          "cumulative_amount",
+          "cap_exceeded",
+          "line_accounting",
+          "computed_at",
+          "line_count"
+        ],
+        "title": "MeteringStatementOut",
+        "type": "object"
+      },
+      "MissingItemOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "source_ref": {
+            "title": "Source Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "code",
+          "detail",
+          "source_ref"
+        ],
+        "title": "MissingItemOut",
+        "type": "object"
+      },
+      "MoneyOut": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "tax_included": {
+            "title": "Tax Included",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "amount",
+          "currency",
+          "tax_included"
+        ],
+        "title": "MoneyOut",
+        "type": "object"
+      },
+      "Page_ApprovalTaskOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ApprovalTaskOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[ApprovalTaskOut]",
+        "type": "object"
+      },
+      "Page_AuditImageOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditImageOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[AuditImageOut]",
+        "type": "object"
+      },
+      "Page_ReconDiffOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReconDiffOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[ReconDiffOut]",
+        "type": "object"
+      },
+      "Page_TicketOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TicketOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[TicketOut]",
+        "type": "object"
+      },
+      "ReconBatchOut": {
+        "properties": {
+          "batch_id": {
+            "format": "uuid",
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "conclusive": {
+            "title": "Conclusive",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "title": "Created By",
+            "type": "string"
+          },
+          "diff_count": {
+            "default": 0,
+            "title": "Diff Count",
+            "type": "integer"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReconMetricsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "missing_items": {
+            "items": {
+              "$ref": "#/components/schemas/MissingItemOut"
+            },
+            "title": "Missing Items",
+            "type": "array"
+          },
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "status_reason": {
+            "title": "Status Reason",
+            "type": "string"
+          },
+          "suppliers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Suppliers",
+            "type": "array"
+          },
+          "system_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "System Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "batch_id",
+          "status",
+          "conclusive",
+          "status_reason",
+          "org_id",
+          "period",
+          "system_ids",
+          "suppliers",
+          "created_by",
+          "created_at"
+        ],
+        "title": "ReconBatchOut",
+        "type": "object"
+      },
+      "ReconDatasetIn": {
+        "additionalProperties": false,
+        "description": "本次对账的取数结果；缺省时按 ``sources.statement_files`` 找已登记数据集。",
+        "properties": {
+          "master_data": {
+            "$ref": "#/components/schemas/MasterDataIn"
+          },
+          "our_lines": {
+            "items": {
+              "$ref": "#/components/schemas/ReconLineIn"
+            },
+            "title": "Our Lines",
+            "type": "array"
+          },
+          "supplier_lines": {
+            "items": {
+              "$ref": "#/components/schemas/ReconLineIn"
+            },
+            "title": "Supplier Lines",
+            "type": "array"
+          },
+          "tolerance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToleranceIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "ReconDatasetIn",
+        "type": "object"
+      },
+      "ReconDiffDetailOut": {
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "batch_id": {
+            "format": "uuid",
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "billing_bucket": {
+            "$ref": "#/components/schemas/BillingBucket"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "string"
+          },
+          "diff_id": {
+            "title": "Diff Id",
+            "type": "string"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiscrepancyDraftOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceOut"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "needs_manual": {
+            "title": "Needs Manual",
+            "type": "boolean"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "related_lines": {
+            "items": {
+              "$ref": "#/components/schemas/ReconLineResultOut"
+            },
+            "title": "Related Lines",
+            "type": "array"
+          },
+          "suggestion": {
+            "title": "Suggestion",
+            "type": "string"
+          },
+          "supplier_code": {
+            "title": "Supplier Code",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "unattributed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnattributedOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "diff_id",
+          "type",
+          "amount",
+          "owner",
+          "suggestion",
+          "confidence",
+          "needs_manual",
+          "billing_bucket",
+          "ref",
+          "supplier_code",
+          "batch_id"
+        ],
+        "title": "ReconDiffDetailOut",
+        "type": "object"
+      },
+      "ReconDiffOut": {
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "billing_bucket": {
+            "$ref": "#/components/schemas/BillingBucket"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "string"
+          },
+          "diff_id": {
+            "title": "Diff Id",
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceOut"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "needs_manual": {
+            "title": "Needs Manual",
+            "type": "boolean"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "suggestion": {
+            "title": "Suggestion",
+            "type": "string"
+          },
+          "supplier_code": {
+            "title": "Supplier Code",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "diff_id",
+          "type",
+          "amount",
+          "owner",
+          "suggestion",
+          "confidence",
+          "needs_manual",
+          "billing_bucket",
+          "ref",
+          "supplier_code"
+        ],
+        "title": "ReconDiffOut",
+        "type": "object"
+      },
+      "ReconLineIn": {
+        "additionalProperties": false,
+        "description": "对账输入行；字段与 ``apps.recon.loader._build_line`` 一一对应。",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "coord": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coord"
+          },
+          "currency": {
+            "default": "CNY",
+            "maxLength": 8,
+            "minLength": 3,
+            "title": "Currency",
+            "type": "string"
+          },
+          "doc_no": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Doc No",
+            "type": "string"
+          },
+          "item_code": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Code"
+          },
+          "item_name": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Name"
+          },
+          "line_no": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Line No",
+            "type": "integer"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "qty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qty"
+          },
+          "scrap_qty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scrap Qty"
+          },
+          "supplier_code": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Supplier Code",
+            "type": "string"
+          },
+          "system": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "System",
+            "type": "string"
+          },
+          "tax_included": {
+            "default": true,
+            "title": "Tax Included",
+            "type": "boolean"
+          },
+          "tax_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Rate"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          }
+        },
+        "required": [
+          "system",
+          "doc_no",
+          "supplier_code"
+        ],
+        "title": "ReconLineIn",
+        "type": "object"
+      },
+      "ReconLineResultOut": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "string"
+          },
+          "item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item"
+          },
+          "match_type": {
+            "title": "Match Type",
+            "type": "string"
+          },
+          "needs_manual": {
+            "title": "Needs Manual",
+            "type": "boolean"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "our_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Our Ref"
+          },
+          "qty_mine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qty Mine"
+          },
+          "qty_supplier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qty Supplier"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "supplier_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Ref"
+          }
+        },
+        "required": [
+          "match_type",
+          "confidence",
+          "status",
+          "needs_manual"
+        ],
+        "title": "ReconLineResultOut",
+        "type": "object"
+      },
+      "ReconMetricsOut": {
+        "properties": {
+          "ambiguous": {
+            "title": "Ambiguous",
+            "type": "integer"
+          },
+          "auto_disposal_allowed": {
+            "title": "Auto Disposal Allowed",
+            "type": "boolean"
+          },
+          "candidate_only": {
+            "title": "Candidate Only",
+            "type": "integer"
+          },
+          "diff_amount": {
+            "title": "Diff Amount",
+            "type": "string"
+          },
+          "diff_lines": {
+            "title": "Diff Lines",
+            "type": "integer"
+          },
+          "diff_rate": {
+            "title": "Diff Rate",
+            "type": "string"
+          },
+          "matched": {
+            "title": "Matched",
+            "type": "integer"
+          },
+          "matched_rate": {
+            "title": "Matched Rate",
+            "type": "string"
+          },
+          "supplier_lines": {
+            "title": "Supplier Lines",
+            "type": "integer"
+          },
+          "suspected_anomaly": {
+            "title": "Suspected Anomaly",
+            "type": "boolean"
+          },
+          "unmatched": {
+            "title": "Unmatched",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "supplier_lines",
+          "matched",
+          "matched_rate",
+          "ambiguous",
+          "candidate_only",
+          "unmatched",
+          "diff_lines",
+          "diff_rate",
+          "diff_amount",
+          "suspected_anomaly",
+          "auto_disposal_allowed"
+        ],
+        "title": "ReconMetricsOut",
+        "type": "object"
+      },
+      "ReconRunIn": {
+        "additionalProperties": false,
+        "properties": {
+          "dataset": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReconDatasetIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rerun_of": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerun Of"
+          },
+          "rerun_reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerun Reason"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ScopeIn"
+          },
+          "sources": {
+            "$ref": "#/components/schemas/ReconSourcesIn"
+          },
+          "suppliers": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Suppliers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scope",
+          "suppliers"
+        ],
+        "title": "ReconRunIn",
+        "type": "object"
+      },
+      "ReconSourcesIn": {
+        "additionalProperties": false,
+        "description": "取数来源声明（与 AG-1 入参 C7 的 ``sources`` 对齐）。",
+        "properties": {
+          "erp": {
+            "default": true,
+            "title": "Erp",
+            "type": "boolean"
+          },
+          "mes": {
+            "default": false,
+            "title": "Mes",
+            "type": "boolean"
+          },
+          "statement_files": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Statement Files",
+            "type": "array"
+          },
+          "wms": {
+            "default": false,
+            "title": "Wms",
+            "type": "boolean"
+          }
+        },
+        "title": "ReconSourcesIn",
+        "type": "object"
+      },
+      "ScopeIn": {
+        "additionalProperties": false,
+        "description": "G-05：三个字段缺一不可，只允许在授权范围内收窄。",
+        "properties": {
+          "org_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Org Id",
+            "type": "string"
+          },
+          "period": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Period",
+            "type": "string"
+          },
+          "system_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "System Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "org_id",
+          "period",
+          "system_ids"
+        ],
+        "title": "ScopeIn",
+        "type": "object"
+      },
+      "SupplierMasterIn": {
+        "additionalProperties": false,
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "code": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "tax_no": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax No"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "SupplierMasterIn",
+        "type": "object"
+      },
+      "TicketDetailOut": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "approvals": {
+            "items": {
+              "$ref": "#/components/schemas/ApprovalOut"
+            },
+            "title": "Approvals",
+            "type": "array"
+          },
+          "audit_image_count": {
+            "title": "Audit Image Count",
+            "type": "integer"
+          },
+          "business_key": {
+            "title": "Business Key",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "initiator_id": {
+            "format": "uuid",
+            "title": "Initiator Id",
+            "type": "string"
+          },
+          "missing_roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Roles",
+            "type": "array"
+          },
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "required_roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Roles",
+            "type": "array"
+          },
+          "scene_code": {
+            "title": "Scene Code",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TicketStateCode"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/TicketStepOut"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "systems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Systems",
+            "type": "array"
+          },
+          "ticket_id": {
+            "format": "uuid",
+            "title": "Ticket Id",
+            "type": "string"
+          },
+          "ticket_no": {
+            "title": "Ticket No",
+            "type": "string"
+          },
+          "touches_fund": {
+            "title": "Touches Fund",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "write_level": {
+            "title": "Write Level",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket_id",
+          "ticket_no",
+          "scene_code",
+          "state",
+          "version",
+          "initiator_id",
+          "business_key",
+          "org_id",
+          "period",
+          "systems",
+          "write_level",
+          "amount",
+          "touches_fund",
+          "created_at",
+          "updated_at",
+          "steps",
+          "approvals",
+          "required_roles",
+          "missing_roles",
+          "audit_image_count"
+        ],
+        "title": "TicketDetailOut",
+        "type": "object"
+      },
+      "TicketOut": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "business_key": {
+            "title": "Business Key",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "initiator_id": {
+            "format": "uuid",
+            "title": "Initiator Id",
+            "type": "string"
+          },
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "scene_code": {
+            "title": "Scene Code",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TicketStateCode"
+          },
+          "systems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Systems",
+            "type": "array"
+          },
+          "ticket_id": {
+            "format": "uuid",
+            "title": "Ticket Id",
+            "type": "string"
+          },
+          "ticket_no": {
+            "title": "Ticket No",
+            "type": "string"
+          },
+          "touches_fund": {
+            "title": "Touches Fund",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "write_level": {
+            "title": "Write Level",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket_id",
+          "ticket_no",
+          "scene_code",
+          "state",
+          "version",
+          "initiator_id",
+          "business_key",
+          "org_id",
+          "period",
+          "systems",
+          "write_level",
+          "amount",
+          "touches_fund",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "TicketOut",
+        "type": "object"
+      },
+      "TicketStateCode": {
+        "enum": [
+          "计划中",
+          "待确认",
+          "待审批",
+          "执行中",
+          "校验中",
+          "已完成",
+          "补偿中",
+          "已回滚",
+          "需人工处置",
+          "已锁定",
+          "已终止",
+          "已驳回"
+        ],
+        "title": "TicketStateCode",
+        "type": "string"
+      },
+      "TicketStepOut": {
+        "properties": {
+          "action_key": {
+            "title": "Action Key",
+            "type": "string"
+          },
+          "executed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executed At"
+          },
+          "idem_key": {
+            "title": "Idem Key",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "object_type": {
+            "title": "Object Type",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "step_id": {
+            "format": "uuid",
+            "title": "Step Id",
+            "type": "string"
+          },
+          "step_no": {
+            "title": "Step No",
+            "type": "integer"
+          },
+          "system": {
+            "title": "System",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_no",
+          "step_id",
+          "action_key",
+          "system",
+          "object_type",
+          "object_id",
+          "state",
+          "level",
+          "idem_key"
+        ],
+        "title": "TicketStepOut",
+        "type": "object"
+      },
+      "ToleranceIn": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "qty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qty"
+          }
+        },
+        "title": "ToleranceIn",
+        "type": "object"
+      },
+      "UnattributedOut": {
+        "properties": {
+          "amount_diff": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceOut"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "amount_diff",
+          "reason"
+        ],
+        "title": "UnattributedOut",
+        "type": "object"
+      },
+      "UnitConversionIn": {
+        "additionalProperties": false,
+        "properties": {
+          "factor": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Factor"
+          },
+          "from_unit": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "From Unit",
+            "type": "string"
+          },
+          "item": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Item",
+            "type": "string"
+          },
+          "to_unit": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "To Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item",
+          "from_unit",
+          "to_unit",
+          "factor"
+        ],
+        "title": "UnitConversionIn",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Smart-ERP 产品 API（C16）。所有路径都挂在 `/erp/api` 下，即本文件的 `servers` + `/v1`。\n\n## 装配\napp 装配由平台底座负责：`apps/main.py` 调用 `install_platform(app)`，本模块只向\n`apps.platform.api.router.api_router` 注册 `/v1` 业务路由（导入 `apps.api` 即完成挂载），\n不修改 `apps/main.py`。`trace_id` 与 problem+json 由平台中间件/异常处理器统一注入。\n\n## 认证与会话\n- 请求头 `X-Session-Token: <token>`（或 `Authorization: Bearer <token>`）。\n- 缺失/过期/注销统一 401；令牌只映射到服务端会话，不接受客户端自报身份。\n\n## 数据范围（G-05）\n- 所有接口都必须携带 `org_id`、`period`、`system_ids`（查询参数或请求体 `scope`）。\n- scope 只能收窄，不能越权放大：请求 scope 不在授权范围内返回 403 `E-AUTHZ-001`。\n\n## 写操作治理\n- 每个写动作先过 `AccessGate` 四道闸（身份/范围/等级/审批），再执行：\n  - 外部写入只能经 `WriteGateway.execute()`（或回滚链路 `RollbackService`）；\n  - W3 一律拒绝（`E-POLICY-W3FORBIDDEN`），拒绝时连接器零写入；\n  - 内部对象追加（审批记录、状态推进、审计影像）不产生外部写入，只过 `AccessGate`。\n- 审批与执行分离：审批人用 `/approvals/*` 落意见；发起人/执行体用\n  `/tickets/{id}/actions/approve` 统一过闸并执行已锁定的写计划。\n\n## 计量（结果计费，W0 只读）\n- `GET /v1/metering/batches/{batch_id}/statement` 只输出程序性事实（是否自动放行、\n  是否需人工、有无证据链），不判断「结论是否正确」；`format=csv` 导出逐行明细。\n- 逐行 `billing_bucket`（`billable / auto_released / dispute_hold / other_unbillable`）\n  与 statement 的四类计数由**同一个分类函数**产出；差异列表同样返回该字段并支持\n  `billing_bucket=` 过滤，避免「计数说争议挂起 2、列表却有 3 行」。\n- 缺失字段（已确认错放行/客户原因/是否被人改过/工单号/前像后像）返回 null，并在\n  `data_gaps` 写明 `owner_role`（谁负责提供）与 `action`（需要提供什么）；\n  单行单价只从 `ERP_METERING_UNIT_PRICE` 读取，未配置返回 503。\n\n## 对账结果留存（append-only）\n- `POST /v1/recon/runs` 成功后，批次头与逐行快照落库，statement 读持久化快照；\n  进程重启/容器重建后同一批次的数字不变。\n- 批次与行快照只追加：库上不可 UPDATE/DELETE（触发器兜底），\n  **改判只能显式重跑开新批次**，原批次数据永久保持不变。\n- 按原批次重跑：同时提供 `rerun_of`（原批次 id）与 `rerun_reason`（非空原因），\n  服务端生成新的批次 id 并在新批次上记录 `rerun_of`；两者都是可选字段，\n  不带时行为与旧版一致。\n- 幂等：同租户/组织/期间/输入指纹只允许一个首次执行，重复提交 409 `E-IDEM-CONFLICT`；\n  行级人工事件的去重键为「租户+操作人+行+事件+10 分钟时间窗」，\n  重试返回原事件 `seq`，不因重试把 `seq` 撑大。\n- 上线切换：旧进程内存里的历史批次**不迁移**，发布后不可查询，需重新发起对账生成；\n  结果数据保留期 ≥24 个月（清理任务尚未实现，已在台账留 TODO）。\n\n## 幂等与分页\n- 写接口（POST）必须带 `Idempotency-Key`：同键同参回放首次响应，同键不同参 409；\n  缺失 400 `E-IDEM-CONFLICT`。\n- 列表统一 `{items, next_cursor}`，`limit` 默认 20、上限 100；游标不透明，\n  非法游标 422 `E-PARSE-FAILED`。\n\n## 错误格式\n`application/problem+json`，字段：`type`、`title`、`status`、`detail`、`code`、\n`trace_id`、`retriable`、`fail_code`。常用映射：\n\n| HTTP | code | 含义 |\n| --- | --- | --- |\n| 400 | E-IDEM-CONFLICT | 写接口缺少 Idempotency-Key |\n| 401 | E-AUTHZ-001 | 会话缺失/失效 |\n| 403 | E-AUTHZ-001 | 超出授权 scope |\n| 403 | E-AUTHZ-002 | 字段范围越界 |\n| 403 | E-POLICY-W3FORBIDDEN | W3 或需要更高权限 |\n| 403 | E-POLICY-LEVEL | 动作未注册/等级不足 |\n| 409 | E-POLICY-APPROVAL | 审批未满足、审批意见缺失、重复审批 |\n| 409 | E-IDEM-CONFLICT | 同键不同参 |\n| 409 | E-STATE-ILLEGAL | 状态迁移/重放非法 |\n| 409 | E-VERIFY-MISMATCH | 写入校验或审计链校验不一致 |\n| 422 | E-DATA-MISSING | 缺数据（含工单/批次不存在） |\n| 422 | E-PARSE-FAILED | 入参/游标/金额解析失败 |\n| 503 | E-CONN-UNAVAILABLE | 连接器不可用或凭据交换失败 |\n| 503 | E-DATA-MISSING | 计量配置缺失（未配置 ERP_METERING_UNIT_PRICE） |\n",
+    "title": "Smart-ERP 产品 API",
+    "version": "1.0.0",
+    "x-contract-id": "C16",
+    "x-contract-version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/approvals/pending": {
+      "get": {
+        "description": "只返回 scope 内、待审批、发起人不是当前用户，且所需角色与当前用户角色有交集的工单。",
+        "operationId": "pending_v1_approvals_pending_get",
+        "parameters": [
+          {
+            "description": "场景码筛选",
+            "in": "query",
+            "name": "scene_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "场景码筛选",
+              "title": "Scene Code"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "每页条数，默认 20",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "每页条数，默认 20",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "组织",
+            "in": "query",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "组织",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "期间，如 2026-10",
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "description": "期间，如 2026-10",
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "description": "系统列表，可重复传",
+            "in": "query",
+            "name": "system_ids",
+            "required": true,
+            "schema": {
+              "description": "系统列表，可重复传",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "title": "System Ids",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ApprovalTaskOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "审批待办",
+        "tags": [
+          "审批"
+        ]
+      }
+    },
+    "/v1/approvals/{ticket_id}/approve": {
+      "post": {
+        "description": "记录审批意见；意见必填，同一人不得对同一工单重复审批。",
+        "operationId": "approve_v1_approvals__ticket_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ticket Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "写接口必填；同键同参回放首次结果，同键不同参 409（G-02）",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "写接口必填；同键同参回放首次结果，同键不同参 409（G-02）",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalDecisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalDecisionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "审批通过",
+        "tags": [
+          "审批"
+        ]
+      }
+    },
+    "/v1/approvals/{ticket_id}/reject": {
+      "post": {
+        "description": "记录驳回意见并把工单推进到已驳回；意见必填。",
+        "operationId": "reject_v1_approvals__ticket_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ticket Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "写接口必填；同键同参回放首次结果，同键不同参 409（G-02）",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "写接口必填；同键同参回放首次结果，同键不同参 409（G-02）",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalDecisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalDecisionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "审批驳回",
+        "tags": [
+          "审批"
+        ]
+      }
+    },
+    "/v1/audit/export": {
+      "get": {
+        "description": "按工单导出 CSV（UTF-8 BOM），响应头 X-Content-SHA256 给出内容摘要，便于对账复核。",
+        "operationId": "export_audit_v1_audit_export_get",
+        "parameters": [
+          {
+            "description": "工单",
+            "in": "query",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "description": "工单",
+              "format": "uuid",
+              "title": "Ticket Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "系统过滤",
+            "in": "query",
+            "name": "system",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "系统过滤",
+              "title": "System"
+            }
+          },
+          {
+            "description": "组织",
+            "in": "query",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "组织",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "期间，如 2026-10",
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "description": "期间，如 2026-10",
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "description": "系统列表，可重复传",
+            "in": "query",
+            "name": "system_ids",
+            "required": true,
+            "schema": {
+              "description": "系统列表，可重复传",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "title": "System Ids",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/csv": {}
+            },
+            "description": "CSV 明细，含哈希与字段差异"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "导出审计明细",
+        "tags": [
+          "审计"
+        ]
+      }
+    },
+    "/v1/audit/tickets/{ticket_id}/chain": {
+      "get": {
+        "description": "校验租户链完整性（append-only + 前向哈希），并返回该工单影像数与链尾哈希。",
+        "operationId": "chain_v1_audit_tickets__ticket_id__chain_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ticket Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "组织",
+            "in": "query",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "组织",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "期间，如 2026-10",
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "description": "期间，如 2026-10",
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "description": "系统列表，可重复传",
+            "in": "query",
+            "name": "system_ids",
+            "required": true,
+            "schema": {
+              "description": "系统列表，可重复传",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "title": "System Ids",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditChainOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "按工单校验审计链",
+        "tags": [
+          "审计"
+        ]
+      }
+    },
+    "/v1/audit/tickets/{ticket_id}/images": {
+      "get": {
+        "description": "返回操作前后竖表、哈希链指针；可按系统、步骤过滤，游标分页。",
+        "operationId": "list_images_v1_audit_tickets__ticket_id__images_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ticket Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "系统过滤，如 u8",
+            "in": "query",
+            "name": "system",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "系统过滤，如 u8",
+              "title": "System"
+            }
+          },
+          {
+            "description": "步骤过滤",
+            "in": "query",
+            "name": "step_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "步骤过滤",
+              "title": "Step Id"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "每页条数，默认 20",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "每页条数，默认 20",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "组织",
+            "in": "query",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "组织",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "期间，如 2026-10",
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "description": "期间，如 2026-10",
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "description": "系统列表，可重复传",
+            "in": "query",
+            "name": "system_ids",
+            "required": true,
+            "schema": {
+              "description": "系统列表，可重复传",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "title": "System Ids",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_AuditImageOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "按工单读取审计影像",
+        "tags": [
+          "审计"
+        ]
+      }
+    },
+    "/v1/metering/batches/{batch_id}/statement": {
+      "get": {
+        "description": "按对账批次输出结果计费的计量表（W0 只读：不写库、不碰资金、不改状态）。「有效对账行数」只按程序性事实计算：自动放行 − 已确认错放行 − 客户原因；后两项当前无数据源，按 0 扣减并在 calculation/data_gaps 中标注为上界。单行单价只从 ERP_METERING_UNIT_PRICE 读取，未配置直接 503。format=csv 导出逐行明细（UTF-8 BOM，X-Content-SHA256 为内容摘要）。",
+        "operationId": "get_statement_v1_metering_batches__batch_id__statement_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "json=计量表（含逐行明细）；csv=逐行明细导出",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "description": "json=计量表（含逐行明细）；csv=逐行明细导出",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          },
+          {
+            "description": "组织",
+            "in": "query",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "组织",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "期间，如 2026-10",
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "description": "期间，如 2026-10",
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "description": "系统列表，可重复传",
+            "in": "query",
+            "name": "system_ids",
+            "required": true,
+            "schema": {
+              "description": "系统列表，可重复传",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "title": "System Ids",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeteringStatementOut"
+                }
+              },
+              "text/csv": {}
+            },
+            "description": "format=csv 时为逐行明细 CSV"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "按批次出计量表",
+        "tags": [
+          "计量"
+        ]
+      }
+    },
+    "/v1/recon/runs": {
+      "post": {
+        "description": "按 scope 收窄后调用对账引擎；数据行须由 dataset 显式提供或事先登记，缺数据直接 422，不猜取数来源。发起本身无外部写入（W0）。\n\n**按原批次重跑**：批次与行快照 append-only，改判不能原地修改，只能显式重跑。重跑必须同时给 `rerun_of`（原批次 id）与 `rerun_reason`（非空原因），服务端生成**新批次 id**，新批次的 `rerun_of` 指向原批次；原批次数据保持不变。同租户/组织/期间/输入指纹的首次执行只允许一次，重复提交 409 `E-IDEM-CONFLICT`。",
+        "operationId": "create_run_v1_recon_runs_post",
+        "parameters": [
+          {
+            "description": "写接口必填；同键同参回放首次结果，同键不同参 409（G-02）",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "写接口必填；同键同参回放首次结果，同键不同参 409（G-02）",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconRunIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconBatchOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "发起对账",
+        "tags": [
+          "对账"
+        ]
+      }
+    },
+    "/v1/recon/runs/{batch_id}": {
+      "get": {
+        "description": "返回批次状态、结论、指标与差异条数；批次不在 scope 内 403。",
+        "operationId": "get_run_v1_recon_runs__batch_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "组织",
+            "in": "query",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "组织",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "期间，如 2026-10",
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "description": "期间，如 2026-10",
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "description": "系统列表，可重复传",
+            "in": "query",
+            "name": "system_ids",
+            "required": true,
+            "schema": {
+              "description": "系统列表，可重复传",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "title": "System Ids",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconBatchOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "对账状态",
+        "tags": [
+          "对账"
+        ]
+      }
+    },
+    "/v1/recon/runs/{batch_id}/diffs": {
+      "get": {
+        "description": "按差异类型、是否需人工、供应商、计费桶过滤，游标分页。`billing_bucket` 与计量表四类计数同源，避免「计数说 2、点进去 3 行」。",
+        "operationId": "list_diffs_v1_recon_runs__batch_id__diffs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "差异类型（枚举由引擎 DiffType 派生，含 rounding_tolerance）",
+            "in": "query",
+            "name": "diff_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DiffTypeCode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "差异类型（枚举由引擎 DiffType 派生，含 rounding_tolerance）",
+              "title": "Diff Type"
+            }
+          },
+          {
+            "description": "只看需要人工的差异",
+            "in": "query",
+            "name": "needs_manual",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "只看需要人工的差异",
+              "title": "Needs Manual"
+            }
+          },
+          {
+            "description": "供应商编码",
+            "in": "query",
+            "name": "supplier_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "供应商编码",
+              "title": "Supplier Code"
+            }
+          },
+          {
+            "description": "计费桶：billable / auto_released / dispute_hold / other_unbillable",
+            "in": "query",
+            "name": "billing_bucket",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/BillingBucket"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "计费桶：billable / auto_released / dispute_hold / other_unbillable",
+              "title": "Billing Bucket"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "每页条数，默认 20",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "每页条数，默认 20",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "组织",
+            "in": "query",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "组织",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "期间，如 2026-10",
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "description": "期间，如 2026-10",
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "description": "系统列表，可重复传",
+            "in": "query",
+            "name": "system_ids",
+            "required": true,
+            "schema": {
+              "description": "系统列表，可重复传",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "title": "System Ids",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ReconDiffOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "差异列表",
+        "tags": [
+          "对账"
+        ]
+      }
+    },
+    "/v1/recon/runs/{batch_id}/diffs/{diff_id}": {
+      "get": {
+        "description": "差异本体 + 命中行 + 差异草稿 + 未归因金额，均可回溯到影像坐标。",
+        "operationId": "get_diff_v1_recon_runs__batch_id__diffs__diff_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diff_id",
+            "required": true,
+            "schema": {
+              "title": "Diff Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "组织",
+            "in": "query",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "组织",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "期间，如 2026-10",
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "description": "期间，如 2026-10",
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "description": "系统列表，可重复传",
+            "in": "query",
+            "name": "system_ids",
+            "required": true,
+            "schema": {
+              "description": "系统列表，可重复传",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "title": "System Ids",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconDiffDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "差异明细",
+        "tags": [
+          "对账"
+        ]
+      }
+    },
+    "/v1/tickets": {
+      "get": {
+        "description": "按 scope 过滤后键集分页；状态、场景、业务键、工单号、发起人均可筛选。",
+        "operationId": "list_tickets_v1_tickets_get",
+        "parameters": [
+          {
+            "description": "工单状态，如 待审批",
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "工单状态，如 待审批",
+              "title": "State"
+            }
+          },
+          {
+            "description": "场景码，如 ag1_reconcile",
+            "in": "query",
+            "name": "scene_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "场景码，如 ag1_reconcile",
+              "title": "Scene Code"
+            }
+          },
+          {
+            "description": "业务键",
+            "in": "query",
+            "name": "business_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "业务键",
+              "title": "Business Key"
+            }
+          },
+          {
+            "description": "工单号",
+            "in": "query",
+            "name": "ticket_no",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "工单号",
+              "title": "Ticket No"
+            }
+          },
+          {
+            "description": "发起人",
+            "in": "query",
+            "name": "initiator_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "发起人",
+              "title": "Initiator Id"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "每页条数，默认 20",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "每页条数，默认 20",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "组织",
+            "in": "query",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "组织",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "期间，如 2026-10",
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "description": "期间，如 2026-10",
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "description": "系统列表，可重复传",
+            "in": "query",
+            "name": "system_ids",
+            "required": true,
+            "schema": {
+              "description": "系统列表，可重复传",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "title": "System Ids",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_TicketOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "工单列表",
+        "tags": [
+          "工单"
+        ]
+      }
+    },
+    "/v1/tickets/{ticket_id}": {
+      "get": {
+        "description": "含步骤、审批记录、当前所需/缺失审批角色；只返回 scope 内工单。",
+        "operationId": "get_ticket_v1_tickets__ticket_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ticket Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "组织",
+            "in": "query",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "组织",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "期间，如 2026-10",
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "description": "期间，如 2026-10",
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "description": "系统列表，可重复传",
+            "in": "query",
+            "name": "system_ids",
+            "required": true,
+            "schema": {
+              "description": "系统列表，可重复传",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "title": "System Ids",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "工单详情",
+        "tags": [
+          "工单"
+        ]
+      }
+    },
+    "/v1/tickets/{ticket_id}/actions/approve": {
+      "post": {
+        "description": "依次过 AccessGate 四道闸（含审批闸）→ WriteGateway.execute → 追加审计影像 → 推进到执行中。审批闸不满足时返回 403/409 且连接器零写入。",
+        "operationId": "approve_ticket_v1_tickets__ticket_id__actions_approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ticket Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "写接口必填；同键同参回放首次结果，同键不同参 409（G-02）",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "写接口必填；同键同参回放首次结果，同键不同参 409（G-02）",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "审批通过并执行写计划",
+        "tags": [
+          "工单"
+        ]
+      }
+    },
+    "/v1/tickets/{ticket_id}/actions/cancel": {
+      "post": {
+        "description": "只允许计划中 / 待人工复核 / 待审批三个状态，必须写明原因；无外部写入。",
+        "operationId": "cancel_ticket_v1_tickets__ticket_id__actions_cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ticket Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "写接口必填；同键同参回放首次结果，同键不同参 409（G-02）",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "写接口必填；同键同参回放首次结果，同键不同参 409（G-02）",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "取消工单",
+        "tags": [
+          "工单"
+        ]
+      }
+    },
+    "/v1/tickets/{ticket_id}/actions/compensate": {
+      "post": {
+        "description": "按审计影像推导反向操作并分组经 WriteGateway 回写；W3 或反向等级更高时整单拒绝，未人工确认的 L2 回滚 409。",
+        "operationId": "compensate_ticket_v1_tickets__ticket_id__actions_compensate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ticket Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "写接口必填；同键同参回放首次结果，同键不同参 409（G-02）",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "写接口必填；同键同参回放首次结果，同键不同参 409（G-02）",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "触发补偿",
+        "tags": [
+          "工单"
+        ]
+      }
+    },
+    "/v1/tickets/{ticket_id}/actions/reject": {
+      "post": {
+        "description": "落审批记录（写入人不得是发起人）并推进到已驳回；无外部写入。",
+        "operationId": "reject_ticket_v1_tickets__ticket_id__actions_reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ticket Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "写接口必填；同键同参回放首次结果，同键不同参 409（G-02）",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "写接口必填；同键同参回放首次结果，同键不同参 409（G-02）",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "驳回工单",
+        "tags": [
+          "工单"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "/erp/api"
+    }
+  ]
+}
