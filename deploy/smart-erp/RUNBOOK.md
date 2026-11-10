@@ -275,10 +275,10 @@ ERP_IMAGE_TAG=<old-sha> docker compose --env-file deploy/smart-erp/.env \
 # ② /metrics —— 站点根路径上的同名路径，防御性兜底（不是本应用的转发路径，
 #    同机其它站点或默认 server 若暴露 /metrics 会被它挡住）。
 location = /erp/api/metrics {
-    deny all;          # 或：return 404;
+    deny all;          # 只接受 deny all（403）；不要写 return 404（见下方验收矩阵）
 }
 location = /metrics {
-    deny all;          # 或：return 404;
+    deny all;          # 只接受 deny all（403）；不要写 return 404（见下方验收矩阵）
 }
 
 # 业务 API 反代到广州宿主回环地址；proxy_pass 结尾**必须带 "/"**（剥掉 /erp/api/ 前缀）。
@@ -295,24 +295,55 @@ location /erp/api/ {
 }
 ```
 
-**nginx 侧验收口径（两条都必须满足，任一 200 即视为指标外泄、发布不通过）：**
+**指标验收口径（三行矩阵，按 1 → 2 → 3 顺序执行，缺一行都不算通过）：**
+
+> 判断原则：**只有第 2 行（开启后容器内直连 200）能证明端点存在，第 3 行才有意义。**
+> 跳过第 2 行直接看第 3 行，等于在验一个可能不存在的端点——`#48` 的 deny 规则
+> 就是这样保护了一个不存在的端点，靠 404 通过，属于假通过。
+
+容器内探针（app 镜像自带 python，不依赖镜像里有没有 curl）：
 
 > **前提：转发必须已剥掉 `/erp/api/` 前缀**（`proxy_pass .../;`）。若沿用旧写法保留前缀，
 > `/erp/api/metrics` 会因应用只认 `/metrics` 而返回 404——**这种 404 不是拦截生效的证据**。
 > 必须先验 `/erp/api/healthz` 为 200（证明前缀通路与剥前缀都正确），再看 metrics 的 403/404。
 
 ```bash
-# ① App 指标的真实公网路径：必须 403/404，不得 200
-curl -m 5 -o /dev/null -sS -w '%{http_code}\n' https://<域名>/erp/api/metrics
-# 期望输出：403 或 404
-
-# ② 站点根路径兜底：必须 403/404，不得 200
-curl -m 5 -o /dev/null -sS -w '%{http_code}\n' https://<域名>/metrics
-# 期望输出：403 或 404
+probe() {
+  docker exec -T erp_api python -c "
+import urllib.request, urllib.error
+try:
+    r = urllib.request.urlopen('http://127.0.0.1:8010/metrics', timeout=5)
+    print(r.status)
+    print(r.read().decode()[:2000])
+except urllib.error.HTTPError as e:
+    print(e.code)
+"
+}
 ```
 
-配合 5.3 第 ③ 条（`http://<公网IP>:8010/metrics` 必须连接失败），三条合起来才算
-「指标既不能绕过 nginx，也不能直连宿主」。换域名/改前缀后必须重跑这三条。
+| # | 操作 | 期望 | 证明了什么 |
+|---|---|---|---|
+| 1 | `deploy/smart-erp/.env` 里 `ERP_METRICS_ENABLED=`（空）或 `0`，`docker compose --env-file deploy/smart-erp/.env --profile full up -d --force-recreate api` 后执行 `probe` | **404** | 关闭时端点不暴露 |
+| 2 | `deploy/smart-erp/.env` 里 `ERP_METRICS_ENABLED=1`（`true/yes/on` 等价），同样重建后执行 `probe` | **200**，且正文含 `smart_erp_recon_batches_total` | 端点确实挂载、指标在产出 |
+| 3 | 保持第 2 行的开启状态，从外网访问 | **403**（`curl -m 5 -o /dev/null -sS -w '%{http_code}\n' https://<域名>/erp/api/metrics`） | nginx 的 deny 生效，而不是「端点不存在」 |
+
+第 3 行返回 **404 不算通过**：它与第 1 行同码，既可能是 nginx 写成了 `return 404` 而不是
+`deny all`，也可能是配置没 reload。先改配置再重测；返回 200 即指标外泄，发布不通过。
+
+站点根路径兜底仍需单独验（它不是应用的转发路径，漏配时同样会 200）：
+
+```bash
+curl -m 5 -o /dev/null -sS -w '%{http_code}\n' https://<域名>/metrics   # 期望 403
+```
+
+配合 5.3 第 ③ 条（`http://<公网IP>:8010/metrics` 必须连接失败），「矩阵三行 + 根路径兜底 +
+公网直连失败」全部通过，才算「指标既不能绕过 nginx，也不能直连宿主」。换域名/改前缀后必须重跑。
+
+> **前置依赖（截至 2026-11-11 尚未满足）**：`docker-compose.yml` 目前没有把
+> `ERP_METRICS_ENABLED` 下发进 api 容器（`docker compose config | grep ERP_METRICS_ENABLED`
+> 无输出），此时在 `.env` 里写 `1` 不会生效，第 2 行会停在 404。补下发要同时改
+> `contracts/config.schema.json` 的 `scope`/`services`（校验器会比对「实际注入的服务」），
+> 属 S8 + S0 的契约变更，单独合入后再执行本矩阵。
 
 ### 5.3 发布后自检（三条都要过）
 
