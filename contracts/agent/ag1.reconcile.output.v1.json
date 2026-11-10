@@ -1,0 +1,338 @@
+{
+  "$defs": {
+    "Coord": {
+      "additionalProperties": false,
+      "properties": {
+        "bbox": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Bbox",
+          "type": "array"
+        },
+        "page": {
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page",
+        "bbox"
+      ],
+      "title": "Coord",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "description": "证据最小单元：系统 + 单号 + 字段 +（可选）影像坐标。",
+      "properties": {
+        "coord": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Coord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "doc_no": {
+          "minLength": 1,
+          "title": "Doc No",
+          "type": "string"
+        },
+        "field": {
+          "minLength": 1,
+          "title": "Field",
+          "type": "string"
+        },
+        "system": {
+          "minLength": 1,
+          "title": "System",
+          "type": "string"
+        }
+      },
+      "required": [
+        "system",
+        "doc_no",
+        "field"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "Money": {
+      "additionalProperties": false,
+      "description": "金额对象（numeric(18,4)）。``amount`` 是十进制字符串，裸数字直接拒绝。",
+      "properties": {
+        "amount": {
+          "pattern": "^-?\\d{1,14}(\\.\\d{1,4})?$",
+          "title": "Amount",
+          "type": "string"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "title": "Currency",
+          "type": "string"
+        },
+        "tax_included": {
+          "title": "Tax Included",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "amount",
+        "currency",
+        "tax_included"
+      ],
+      "title": "Money",
+      "type": "object"
+    },
+    "PlannedAction": {
+      "additionalProperties": false,
+      "description": "Agent 只能提出 W0/W1；更高等级必须由人走审批，不在输出契约里。",
+      "properties": {
+        "action": {
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "level": {
+          "enum": [
+            "W0",
+            "W1"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "system": {
+          "minLength": 1,
+          "title": "System",
+          "type": "string"
+        }
+      },
+      "required": [
+        "system",
+        "action",
+        "level"
+      ],
+      "title": "PlannedAction",
+      "type": "object"
+    },
+    "ReconcileDiff": {
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "$ref": "#/$defs/Money"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "owner": {
+          "enum": [
+            "ours",
+            "supplier",
+            "system"
+          ],
+          "title": "Owner",
+          "type": "string"
+        },
+        "suggestion": {
+          "title": "Suggestion",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "单价不一致",
+            "数量不符",
+            "报废未扣",
+            "单位换算",
+            "税率口径",
+            "缺单",
+            "重复计费"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "amount",
+        "owner",
+        "suggestion",
+        "confidence"
+      ],
+      "title": "ReconcileDiff",
+      "type": "object"
+    },
+    "ReconcileLine": {
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "$ref": "#/$defs/Money"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "item": {
+          "minLength": 1,
+          "title": "Item",
+          "type": "string"
+        },
+        "match_type": {
+          "enum": [
+            "exact",
+            "fuzzy",
+            "candidate",
+            "unmatched"
+          ],
+          "title": "Match Type",
+          "type": "string"
+        },
+        "qty_mine": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Qty Mine"
+        },
+        "qty_supplier": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Qty Supplier"
+        }
+      },
+      "required": [
+        "item",
+        "amount",
+        "match_type"
+      ],
+      "title": "ReconcileLine",
+      "type": "object"
+    }
+  },
+  "$id": "https://contracts/agent/ag1.reconcile.output/1.0",
+  "additionalProperties": true,
+  "properties": {
+    "actions": {
+      "items": {
+        "$ref": "#/$defs/PlannedAction"
+      },
+      "title": "Actions",
+      "type": "array"
+    },
+    "batch_id": {
+      "minLength": 1,
+      "title": "Batch Id",
+      "type": "string"
+    },
+    "diffs": {
+      "items": {
+        "$ref": "#/$defs/ReconcileDiff"
+      },
+      "title": "Diffs",
+      "type": "array"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/Evidence"
+      },
+      "minItems": 1,
+      "title": "Evidence",
+      "type": "array"
+    },
+    "lines": {
+      "items": {
+        "$ref": "#/$defs/ReconcileLine"
+      },
+      "title": "Lines",
+      "type": "array"
+    },
+    "metrics": {
+      "additionalProperties": true,
+      "title": "Metrics",
+      "type": "object"
+    },
+    "status": {
+      "enum": [
+        "计划中",
+        "待确认",
+        "待审批",
+        "执行中",
+        "校验中",
+        "已完成",
+        "补偿中",
+        "已回滚",
+        "需人工处置",
+        "已锁定",
+        "已终止",
+        "已驳回"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "ticket_id": {
+      "pattern": "^AT-[0-9]{8}-[0-9]{4}$",
+      "title": "Ticket Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "ticket_id",
+    "status",
+    "evidence",
+    "batch_id",
+    "lines",
+    "diffs",
+    "actions",
+    "metrics"
+  ],
+  "title": "AG1ReconcileOutput",
+  "type": "object"
+}
