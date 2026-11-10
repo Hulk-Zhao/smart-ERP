@@ -32,6 +32,65 @@ TICKET_STATUSES: tuple[str, ...] = ("succeeded", "failed", "rejected")
 WRITE_STAGES: tuple[str, ...] = ("preview", "write", "verify", "compensate")
 RECON_RESULTS: tuple[str, ...] = ("matched", "pending_manual", "unreconcilable")
 
+#: ``BatchStatus.name`` → 既有 ``result`` 词表。仅此三种，未知即报错，避免悄悄多出新序列。
+BATCH_STATUS_TO_RESULT: dict[str, str] = {
+    "RECONCILED": "matched",
+    "NEEDS_REVIEW": "pending_manual",
+    "NO_CONCLUSION": "unreconcilable",
+}
+
+#: 对账行级结果（封闭词表）。
+#: ``matched_*`` 才算自动匹配；``unaccounted`` 是合成值（分母 − 已归类行数），
+#: ``unknown`` 兜住引擎新增状态，二者长期非 0 都说明口径有缺口。
+RECON_LINE_OUTCOMES: tuple[str, ...] = (
+    "matched_exact",
+    "matched_fuzzy",
+    "matched_aggregated",
+    "needs_review",
+    "ambiguous",
+    "candidate",
+    "unmatched",
+    "duplicate",
+    "unparseable",
+    "unaccounted",
+    "unknown",
+)
+
+#: 计入「自动匹配」的行级结果；其余一律计入人工介入。
+RECON_AUTO_OUTCOMES: frozenset[str] = frozenset(
+    {"matched_exact", "matched_fuzzy", "matched_aggregated"}
+)
+
+#: 降级（无法对账）原因，取 ``MissingKind.name`` 的小写形式；自由文本永不进标签。
+RECON_DEGRADATION_REASONS: tuple[str, ...] = (
+    "scope",
+    "supplier",
+    "item",
+    "base_unit",
+    "unit_conversion",
+    "line_data",
+    "other",
+)
+
+#: 批次自动匹配率桶（0–1）。2 位小数的分母限制下，桶只分辨「差 / 可用 / 接近全自动」。
+RECON_RATIO_BUCKETS: tuple[float, ...] = (0.5, 0.7, 0.8, 0.9, 0.95, 0.99, 1.0)
+
+_LINE_STATUS_TO_OUTCOME: dict[str, str] = {
+    "NEEDS_REVIEW": "needs_review",
+    "AMBIGUOUS": "ambiguous",
+    "CANDIDATE_ONLY": "candidate",
+    "UNMATCHED_OURS": "unmatched",
+    "UNMATCHED_SUPPLIER": "unmatched",
+    "DUPLICATE": "duplicate",
+    "UNPARSEABLE": "unparseable",
+}
+
+_MATCH_TYPE_TO_OUTCOME: dict[str, str] = {
+    "EXACT": "matched_exact",
+    "FUZZY": "matched_fuzzy",
+    "AGGREGATED": "matched_aggregated",
+}
+
 #: span 名 → 指标 stage 标签。
 SPAN_TO_STAGE: dict[str, str] = {
     "gateway.preview": "preview",
@@ -58,9 +117,21 @@ STAGE_BUCKETS: tuple[float, ...] = (
 #: 对账批次耗时桶（秒）；月末批次可能到分钟级。
 RECON_BUCKETS: tuple[float, ...] = (1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0)
 
-#: 禁止作为标签的键：高基数或敏感。
+#: 禁止作为标签的键：高基数、自由文本或敏感。
 FORBIDDEN_LABELS: frozenset[str] = frozenset(
-    {"ticket_id", "idem_key", "external_id", "trace_id", "span_id", "doc_no", "batch_id"}
+    {
+        "ticket_id",
+        "idem_key",
+        "external_id",
+        "trace_id",
+        "span_id",
+        "doc_no",
+        "batch_id",
+        "supplier_code",
+        "org_id",
+        "period",
+        "status_reason",
+    }
 )
 
 #: ``/metrics`` 默认关闭（与 trace 默认关闭同一原则）；只有显式打开才挂载。
@@ -358,6 +429,21 @@ class MetricsRegistry:
             "对账批次耗时（秒）",
             buckets=RECON_BUCKETS,
         )
+        self.recon_supplier_lines_total = Counter(
+            "smart_erp_recon_supplier_lines_total",
+            "供应商对账行数，按行级结果计数（自动匹配率与人工介入率的分子分母）",
+            ("outcome",),
+        )
+        self.recon_batch_auto_match_ratio = Histogram(
+            "smart_erp_recon_batch_auto_match_ratio",
+            "单批次自动匹配率（0-1，按行级状态重算；不是人工标注准确率）",
+            buckets=RECON_RATIO_BUCKETS,
+        )
+        self.recon_degraded_batches_total = Counter(
+            "smart_erp_recon_degraded_batches_total",
+            "降级（无法对账）批次计数，按缺失项种类归因",
+            ("reason",),
+        )
         self.unresolved_tickets = Gauge(
             "smart_erp_unresolved_tickets",
             "当前未解决工单数（unresolved）",
@@ -379,6 +465,9 @@ class MetricsRegistry:
             self.write_stage_duration_seconds,
             self.recon_batches_total,
             self.recon_batch_duration_seconds,
+            self.recon_supplier_lines_total,
+            self.recon_batch_auto_match_ratio,
+            self.recon_degraded_batches_total,
             self.unresolved_tickets,
             self.compensation_backlog,
             self.audit_chain_broken,
@@ -422,12 +511,72 @@ class MetricsRegistry:
             self.write_stage_failures_total.inc(stage=stage)
 
     def record_recon_batch(self, result: str, duration_seconds: float) -> None:
+        """只记批次结果与耗时；有完整 ``ReconResult`` 时应改用 ``observe_recon_result``。"""
+
         if result not in RECON_RESULTS:
             raise MetricError(f"result 必须是 {RECON_RESULTS}，实际 {result!r}")
         self.recon_batches_total.inc(result=result)
         self.recon_batch_duration_seconds.observe(
             _non_negative(duration_seconds, "duration_seconds")
         )
+
+    def observe_recon_result(
+        self, result: Any, *, duration_seconds: float | None = None
+    ) -> None:
+        """把一个批次结果折算成对账质量指标（鸭子类型，不 import ``apps.recon``）。
+
+        口径（README §6.1.1 为唯一权威）：
+
+        - 只统计**供应商侧**行（``supplier_ref`` 非空）；我方单边未匹配不进分母，
+          否则「我方有单、供应商没来」会把匹配率压成假低；
+        - 分母以 ``result.metrics.supplier_lines`` 为准；缺失时退回已归类行数；
+        - ``unaccounted`` = 分母 − 已归类行数（≥0）。长期非 0 说明引擎少给了行；
+        - 自动匹配率按**行级状态**重算，不用 ``metrics.matched_rate``：后者把 merged
+          （状态为「待人工」）也算进 matched，与本层口径不一致；
+        - 每批次只调用一次。不要再叠加 ``record_recon_batch``，否则批次计数翻倍。
+        """
+
+        batch_status = _enum_name(getattr(result, "batch_status", None))
+        label = BATCH_STATUS_TO_RESULT.get(batch_status)
+        if label is None:
+            raise MetricError(
+                f"batch_status 必须是 {sorted(BATCH_STATUS_TO_RESULT)}，"
+                f"实际 {batch_status!r}"
+            )
+        if duration_seconds is not None:
+            self.recon_batch_duration_seconds.observe(
+                _non_negative(duration_seconds, "duration_seconds")
+            )
+
+        counts = {name: 0 for name in RECON_LINE_OUTCOMES}
+        for line in getattr(result, "lines", None) or ():
+            if getattr(line, "supplier_ref", None) is None:
+                continue
+            counts[classify_recon_line(line)] += 1
+
+        declared = getattr(getattr(result, "metrics", None), "supplier_lines", None)
+        supplier_lines = (
+            int(declared)
+            if isinstance(declared, int) and not isinstance(declared, bool)
+            else sum(counts.values())
+        )
+        counted = sum(counts.values())
+        if supplier_lines > counted:
+            counts["unaccounted"] += supplier_lines - counted
+
+        for outcome, amount in counts.items():
+            if amount:
+                self.recon_supplier_lines_total.inc(amount, outcome=outcome)
+
+        self.recon_batches_total.inc(result=label)
+
+        total = sum(counts.values())
+        if total:
+            auto = sum(counts[outcome] for outcome in RECON_AUTO_OUTCOMES)
+            self.recon_batch_auto_match_ratio.observe(auto / total)
+
+        if label == "unreconcilable":
+            self.recon_degraded_batches_total.inc(reason=_degradation_reason(result))
 
     def set_unresolved(self, count: int) -> None:
         self.unresolved_tickets.set(_count_value(count, "unresolved"))
@@ -476,6 +625,38 @@ def _count_value(value: int, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise MetricError(f"{name} 必须是非负整数，实际 {value!r}")
     return value
+
+
+def _enum_name(value: Any) -> str:
+    """取枚举成员名（``LineStatus.MATCHED`` → ``MATCHED``），非枚举按原值转字符串。
+
+    只用 ``.name`` 而不比对 ``.value`` 的中文文案：中文是展示口径，改名不该打穿指标。
+    """
+
+    return str(getattr(value, "name", value))
+
+
+def classify_recon_line(line: Any) -> str:
+    """把一条 ``MatchResultLine`` 归入封闭词表；状态优先于匹配类型。
+
+    ``UNPARSEABLE`` 行虽然 ``match_type`` 是 ``UNMATCHED``，仍单列——它是最需要被看见的
+    降级来源。未识别的状态归 ``unknown``，绝不新造标签值。
+    """
+
+    status = _enum_name(getattr(line, "status", None))
+    if status == "MATCHED":
+        return _MATCH_TYPE_TO_OUTCOME.get(_enum_name(getattr(line, "match_type", None)), "unknown")
+    return _LINE_STATUS_TO_OUTCOME.get(status, "unknown")
+
+
+def _degradation_reason(result: Any) -> str:
+    """从缺失项里取一个封闭的原因标签；没有可用缺失项时为 ``other``。"""
+
+    for item in getattr(result, "missing_items", None) or ():
+        reason = _enum_name(getattr(item, "kind", None)).lower()
+        if reason in RECON_DEGRADATION_REASONS:
+            return reason
+    return "other"
 
 
 def _failure_class_of(trace: Any) -> str | None:

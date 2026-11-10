@@ -196,6 +196,9 @@ location = /erp/api/metrics { deny all; }   # 或 return 404;
 | `smart_erp_write_stage_duration_seconds` | histogram | `stage` | 先 `sum by (le)` 再 `histogram_quantile` | 阶段耗时（秒），默认桶 5ms–10s |
 | `smart_erp_recon_batches_total` | counter | `result` | `sum()` / `sum by (result)` | 对账批次结果：`matched`（已对账）/`pending_manual`（待人工）/`unreconcilable`（无法对账） |
 | `smart_erp_recon_batch_duration_seconds` | histogram | — | 先 `sum by (le)` 再 `histogram_quantile` | 批次耗时（秒），默认桶 1s–600s |
+| `smart_erp_recon_supplier_lines_total` | counter | `outcome` | `sum()` / `sum by (outcome)` | 供应商侧行按行级结果计数（封闭词表见 §6.1.1）；自动匹配率与人工介入率的分子分母 |
+| `smart_erp_recon_batch_auto_match_ratio` | histogram | — | 先 `sum by (le)` 再 `histogram_quantile` | 单批次自动匹配率（0–1），桶 0.5/0.7/0.8/0.9/0.95/0.99/1.0。**不是准确率**，见 §6.1.1 |
+| `smart_erp_recon_degraded_batches_total` | counter | `reason` | `sum()` / `sum by (reason)` | 降级（无法对账）批次按缺失项种类归因：`scope`/`supplier`/`item`/`base_unit`/`unit_conversion`/`line_data`/`other` |
 | `smart_erp_unresolved_tickets` | gauge | — | 全局口径 `max()`；分片队列 `sum()` | 当前 unresolved 工单数 |
 | `smart_erp_compensation_backlog` | gauge | — | `sum()` | 当前待处理补偿任务数（各副本各自的补偿队列相加） |
 | `smart_erp_audit_chain_broken` | gauge | — | `max()` | 审计链断链标志：0 正常 / 1 断链（P0） |
@@ -204,11 +207,75 @@ location = /erp/api/metrics { deny all; }   # 或 return 404;
 
 span → 指标的折算规则：包含任一 `rejected` span 的 trace 计为 `rejected`，否则有 `error` 计为 `failed` 并取第一个 `failure_class`/`fail_code`，都没有则进 `unclassified`；`gateway.preview|write|verify|compensate` 分别累加到对应 `stage`。
 
+### 6.1.1 对账质量口径（自动匹配率 / 人工介入率 / 降级率）
+
+> **自动匹配率 ≠ 准确率。** 仓库内没有人工标注的 ground truth（没有任何一份「正确答案」批次），
+> 所以 accuracy **不可计算**。指标名、告警名、对外材料与口头口径中**一律不得出现 accuracy**；
+> 被问「准确率多少」时，只能回答下面三项，并把分母说清楚。此前出现过的「准确率 0.70」
+> 在两个仓库里都找不到可复现来源，属虚构数字，不得再引用。
+
+唯一计算口径（PromQL 形状，已按多副本聚合）：
+
+| 比率 | 分子 | 分母 |
+|---|---|---|
+| 自动匹配率（行级） | `sum(rate(smart_erp_recon_supplier_lines_total{outcome=~"matched_.*"}[1h]))` | `sum(rate(smart_erp_recon_supplier_lines_total[1h]))` |
+| 人工介入率（行级） | `sum(rate(smart_erp_recon_supplier_lines_total{outcome=~"needs_review\|ambiguous\|candidate\|unmatched\|duplicate\|unparseable\|unknown"}[1h]))` | 同上 |
+| 降级率（批次级） | `sum(rate(smart_erp_recon_batches_total{result="unreconcilable"}[1h]))` | `sum(rate(smart_erp_recon_batches_total[1h]))` |
+
+批次分布（避免小批次被大批次稀释）：`histogram_quantile(0.5, sum by (le) (rate(smart_erp_recon_batch_auto_match_ratio_bucket[6h])))`。
+
+行级 `outcome` 是**封闭词表**（`RECON_LINE_OUTCOMES`）。新增值必须同时改代码、本文与测试，否则序列会悄悄长出来：
+
+| outcome | 来源（`LineStatus.name` / `MatchType.name`） | 计入自动匹配 |
+|---|---|---|
+| `matched_exact` / `matched_fuzzy` / `matched_aggregated` | `MATCHED`，按 `match_type` 拆分 | 是 |
+| `needs_review` | `NEEDS_REVIEW`（含多行合并匹配） | 否 |
+| `ambiguous` | `AMBIGUOUS` | 否 |
+| `candidate` | `CANDIDATE_ONLY` | 否 |
+| `unmatched` | `UNMATCHED_OURS` / `UNMATCHED_SUPPLIER` | 否 |
+| `duplicate` | `DUPLICATE` | 否 |
+| `unparseable` | `UNPARSEABLE`（金额/数量无法解析，不静默当 0） | 否 |
+| `unaccounted` | 合成值：`supplier_lines − 已归类行数` | 否 |
+| `unknown` | 引擎新增、本层未识别的状态 | 否 |
+
+三条实现约束（写在 `MetricsRegistry.observe_recon_result` 的文档里，测试逐条覆盖）：
+
+- **只统计供应商侧行**（`supplier_ref` 非空）。我方单边未匹配不进分母，否则「我方有单、供应商没来」会把匹配率压成假低。
+- **`unaccounted` 与 `unknown` 长期必须为 0**：前者说明引擎声明了行数却少给行，后者说明引擎加了状态但没同步本层。二者与 `ticket_failures_unclassified_total` 同级，属口径缺口，不是正常波动。
+- **分子不用 `ReconMetrics.matched_rate`**：引擎把 merged（状态是「待人工」）也算进 `matched`，与行级口径不一致。本层按 `status` 重算；两边不一致时以行级为准，差异记在引擎侧待修。
+
+`BatchStatus`（中文枚举）→ `result`（既有英文词表）的映射集中在 `BATCH_STATUS_TO_RESULT`：
+
+| `BatchStatus` | `result` |
+|---|---|
+| `RECONCILED`（已对账） | `matched` |
+| `NEEDS_REVIEW`（待人工复核） | `pending_manual` |
+| `NO_CONCLUSION`（无法对账） | `unreconcilable` |
+
+不改 `result` 词表的原因：它已被 T708 的规则文件与看板引用，改名会同时打穿测试与查询；
+映射只写一处，未知状态直接抛 `MetricError`，不允许悄悄多出第四个值。
+
+调用方式（每批次一次，**不要**再叠加 `record_recon_batch`，否则批次计数翻倍）：
+
+```python
+registry.observe_recon_result(result, duration_seconds=elapsed)  # result 为 apps.recon 的 ReconResult
+```
+
+本函数按鸭子类型读取 `batch_status` / `lines` / `metrics.supplier_lines` / `missing_items`，
+**不 import `apps.recon`**，观测层不反向依赖业务流（`tests/observability/test_recon_quality.py` 用 AST 断言这一点）。
+
 ### 6.2 标签克制（硬约束）
 
-- `ticket_id`、`idem_key`、`external_id`、`trace_id`、`span_id`、`batch_id`、`doc_no` 以及任何 `*_id` 后缀**禁止**作为标签，传入即抛 `MetricLabelError`；
+- `ticket_id`、`idem_key`、`external_id`、`trace_id`、`span_id`、`batch_id`、`doc_no`、`supplier_code`、`org_id`、`period`、`status_reason` 以及任何 `*_id` 后缀**禁止**作为标签，传入即抛 `MetricLabelError`；
 - 未声明或缺失的标签同样报错，避免悄悄产生新序列；
 - 工单级细节留在 trace / JSONL 里按需检索，时序库只保留可聚合的低基数维度。
+
+后四个（`supplier_code` / `org_id` / `period` / `status_reason`）是 T709 追加的红线，理由分两类：
+
+- **基数爆炸**：供应商数 × 组织数 × 期间数本身就是笛卡尔积，再乘副本数，几天就能把时序库打穿；这类维度只适合按需查询，不适合常驻序列。
+- **自由文本**：`status_reason` 是中文叙述（「供应商『华东某某』未绑定」），几乎每批次都不同，等价于给每个批次建一条序列；降级原因只能取封闭的 `MissingKind` 归类（见 `smart_erp_recon_degraded_batches_total`）。
+
+需要按供应商 / 期间看质量时，用 `ReconBatchRecord` 做明细查询，不要把它塞进 Prometheus。
 
 ### 6.3 真实输出片段（节选）
 
@@ -226,6 +293,14 @@ smart_erp_write_stage_duration_seconds_count{stage="write"} 2
 smart_erp_recon_batches_total{result="matched"} 1
 smart_erp_recon_batches_total{result="pending_manual"} 1
 smart_erp_recon_batch_duration_seconds_bucket{le="60"} 2
+smart_erp_recon_supplier_lines_total{outcome="matched_exact"} 9
+smart_erp_recon_supplier_lines_total{outcome="unmatched"} 1
+smart_erp_recon_batch_auto_match_ratio_bucket{le="0.5"} 0
+smart_erp_recon_batch_auto_match_ratio_bucket{le="0.9"} 1
+smart_erp_recon_batch_auto_match_ratio_bucket{le="+Inf"} 1
+smart_erp_recon_batch_auto_match_ratio_sum 0.9
+smart_erp_recon_batch_auto_match_ratio_count 1
+smart_erp_recon_degraded_batches_total{reason="scope"} 1
 smart_erp_unresolved_tickets 7
 smart_erp_compensation_backlog 3
 smart_erp_audit_chain_broken 0
@@ -294,13 +369,14 @@ audit_chain_broken=1  max()=1  firing=True
 ## 9. 测试与验证
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/observability -q   # 52 条：约定 / 树 / 链路 / 成本 / 导出 / 指标 / 告警 / 暴露面
+.\.venv\Scripts\python.exe -m pytest tests/observability -q   # 65 条：约定 / 树 / 链路 / 成本 / 导出 / 指标 / 对账质量 / 告警 / 暴露面
 .\.venv\Scripts\python.exe -m pytest tests/e2e -q             # 11 条：健康检查 / 只读 / W3 / 越权 / 审批 / 路由门禁
 ```
 
 全量回归（本次）：`tests=637 failures=0 errors=0 skipped=25`（跳过均为未提供 `ERP_TEST_DATABASE_URL` 的 PG 用例）。
 
 `tests/observability/test_metrics.py` 覆盖：高基数标签拒绝、文本格式与累计桶、span→指标折算（成功 / F6 / rejected / unclassified）、业务指标、`/metrics` 的 200 与 OpenAPI 排除、非 GET 405、默认不挂载与 `ERP_METRICS_ENABLED` 开关。
+`tests/observability/test_recon_quality.py` 覆盖：词表封闭且无 accuracy 指标、观测层不 import `apps.recon`（AST 断言）、只统计供应商侧行、`unaccounted = supplier_lines − 各行之和 == 0` 的自检、`BatchStatus→result` 映射与未知状态报错、降级原因取缺失项而非自由文本、直方图桶边界（`le` 为小于等于）、四条标签红线。
 `tests/observability/test_alerts.py` 覆盖：YAML 解析、规则数量与 `why_paged`、P0 审计断链的 `for: 1m`、表达式引用的指标全部存在、健康/断链两种快照下的触发求值。
 
 ### 9.1 发布前检查（全部通过才可上线）
