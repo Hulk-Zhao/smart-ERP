@@ -88,6 +88,12 @@ class CompensationTask(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
+    # 每次状态变化（认领/完成/失败回队/回收）都刷新；overdue 口径用它判断
+    # 「排队但没人领」的年龄。没有它就只能退回 created_at，重试回队的旧任务
+    # 会被误判为 overdue（created_at 早于 60s 但刚刚才回到 queued）。
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
 
 
 class TicketEventAnchor(Base):

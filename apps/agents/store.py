@@ -50,6 +50,19 @@ class DuplicateStep(StoreError):
     """同一工单内 step_no 重复（断点续跑不得重放已存在的步骤）。"""
 
 
+#: 「已解决」口径（README §6.1.3）：``COMPLETED``（业务成功闭合）与
+#: ``ROLLED_BACK``（补偿成功撤销）必须分开列出——前者外部副作用保留，后者已抵消，
+#: 不能合成一个 ``closed`` 概念。``TERMINATED`` / ``REJECTED`` 是零写入或策略拒绝，
+#: 外部没有残留，同样算解决。其余（含 ``MANUAL_REQUIRED`` 失败没人接住、
+#: ``LOCKED`` 外部已生效待对账）一律计入未解决。
+RESOLVED_TICKET_STATES: tuple[str, ...] = (
+    TicketState.COMPLETED.value,
+    TicketState.ROLLED_BACK.value,
+    TicketState.TERMINATED.value,
+    TicketState.REJECTED.value,
+)
+
+
 @dataclass(frozen=True, slots=True)
 class ProjectionCheck:
     ticket_id: UUID
@@ -161,6 +174,20 @@ class TicketStore:
             if ticket is None:
                 raise TicketNotFound(f"工单不存在: {ticket_id}")
             return ticket
+
+    async def count_unresolved(self) -> int:
+        """全库未解决工单数；口径见 :data:`RESOLVED_TICKET_STATES`。
+
+        采集是旁路：查询失败直接向上抛，由调用方决定「缺样本」，绝不返回 0。
+        """
+
+        async with self._sf() as session:
+            count = await session.scalar(
+                select(func.count())
+                .select_from(Ticket)
+                .where(Ticket.state.notin_(RESOLVED_TICKET_STATES))
+            )
+        return int(count or 0)
 
     async def transition(
         self,
