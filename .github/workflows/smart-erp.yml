@@ -285,6 +285,11 @@ jobs:
 
           PROVISION = pathlib.Path("deploy/smart-erp/db/00-provision.sql")
           MIGRATOR = "erp_test"  # 本 job 跑迁移的角色；生产是 erp_migrator
+          # §4 一条 CREATE SCHEMA + §7 三条 ALTER DEFAULT PRIVILEGES。
+          # 这个数字是刻意的：§4/§7 里新增/删掉一处角色引用时，CI 会红并要求
+          # 作者显式改这里，而不是被裸串替换悄悄带走（少替换 = 少授权）。
+          ROLE_MENTIONS = 4
+          ROLE = re.compile(r"\berp_migrator\b")
           DSN = "postgresql://erp_test:erp_test@127.0.0.1:5432/smart_erp_test"
 
           def section(text: str, number: int) -> str:
@@ -311,10 +316,14 @@ jobs:
 
           async def main() -> None:
               source = PROVISION.read_text(encoding="utf-8")
-              sql = [
-                  stmt.replace("erp_migrator", MIGRATOR)
-                  for stmt in statements(section(source, 4) + section(source, 7))
-              ]
+              raw = statements(section(source, 4) + section(source, 7))
+              mentions = sum(len(ROLE.findall(stmt)) for stmt in raw)
+              if mentions != ROLE_MENTIONS:
+                  raise SystemExit(
+                      f"00-provision.sql §4/§7 里 erp_migrator 实际出现 {mentions} 次，"
+                      f"预期 {ROLE_MENTIONS} 次：请显式更新预期值后再让 CI 替角色名"
+                  )
+              sql = [ROLE.sub(MIGRATOR, stmt) for stmt in raw]
               if not any(
                   "ALTER DEFAULT PRIVILEGES" in stmt and "ON TABLES" in stmt
                   for stmt in sql
