@@ -70,17 +70,21 @@ def upgrade() -> None:
         """
     )
 
+    # executed_at：详情要输出步骤执行时间，C3 的 ticket_step 只有 ``attempt``/
+    # ``latency_ms``，没有时间戳；不补这列则换 DB 后详情里该字段恒为 null。
     op.execute(
         """
         ALTER TABLE erp.ticket_step
             ADD COLUMN IF NOT EXISTS object_type text,
             ADD COLUMN IF NOT EXISTS object_id text,
-            ADD COLUMN IF NOT EXISTS audit_image_id uuid
+            ADD COLUMN IF NOT EXISTS audit_image_id uuid,
+            ADD COLUMN IF NOT EXISTS executed_at timestamptz
         """
     )
 
 
 def downgrade() -> None:
+    op.execute("ALTER TABLE erp.ticket_step DROP COLUMN IF EXISTS executed_at")
     op.execute(
         "ALTER TABLE erp.ticket_step DROP COLUMN IF EXISTS audit_image_id"
     )

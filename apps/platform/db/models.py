@@ -214,6 +214,10 @@ class TicketStep(Base):
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 详情要输出的步骤执行时间（0010）；C3 表只有 attempt/latency_ms。
+    executed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # API 详情要输出的目标对象（0010）；执行器路径这两列为空。
     object_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     object_id: Mapped[str | None] = mapped_column(Text, nullable=True)
