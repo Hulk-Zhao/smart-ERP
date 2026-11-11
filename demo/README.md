@@ -122,8 +122,12 @@ python demo/load.py --all --dsn "$DEMO_DSN"
 docker restart erp_api
 
 # 3) 清桩，回到干净起点：reset 同时归零单号，下一单从 PO-STUB-000001 起
-curl -X POST http://127.0.0.1:8013/stub/reset
+curl -X POST http://127.0.0.1:8021/stub/reset
 ```
+
+> 端口一律以 `docker compose config` 的输出为准（当前 `u8-stub` 的宿主映射是
+> `127.0.0.1:8021:8021`）。**`8013` 是 compensation 的容器内端口，不是桩**，
+> 打到 8013 可能返回 200 却没清任何东西。
 
 **为什么重灌后必须重启 `erp_api`**：种子把工单的 `pending_write.idem_key` 固定成
 `demo-demo-w2-write-9001`，而写结果的幂等缓存在 **API 进程内**
@@ -180,11 +184,12 @@ PGDATABASE=smart_erp PGHOST=<pg-host> PGPORT=5432 PGUSER=erp_migrator PGPASSWORD
 预演 → 写入 → 校验 → 冲销），只把外部系统换成本地桩：
 
 ```bash
-# 终端 A：启动模拟外部系统（默认 127.0.0.1:8013，仅本机监听）
-python -m apps.connectors.u8.stub_server --host 127.0.0.1 --port 8013
+# 终端 A：启动模拟外部系统（端口与 compose 的宿主映射保持一致：8021，仅本机监听）
+# 注意：脚本默认端口是 8013，但 8013 已被 compensation 占用，本地直跑也要显式 --port 8021
+python -m apps.connectors.u8.stub_server --host 127.0.0.1 --port 8021
 
 # 终端 B：让 API 连到桩（不设置则写入显式失败，不会假成功）
-export ERP_U8_BASE_URL=http://127.0.0.1:8013          # PowerShell: $env:ERP_U8_BASE_URL="http://127.0.0.1:8013"
+export ERP_U8_BASE_URL=http://127.0.0.1:8021          # PowerShell: $env:ERP_U8_BASE_URL="http://127.0.0.1:8021"
 ```
 
 种子新增两张锁定 `pending_write` 的待审批工单：
@@ -219,9 +224,9 @@ export ERP_U8_BASE_URL=http://127.0.0.1:8013          # PowerShell: $env:ERP_U8_
 核对「单据到底有没有到 / 有没有冲销」：
 
 ```bash
-curl http://127.0.0.1:8013/stub/receipts    # 已落草稿回执（cCode、received_at、关键字段回显）
-curl http://127.0.0.1:8013/stub/requests    # 桩收到的全部请求；W3 被拒时按下方机械判据检查，不是「整体为空」
-curl http://127.0.0.1:8013/stub/reversals   # 已冲销记录；补偿后出现该 U8 单号
+curl http://127.0.0.1:8021/stub/receipts    # 已落草稿回执（cCode、received_at、关键字段回显）
+curl http://127.0.0.1:8021/stub/requests    # 桩收到的全部请求；W3 被拒时按下方机械判据检查，不是「整体为空」
+curl http://127.0.0.1:8021/stub/reversals   # 已冲销记录；补偿后出现该 U8 单号
 ```
 
 > 零外部写入判据（机械可执行）：`/stub/requests` 中，**方法为 `POST` 或 `DELETE`
@@ -233,7 +238,7 @@ curl http://127.0.0.1:8013/stub/reversals   # 已冲销记录；补偿后出现�
 
 ```bash
 # 让接下来 3 次写入返回 503（工单会停在原状态并显式报错，不会静默成功）
-curl -X POST http://127.0.0.1:8013/stub/fault -H 'Content-Type: application/json' \
+curl -X POST http://127.0.0.1:8021/stub/fault -H 'Content-Type: application/json' \
   -d '{"fail_posts": 3}'
 
 # 恢复后重试同一工单即可；补偿接口会发真实 DELETE 草稿，
