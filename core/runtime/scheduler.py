@@ -17,7 +17,9 @@
 - tick：回收租约过期的 ``running`` 任务（``JobQueueStore.reclaim_stale``），
   可选跑全链审计巡检（``--audit-verify``，断链会被 ``AuditGuard`` 冻结写入）；
   默认还会每 60s 跑一个 ``audit_image`` 链校验时间片（``--no-audit-image-scan``
-  可关），结论写入 ``smart_erp_audit_chain_broken``；
+  可关），结论写入 ``smart_erp_audit_chain_broken``；同时默认每天给每个有审计
+  影像的租户固化一条链锚点（``--no-audit-anchor`` 或 ``ERP_AUDIT_ANCHOR=0`` 可关，
+  demo 档建议关掉）；
 - 退出：释放租约（``owner`` 置空、``expires_at`` 置 now），下一个副本立即接管。
 """
 
@@ -35,6 +37,7 @@ from typing import Sequence
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from apps.audit.anchor import AuditAnchorService
 from apps.audit.ledger import AuditLedger
 from apps.audit.monitor import AuditChainMonitor
 from apps.audit.store import SqlAuditStore
@@ -57,6 +60,10 @@ DEFAULT_TICK_SECONDS = 5.0
 DEFAULT_AUDIT_IMAGE_INTERVAL = 60.0
 DEFAULT_AUDIT_IMAGE_ROWS = 2000
 DEFAULT_AUDIT_IMAGE_PAGE = 200
+# 日切锚点：默认开启（full 档用），demo 档用 --no-audit-anchor / ERP_AUDIT_ANCHOR=0 关。
+# 失败后 60s 内不再重试：5s 一 tick 连着打同一个库错误既没用又会刷日志。
+DEFAULT_AUDIT_ANCHOR = True
+DEFAULT_AUDIT_ANCHOR_RETRY = 60.0
 
 _ACQUIRE_SQL = text(
     """
@@ -94,6 +101,8 @@ class SchedulerStats:
     audit_rows: int = 0
     audit_breaks: int = 0
     audit_errors: int = 0
+    anchor_writes: int = 0
+    anchor_errors: int = 0
 
 
 @dataclass
@@ -112,9 +121,15 @@ class Scheduler:
     audit_image_scan: bool = True
     audit_image_rows: int = DEFAULT_AUDIT_IMAGE_ROWS
     audit_image_interval_seconds: float = DEFAULT_AUDIT_IMAGE_INTERVAL
+    # 日切锚点（B-ANCHOR）：默认开启；demo 档关掉可避免演示环境出现锚点行。
+    audit_anchor: bool = DEFAULT_AUDIT_ANCHOR
+    # 只用于启动日志对账（cli/env/default），不参与调度决策。
+    audit_anchor_source: str = "default"
+    audit_anchor_retry_seconds: float = DEFAULT_AUDIT_ANCHOR_RETRY
     metrics: MetricsRegistry | None = None
     jobs: JobQueueStore = field(init=False)
     audit_chain: AuditChainMonitor | None = field(default=None, init=False)
+    anchor_service: AuditAnchorService | None = field(default=None, init=False)
     stats: SchedulerStats = field(default_factory=SchedulerStats)
     _leader: bool = False
     _stop: asyncio.Event = field(default_factory=asyncio.Event, init=False)
@@ -134,6 +149,11 @@ class Scheduler:
                 rows_per_run=self.audit_image_rows,
                 page_size=DEFAULT_AUDIT_IMAGE_PAGE,
                 interval_seconds=self.audit_image_interval_seconds,
+            )
+        if self.audit_anchor:
+            self.anchor_service = AuditAnchorService(
+                ledger=AuditLedger(store=SqlAuditStore(self.session_factory)),
+                retry_seconds=self.audit_anchor_retry_seconds,
             )
 
     # ---------------------------------------------------------------- 租约
@@ -232,6 +252,18 @@ class Scheduler:
                             scan.cycle_completed,
                             scan.elapsed_ms,
                         )
+        if self.anchor_service is not None:
+            try:
+                anchor = await self.anchor_service.step()
+            except Exception:
+                # 写失败不补假值：不写 0 条锚点，也不当天记成功——退避后重试。
+                self.stats.anchor_errors += 1
+                logger.exception("审计锚点写入失败：本日锚点留待下轮重试")
+                result["audit_anchor_error"] = 1
+            else:
+                if anchor is not None:
+                    self.stats.anchor_writes += 1
+                    result["audit_anchor_count"] = anchor.record_count
         return result
 
     # ---------------------------------------------------------------- 生命周期
@@ -253,13 +285,16 @@ class Scheduler:
         # 三个数一起打：配置值 / 租约 / 实际生效间隔。注释会腐烂，这行日志不会——
         # 「我设了 60 为什么 15 秒一跳」的答案必须在 docker logs 里。
         logger.info(
-            "scheduler %s 启动 scope=%s tick_seconds=%s source=%s lease=%ss effective=%ss",
+            "scheduler %s 启动 scope=%s tick_seconds=%s source=%s lease=%ss effective=%ss "
+            "audit_anchor=%s anchor_source=%s",
             self.owner,
             self.scope,
             self.tick_seconds,
             self.tick_source,
             self.lease_seconds,
             interval,
+            self.audit_anchor,
+            self.audit_anchor_source,
         )
         try:
             while not self._stop.is_set():
@@ -294,6 +329,9 @@ class Scheduler:
 
 
 _TICK_ENV = "ERP_SCHEDULER_TICK_SECONDS"
+_AUDIT_ANCHOR_ENV = "ERP_AUDIT_ANCHOR"
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+_FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 
 
 def _tick_seconds_from_env() -> tuple[float, str]:
@@ -315,6 +353,27 @@ def _tick_seconds_from_env() -> tuple[float, str]:
     if value <= 0:
         raise SystemExit(f"{_TICK_ENV}={raw!r} 必须 > 0")
     return value, "env"
+
+
+def _audit_anchor_from_env() -> tuple[bool, str]:
+    """未给 --audit-anchor/--no-audit-anchor 时读环境变量，返回 (开关, 来源)。
+
+    与 tick 同口径：空值回落默认（开启）；写了非法值直接 SystemExit 并带键名，
+    不静默当成「关」——那会让 full 档以为锚点在跑而实际没有。
+    """
+
+    raw = os.environ.get(_AUDIT_ANCHOR_ENV)
+    if raw is None or not raw.strip():
+        return DEFAULT_AUDIT_ANCHOR, "default"
+    value = raw.strip().lower()
+    if value in _TRUE_VALUES:
+        return True, "env"
+    if value in _FALSE_VALUES:
+        return False, "env"
+    raise SystemExit(
+        f"{_AUDIT_ANCHOR_ENV}={raw!r} 不是布尔值；取 1/0、true/false、on/off、yes/no，"
+        f"留空或删除该变量则默认{'开启' if DEFAULT_AUDIT_ANCHOR else '关闭'}"
+    )
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -353,6 +412,15 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_AUDIT_IMAGE_INTERVAL,
         help="两个校验时间片的最小间隔秒数（默认 %(default)s）",
     )
+    parser.add_argument(
+        "--audit-anchor",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            f"日切锚点开关；默认开启（也可用 {_AUDIT_ANCHOR_ENV}=0 关闭）。"
+            "demo 档建议 --no-audit-anchor"
+        ),
+    )
     parser.add_argument("--ticks", type=int, default=None, help="跑 N 个 tick 后退出")
     parser.add_argument(
         "--once", action="store_true", help="等价于 --ticks 1（冒烟/复验用）"
@@ -362,6 +430,10 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         args.tick_seconds, args.tick_source = _tick_seconds_from_env()
     else:
         args.tick_source = "cli"
+    if args.audit_anchor is None:
+        args.audit_anchor, args.audit_anchor_source = _audit_anchor_from_env()
+    else:
+        args.audit_anchor_source = "cli"
     return args
 
 
@@ -379,6 +451,8 @@ async def _amain(args: argparse.Namespace) -> SchedulerStats:
             audit_image_scan=not args.no_audit_image_scan,
             audit_image_rows=args.audit_image_rows,
             audit_image_interval_seconds=args.audit_image_interval_seconds,
+            audit_anchor=args.audit_anchor,
+            audit_anchor_source=args.audit_anchor_source,
         )
         max_ticks = 1 if args.once else args.ticks
         return await scheduler.run(max_ticks=max_ticks, install_signals=True)
