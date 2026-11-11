@@ -112,15 +112,22 @@ describe('计量表：四类行 + data_gaps 显式可见 + CSV 摘要', () => {
 
     expect(await screen.findByText(/计量表 · 批次/)).toBeInTheDocument();
 
-    // 四类行：口径数字与可下钻桶名分开，术语按接口字段语义一一对应
+    // 四类行：口径数字与可下钻桶名分开，名称按后端三个行数定义一一对应
     const caliber = screen.getByTestId('metering-caliber');
-    expect(caliber).toHaveTextContent('供应商对账单行数（应处理）');
-    expect(caliber).toHaveTextContent('有效对账行数');
-    expect(caliber).toHaveTextContent('计费行数（billable 桶）');
-    // 两个数当前相等，页面必须解释为什么：本期无扣减；扣减上线后会分开
-    expect(screen.getByTestId('metering-valid-vs-billable')).toHaveTextContent(
-      '本期无扣减，故两者相等；发生扣减后计费行数将小于有效对账行数。',
+    expect(within(caliber).getByText('供应商对账单行数（应处理）')).toBeInTheDocument();
+    expect(within(caliber).getByText('有效对账行')).toBeInTheDocument();
+    expect(within(caliber).getByText('计费行数')).toBeInTheDocument();
+    expect(within(caliber).getByText('总对账行')).toBeInTheDocument();
+    // 本期扣减为 0 时数值相等，但口径不同；页面只解释上界，不再声称「两者相等」
+    const validVsBillable = screen.getByTestId('metering-valid-vs-billable');
+    expect(validVsBillable).toHaveTextContent(
+      `有效对账行 ${statementBody.auto_released_lines}（auto_released_lines = billable 桶 + auto_released 桶）`,
     );
+    expect(validVsBillable).toHaveTextContent(
+      `计费行数 ${statementBody.billable_lines}（billable_lines = billable 桶行数）`,
+    );
+    expect(validVsBillable).toHaveTextContent('按 0 扣减，所以计费行数是上界');
+    expect(validVsBillable).not.toHaveTextContent('两者相等');
     expect(screen.getByTestId('metering-bucket-billable')).toHaveTextContent('计费行（billable 桶）');
     expect(screen.getByTestId('metering-bucket-auto_released')).toHaveTextContent('自动放行但扣减');
     expect(screen.getByTestId('metering-bucket-dispute_hold')).toHaveTextContent('争议挂起');
@@ -140,13 +147,13 @@ describe('计量表：四类行 + data_gaps 显式可见 + CSV 摘要', () => {
     expect(within(gaps).getByText('这几项暂无数据源')).toBeVisible();
     expect(within(gaps).getByText(/无法计算封顶余额/)).toBeVisible();
 
-    // 上界说明：计费行数（billable 桶）是上界，且明确与有效对账行数分开
+    // 上界说明：计费行数（billable_lines）是上界，且明确与有效对账行分开
     const bound = screen.getByTestId('metering-upper-bound');
-    expect(within(bound).getByText(/计费行数（billable 桶）是上界，不是精确值/)).toBeVisible();
+    expect(within(bound).getByText(/计费行数（billable_lines）是上界，不是精确值/)).toBeVisible();
     expect(within(bound).getByText(/已确认错放行（confirmed_misrelease_lines）/)).toBeVisible();
     expect(within(bound).getByText(/客户原因（customer_reason_lines）/)).toBeVisible();
     expect(within(bound).getByTestId('metering-billable-lines')).toHaveTextContent(String(statementBody.billable_lines));
-    expect(within(bound).getByText(/只数 billable 桶，不等于「有效对账行数」/)).toBeVisible();
+    expect(within(bound).getByText(/只数 billable 桶，不等于有效对账行/)).toBeVisible();
     expect(within(bound).getByTestId('metering-valid-lines')).toHaveTextContent(String(statementBody.auto_released_lines));
 
     // calculation 算式：页面原样展示服务端文本，断言从 fixture 取，不抄数字
@@ -154,9 +161,46 @@ describe('计量表：四类行 + data_gaps 显式可见 + CSV 摘要', () => {
     expect(amountCalc).toBeTruthy();
     expect(screen.getByText(literal(amountCalc as string))).toBeInTheDocument();
 
-    // 契约文案缺口：API 修好 calculation 文案后，一并删除 MeteringPage 的 metering-calculation-gap、
-    // mock.ts 中镜像的两行文案，以及下面这条断言
-    expect(screen.getByTestId('metering-calculation-gap')).toBeVisible();
+    // 后端已修正口径文案：前端只保留「以后端为源」，不再标注契约文案缺口
+    expect(screen.getByTestId('metering-calculation-gap')).toHaveTextContent('口径文字以后端为源');
+  });
+
+  it('有效对账行 2 ≠ 计费行数 1：两个口径各自展示，且计费写明上界', async () => {
+    const base = meteringStatement();
+    statementBody = {
+      ...base,
+      expected_lines: 2,
+      line_count: 2,
+      auto_released_lines: 2,
+      billable_lines: 1,
+      confirmed_misrelease_lines: 1,
+      excluded_lines: { ...base.excluded_lines, total: 0, dispute_hold: 0, other_unbillable: 0, misrelease: 1, other_reasons: {} },
+      line_accounting: '应处理 2 = 自动放行 2 + 争议挂起 0 + 其他不计费 0（明细行合计 2）',
+      period_amount: '0.8000',
+      calculation: [
+        '总对账行数（line_count，批次内全部行）= 2',
+        '有效对账行数（auto_released_lines，行级 auto）= billable 桶 2 + auto_released 桶 0 = 2',
+        '计费行数（billable_lines，billable 桶行数）= 1（上界：扣减源接入后只会下调）',
+        '本期金额 = 计费行数 1 × 单行单价 0.8000 = 0.8000 CNY',
+      ],
+      lines: (base.lines ?? []).slice(0, 2),
+    };
+
+    renderPage(<MeteringPage />, {
+      route: `/recon/${BATCH_ID}/metering`,
+      path: '/recon/:batchId/metering',
+    });
+
+    await screen.findByText(/计量表 · 批次/);
+
+    // 关键：有效 2、计费 1，证明页面没有把两个字段互相代称，也不是只在相等时才对。
+    expect(screen.getByTestId('metering-valid-lines')).toHaveTextContent('2');
+    expect(screen.getByTestId('metering-billable-lines')).toHaveTextContent('1');
+    const box = screen.getByTestId('metering-valid-vs-billable');
+    expect(box).toHaveTextContent('有效对账行 2');
+    expect(box).toHaveTextContent('计费行数 1');
+    expect(box).toHaveTextContent('计费行数是上界');
+    expect(screen.getByTestId('metering-bucket-billable')).toHaveTextContent('2');
   });
 
   it('四类行卡片数字与下钻列表行数逐一相等（D8 验收）', async () => {

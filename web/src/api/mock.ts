@@ -939,7 +939,8 @@ function metering(): MeteringStatementOut {
     expected_lines: 64,
     auto_released_lines: 59,
     billable_lines: 59,
-    billable_basis: '自动放行 − 已确认错放行 − 客户原因',
+    billable_basis:
+      'billable_lines = auto_released_lines − confirmed_misrelease_lines − customer_reason_lines；后两项当前无数据源，按 0 扣减，故为可计费上界',
     excluded_lines: { total: 5, dispute_hold: 3, other_unbillable: 2, misrelease: null, customer_reason: null, other_reasons: { 重复单据: 2 } },
     unit_price: '0.8000',
     unit_price_source: 'ERP_METERING_UNIT_PRICE',
@@ -961,10 +962,12 @@ function metering(): MeteringStatementOut {
       '其他不计费行数 = 供应商侧未匹配/重复计费/不可解析 = 2',
       '计费桶 = billable 59 + auto_released 0 + dispute_hold 3 + other_unbillable 2 = 明细行数 64（逐行 billing_bucket 与计数同源）',
       '已确认错放行行数 = 无数据源（未接入，按 0 扣减）；客户原因不计费行数 = 无数据源（未接入，按 0 扣减）',
-      // 下面两行镜像自 apps/api/metering.py 的 calculation 原文：服务端把 billable_count 写作「有效对账行数」，是错的。
-      // API 修好文案后必须同步改这里，否则 mock（演示与截图来源）会与契约长期不一致。
-      '有效对账行数 = 自动放行 59 − 已确认错放行 0 = 59（上界：确认数据接入后只会下调）',
-      '本期金额 = 有效对账行数 59 × 单行单价 0.8000 = 47.2000 CNY',
+      // 服务端已分离三个行数，mock 只做镜像：有效对账行 = billable 桶 + auto_released 桶；
+      // 计费行数 = billable 桶行数（扣减源未接入，按 0 扣减，故为上界）。
+      '总对账行数（line_count，批次内全部行）= 64',
+      '有效对账行数（auto_released_lines，行级 auto）= billable 桶 59 + auto_released 桶 0 = 59',
+      '计费行数（billable_lines，billable 桶行数）= 59（上界：扣减源接入后只会下调）',
+      '本期金额 = 计费行数 59 × 单行单价 0.8000 = 47.2000 CNY',
       '累计金额 = 已计金额 120.0000 + 本期金额 47.2000 = 167.2000',
       '未配置封顶金额（ERP_METERING_CAP_AMOUNT），封顶余额不可核对',
     ],

@@ -45,7 +45,7 @@ function Metric({
 }
 
 // 桶名按接口 billing_bucket 的实际语义命名：
-// billable 只是计费桶，不等于「应处理行数」（expected_lines），也不等于「有效对账行数」（auto_released_lines）。
+// billable 只是计费桶，不等于「应处理行数」（expected_lines），也不等于「有效对账行」（auto_released_lines）。
 const BUCKET_LABEL: Record<BillingBucket, string> = {
   billable: '计费行（billable 桶）',
   auto_released: '自动放行但扣减',
@@ -410,28 +410,29 @@ export function MeteringPage() {
               {/* auto_released_lines 是计数字段（行级 auto 合计），与已删除的 auto_released 桶不是一回事：
                   字段值 ≠ 桶计数（桶恒 0，字段为 59）。删桶不等于删这个字段。 */}
               <Metric
-                label="有效对账行数"
+                label="有效对账行"
                 value={String(data.auto_released_lines)}
-                hint="行级 auto，含已自动归因的差异行（auto_released_lines）"
+                hint="auto_released_lines = billable 桶 + auto_released 桶（行级 auto）"
                 tone="text-emerald-700"
               />
               <Metric
-                label="计费行数（billable 桶）"
+                label="计费行数"
                 value={String(data.billable_lines)}
-                hint="billable_lines = 自动放行 − 已确认错放行 − 客户原因（上界）"
+                hint="billable_lines = billable 桶行数；扣减源未接入按 0 扣减，故为上界"
               />
               <Metric
-                label="本次明细行数"
+                label="总对账行"
                 value={String(data.line_count)}
-                hint={`接口本次返回 ${allLines.length} 行；与对账单不一致时见 data_gaps`}
+                hint={`line_count（批次内全部行，含我方侧与不可解析行）；本次返回 ${allLines.length} 行`}
               />
             </div>
           </div>
 
-          {/* 两数本期相等必须当场解释，否则扣减上线后分开会被当成系统算错 */}
+          {/* 两数口径不同：本期扣减为 0 时数值相等，但计费行数是上界，必须当场解释 */}
           <p className="break-words rounded-lg bg-slate-50 px-3 py-2 text-[10.5px] leading-4 text-slate-600" data-testid="metering-valid-vs-billable">
-            有效对账行数 {data.auto_released_lines} 与计费行数 {data.billable_lines} 定义不同：
-            {'本期无扣减，故两者相等；发生扣减后计费行数将小于有效对账行数。'}
+            有效对账行 {data.auto_released_lines}（auto_released_lines = billable 桶 + auto_released 桶）与计费行数{' '}
+            {data.billable_lines}（billable_lines = billable 桶行数）定义不同：计费行数还要扣减已确认错放行与客户原因；
+            后两项当前无数据源，按 0 扣减，所以计费行数是上界，扣减源接入后只会下调。
           </p>
 
           <div>
@@ -514,7 +515,7 @@ export function MeteringPage() {
             className="min-w-0 rounded-xl border border-indigo-200 bg-indigo-50/70 px-3 py-2.5 text-[11px] leading-5 text-indigo-950"
             data-testid="metering-upper-bound"
           >
-            <b>计费行数（billable 桶）是上界，不是精确值。</b>口径：{data.billable_basis}
+            <b>计费行数（billable_lines）是上界，不是精确值。</b>口径：{data.billable_basis}
             。{deductionText}{data.line_accounting}
             。当前计费行数（billable_lines）：
             <span className="font-mono" data-testid="metering-billable-lines">
@@ -522,11 +523,11 @@ export function MeteringPage() {
             </span>
             。
             <span className="mt-1 block break-words">
-              注意：billable_lines 只数 billable 桶，不等于「有效对账行数」；有效对账行数为 auto_released_lines ={' '}
+              注意：计费行数只数 billable 桶，不等于有效对账行（auto_released_lines = billable 桶 + auto_released 桶）= {' '}
               <span className="font-mono" data-testid="metering-valid-lines">
                 {data.auto_released_lines}
               </span>
-              （行级 auto，含已自动归因的差异行）。
+              （行级 auto）。
             </span>
           </div>
         </div>
@@ -550,10 +551,7 @@ export function MeteringPage() {
         </ol>
         {(data.calculation ?? []).length > 0 ? (
           <p className="mt-1 break-words px-4 pb-3 text-[10px] leading-4 text-amber-700" data-testid="metering-calculation-gap">
-            服务端 calculation 文案把 billable_lines 写作「有效对账行数」，与商务口径不一致；前端不改写契约原文
-            （mock.ts 中同样是错的：那两行镜像自 apps/api/metering.py，演示与截图都取自它）。
-            字段映射以上方「有效对账行数 = auto_released_lines、计费行数 = billable_lines」为准。
-            删除条件：API 修好文案后，删除本标注、mock 中的镜像文案，以及断言本标注的用例。
+            口径文字以后端为源。
           </p>
         ) : null}
       </section>
