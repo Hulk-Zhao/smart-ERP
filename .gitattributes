@@ -24,9 +24,12 @@
 .gitignore text
 .gitattributes text
 
+# 演示数据：CRLF 变体必须原样入库（否则 * text=auto 会把它归一成 LF，
+# 「CRLF 也能解析」的演示文件就失去意义）
+fixtures/recon/upload_demo/*_crlf.csv -text
+
 # 二进制文件不做换行转换
-*.png binary
-*.jpg binary
+*.png binary*.jpg binary
 *.jpeg binary
 *.gif binary
 *.ico binary
