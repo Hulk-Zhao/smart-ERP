@@ -17,7 +17,15 @@ from apps.connectors.canonical.mapping import MappingContext, MappingOutcome
 from apps.connectors.canonical.models import Item
 from apps.connectors.errors import ConnectorError, ErrorKind
 from apps.connectors.health import HealthTracker
-from apps.connectors.u8.actions import ACTIONS, ACTIONS_BY_KEY, PO_DRAFT_KEY
+from apps.connectors.u8.actions import (
+    ACTIONS,
+    ACTIONS_BY_KEY,
+    ARRIVAL_DELETE_KEY,
+    ARRIVAL_DRAFT_KEY,
+    DELETE_ACTIONS,
+    PO_DELETE_KEY,
+    PO_DRAFT_KEY,
+)
 from apps.connectors.u8.mapping import (
     map_arrival_vouch,
     map_item,
@@ -263,6 +271,21 @@ class U8Connector(BaseConnector):
     async def preview(self, action: ActionSpec, payload: Mapping[str, Any]) -> PreviewResult:
         if action.key not in ACTIONS_BY_KEY:
             raise ValueError(f"动作 {action.key} 不属于 u8 连接器")
+        if action.key in DELETE_ACTIONS:
+            # 反向动作：冲销前像 = 现存草稿。查不到就不编前像，由网关判零写入。
+            c_code = str(payload.get("cCode") or "").strip()
+            existing = (
+                await self._transport.get_draft_by_code(action.key, c_code) if c_code else None
+            )
+            return PreviewResult(
+                diff=(
+                    (FieldDiffEntry(field="exists", before=True, after=False),)
+                    if existing is not None
+                    else ()
+                ),
+                before=dict(existing) if existing is not None else None,
+                verify_spec=action.verify or VerifySpec(kind="read_by_business_key"),
+            )
         source_doc_no = str(payload.get("source_doc_no") or "").strip()
         if not source_doc_no:
             # 没有业务键 → 拿不到前像 → 由网关判零写入，不在这里编一个假前像。
@@ -302,6 +325,16 @@ class U8Connector(BaseConnector):
     # -------------------------------------------------------------------- verify
     async def verify(self, spec: VerifySpec, payload: Mapping[str, Any]) -> VerifyResult:
         action_key = _action_key_of_spec(spec)
+        if action_key in DELETE_ACTIONS:
+            # 冲销的「成功」= 外部系统里查不到这张草稿。
+            c_code = str(payload.get("cCode") or "").strip()
+            if not c_code:
+                return VerifyResult(status="absent", observed=None)
+            observed = await self._transport.get_draft_by_code(action_key, c_code)
+            return VerifyResult(
+                status="match" if observed is None else "mismatch",
+                observed=dict(observed) if observed is not None else None,
+            )
         source_doc_no = str(payload.get("source_doc_no") or "").strip()
         if action_key is None or not source_doc_no:
             return VerifyResult(status="absent", observed=None)
@@ -352,11 +385,12 @@ def _describe_error(exc: BaseException) -> str:
 
 
 def _action_key_of_spec(spec: VerifySpec) -> str | None:
-    if spec.kind == "read_po_draft_by_source":
-        return PO_DRAFT_KEY
-    if spec.kind == "read_arrival_draft_by_source":
-        return "u8.arrival.create_draft"
-    return None
+    return {
+        "read_po_draft_by_source": PO_DRAFT_KEY,
+        "read_arrival_draft_by_source": ARRIVAL_DRAFT_KEY,
+        "read_po_draft_by_code": PO_DELETE_KEY,
+        "read_arrival_draft_by_code": ARRIVAL_DELETE_KEY,
+    }.get(spec.kind)
 
 
 def _comp_action_key(comp: Any) -> str | None:

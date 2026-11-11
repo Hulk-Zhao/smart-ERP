@@ -75,9 +75,9 @@
   "erp_counts": {
     "recon_batches": 3,
     "recon_lines": 312,
-    "tickets": 16,
+    "tickets": 18,
     "ticket_steps": 20,
-    "ticket_events": 61,
+    "ticket_events": 65,
     "audit_images": 18,
     "approval_records": 25,
     "recon_line_links": 16,
@@ -144,6 +144,6 @@
     "ticket_case.csv": "4957287b083c2eae78c41917013d7528b7a023b8445484b24168297db07f2e2d",
     "promotion.csv": "9e78318b4bbec9c5f86650940a78a8762e63042c5ca38c752a24846e0fe8cb09",
     "rebate_accrual.csv": "1227f4e650ca7438e934fb74eef4a2efb0c4cce57be7531f96e93e365fdc2dc6",
-    "erp_seed.json": "9dee4b1e824a647a7dd8ae836c4b9e7698dbd6b168bc39a35f32ce01d0649018"
+    "erp_seed.json": "43dfc3edc9fd7a9775f9b0ad9f3b8e3412e62453101b2f685475dcd554b25648"
   }
 }

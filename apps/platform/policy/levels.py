@@ -92,6 +92,8 @@ class ActionSpec:
     verify: VerifySpec | None = None
     rate_limit: RateLimit = field(default_factory=RateLimit)
     idempotent: bool = True
+    #: 只允许由补偿链路执行；带此标记的动作不能被当作工单的正向写入动作。
+    compensation_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)

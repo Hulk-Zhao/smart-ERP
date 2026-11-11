@@ -55646,6 +55646,94 @@
       "amount": "39000.00",
       "pending_write": null,
       "updated_at": "2026-10-14T03:20:00+08:00"
+    },
+    {
+      "id": "1663f3f9-6b75-5b4e-9c3c-a4c4cf5c1931",
+      "tenant_id": "9e2c3df6-4320-5ded-b2b1-6d0ebaa1a603",
+      "ticket_no": "DEMO-W2-WRITE-9001",
+      "scene_code": "ag2_processing_fee",
+      "initiator_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "trigger_kind": "manual",
+      "business_key": "PO-STUB-DEMO-W2-WRITE-9001",
+      "state": "待审批",
+      "version": 1,
+      "diff_amount": "5000.00",
+      "systems_count": 1,
+      "touches_fund": false,
+      "lease_owner": null,
+      "lease_expires_at": null,
+      "created_at": "2026-11-11T10:05:00+08:00",
+      "org_id": "ORG-SH",
+      "period": "2026-09",
+      "systems": [
+        "u8"
+      ],
+      "write_level": 2,
+      "amount": "5000.00",
+      "pending_write": {
+        "action_key": "u8.po.create_draft",
+        "system": "u8",
+        "payload": {
+          "source_doc_no": "PO-STUB-DEMO-W2-WRITE-9001",
+          "supplier_code": "S-SUG-0001",
+          "doc_date": "2026-11-11",
+          "lines": [
+            {
+              "item_code": "FG-SPK-0001",
+              "quantity": "10",
+              "unit": "PCS",
+              "unit_price": "12.50"
+            }
+          ],
+          "memo": "演示：写入模拟外部系统（u8-stub），不是真实 U8 —— DEMO-W2-WRITE-9001"
+        },
+        "idem_key": "demo-demo-w2-write-9001"
+      },
+      "updated_at": "2026-11-11T12:05:00+08:00"
+    },
+    {
+      "id": "bdca42f8-52ef-56d8-aa6e-a9c1fe92c77c",
+      "tenant_id": "9e2c3df6-4320-5ded-b2b1-6d0ebaa1a603",
+      "ticket_no": "DEMO-W3-FUND-9002",
+      "scene_code": "ag2_processing_fee",
+      "initiator_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "trigger_kind": "manual",
+      "business_key": "PO-STUB-DEMO-W3-FUND-9002",
+      "state": "待审批",
+      "version": 1,
+      "diff_amount": "100.00",
+      "systems_count": 1,
+      "touches_fund": true,
+      "lease_owner": null,
+      "lease_expires_at": null,
+      "created_at": "2026-11-11T10:05:00+08:00",
+      "org_id": "ORG-SH",
+      "period": "2026-09",
+      "systems": [
+        "u8"
+      ],
+      "write_level": 3,
+      "amount": "100.00",
+      "pending_write": {
+        "action_key": "u8.po.create_draft",
+        "system": "u8",
+        "payload": {
+          "source_doc_no": "PO-STUB-DEMO-W3-FUND-9002",
+          "supplier_code": "S-SUG-0001",
+          "doc_date": "2026-11-11",
+          "lines": [
+            {
+              "item_code": "FG-SPK-0001",
+              "quantity": "10",
+              "unit": "PCS",
+              "unit_price": "12.50"
+            }
+          ],
+          "memo": "演示：写入模拟外部系统（u8-stub），不是真实 U8 —— DEMO-W3-FUND-9002"
+        },
+        "idem_key": "demo-demo-w3-fund-9002"
+      },
+      "updated_at": "2026-11-11T12:05:00+08:00"
     }
   ],
   "ticket_steps": [
@@ -57263,6 +57351,76 @@
       "prev_hash": "8f384a15789fcb903b2259ea653bf7c216dca06f91507d743f815a97d9eee573",
       "hash": "2c381cd08bae790b656a77efc1d96532561dd5abb5c7bc2699c8b34ea54496e0",
       "created_at": "2026-10-14T03:20:00+08:00"
+    },
+    {
+      "id": "de8265b7-3c5a-5f8b-a29c-39913ed16848",
+      "tenant_id": "9e2c3df6-4320-5ded-b2b1-6d0ebaa1a603",
+      "ticket_id": "1663f3f9-6b75-5b4e-9c3c-a4c4cf5c1931",
+      "seq": 1,
+      "event_type": "created",
+      "from_state": null,
+      "to_state": "计划中",
+      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "payload": {
+        "ticket_no": "DEMO-W2-WRITE-9001",
+        "subject": "委外加工费差异（演示：审批后写入模拟外部系统 u8-stub）"
+      },
+      "trace_id": "b0087e5a85f1cf3744fb826ecf7e53d4",
+      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "hash": "59e52fb2e83b7bf5bba8898c1112cd8054e4970fdf380ccf1e65d7f70ac23c5d",
+      "created_at": "2026-11-11T10:05:00+08:00"
+    },
+    {
+      "id": "197fd43b-09ea-535d-a538-62162f27e34e",
+      "tenant_id": "9e2c3df6-4320-5ded-b2b1-6d0ebaa1a603",
+      "ticket_id": "1663f3f9-6b75-5b4e-9c3c-a4c4cf5c1931",
+      "seq": 2,
+      "event_type": "transition",
+      "from_state": "计划中",
+      "to_state": "待审批",
+      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "payload": {
+        "reason": "委外加工费差异（演示：审批后写入模拟外部系统 u8-stub）"
+      },
+      "trace_id": "f9333607f48188428321d326469c635b",
+      "prev_hash": "59e52fb2e83b7bf5bba8898c1112cd8054e4970fdf380ccf1e65d7f70ac23c5d",
+      "hash": "34809595bdb0d1a2d053643da1204619cc2c5b039a31277af747be2426771f50",
+      "created_at": "2026-11-11T12:05:00+08:00"
+    },
+    {
+      "id": "e1854f34-508f-5b5d-a443-d339860c6fde",
+      "tenant_id": "9e2c3df6-4320-5ded-b2b1-6d0ebaa1a603",
+      "ticket_id": "bdca42f8-52ef-56d8-aa6e-a9c1fe92c77c",
+      "seq": 1,
+      "event_type": "created",
+      "from_state": null,
+      "to_state": "计划中",
+      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "payload": {
+        "ticket_no": "DEMO-W3-FUND-9002",
+        "subject": "资金类写入（演示：W3 硬拒绝，不产生任何外部写入）"
+      },
+      "trace_id": "62bdb5dec68d8bf7ce15b349fd52d270",
+      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "hash": "ccbe5edc70860fb521dfd450832bcbb7280918c342f6790e7f27ff05ba8f7ed8",
+      "created_at": "2026-11-11T10:05:00+08:00"
+    },
+    {
+      "id": "a7cf5dba-d7f3-541e-8e58-09504c6e22fc",
+      "tenant_id": "9e2c3df6-4320-5ded-b2b1-6d0ebaa1a603",
+      "ticket_id": "bdca42f8-52ef-56d8-aa6e-a9c1fe92c77c",
+      "seq": 2,
+      "event_type": "transition",
+      "from_state": "计划中",
+      "to_state": "待审批",
+      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "payload": {
+        "reason": "资金类写入（演示：W3 硬拒绝，不产生任何外部写入）"
+      },
+      "trace_id": "fe9bbf896d8f5df89e1ca77429b6dec8",
+      "prev_hash": "ccbe5edc70860fb521dfd450832bcbb7280918c342f6790e7f27ff05ba8f7ed8",
+      "hash": "345cd810c769ab6e807d11e686560a3633b8b3336dc5f19b9083eedfaafee4c4",
+      "created_at": "2026-11-11T12:05:00+08:00"
     }
   ],
   "audit_images": [

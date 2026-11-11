@@ -150,6 +150,49 @@ PGDATABASE=smart_erp PGHOST=<pg-host> PGPORT=5432 PGUSER=erp_migrator PGPASSWORD
 
 细节见 [cloud/README.md](cloud/README.md)。
 
+## 演示写路径：模拟外部系统（u8-stub）
+
+> ⚠️ `apps/connectors/u8/stub_server.py` 是**模拟外部系统（stub）**，不是真实 U8，
+> 也不是任何真实 ERP。启动横幅、响应体 `simulated: true`、响应头
+> `X-Simulated-System: u8-stub` 都明确标注；**禁止**把它当生产对接，也禁止在生产环境指向它。
+
+演示里的「跨系统写入 + 可审计回滚」走真实 U8 连接器（`apps/connectors/u8`，真实 HTTP
+预演 → 写入 → 校验 → 冲销），只把外部系统换成本地桩：
+
+```bash
+# 终端 A：启动模拟外部系统（默认 127.0.0.1:8013，仅本机监听）
+python -m apps.connectors.u8.stub_server --host 127.0.0.1 --port 8013
+
+# 终端 B：让 API 连到桩（不设置则写入显式失败，不会假成功）
+export ERP_U8_BASE_URL=http://127.0.0.1:8013          # PowerShell: $env:ERP_U8_BASE_URL="http://127.0.0.1:8013"
+```
+
+种子新增两张锁定 `pending_write` 的待审批工单：
+
+| 工单号 | 写入等级 | 预期结果 |
+| --- | --- | --- |
+| `DEMO-W2-WRITE-9001` | W2 | U8 是 B 级连接器，强制双人复核（`reviewer` + `approver`）；审批通过后真实 `POST` 到桩，回执含 U8 单号/时间戳/关键字段，审计影像有 `field_diff` |
+| `DEMO-W3-FUND-9002` | W3 | 在 AccessGate 被 `E-POLICY-W3FORBIDDEN` 拒绝，桩的 `/stub/requests` 保持为空（**零外部写入**） |
+
+核对「单据到底有没有到 / 有没有冲销」：
+
+```bash
+curl http://127.0.0.1:8013/stub/receipts    # 已落草稿回执（cCode、received_at、关键字段回显）
+curl http://127.0.0.1:8013/stub/requests    # 桩收到的全部请求；W3 被拒时应为空
+curl http://127.0.0.1:8013/stub/reversals   # 已冲销记录；补偿后出现该 U8 单号
+```
+
+失败与补偿演练：
+
+```bash
+# 让接下来 3 次写入返回 503（工单会停在原状态并显式报错，不会静默成功）
+curl -X POST http://127.0.0.1:8013/stub/fault -H 'Content-Type: application/json' \
+  -d '{"fail_posts": 3}'
+
+# 恢复后重试同一工单即可；补偿接口会发真实 DELETE 草稿，
+# 之后 /stub/reversals 会出现该单号的冲销记录（这是「可回滚」的唯一实证方式）。
+```
+
 ## 与前端/契约的关系
 
 - 前端当前走 `web/src/api/mock.ts`；本数据集**不替换 mock 的字段形状**，而是把同一份契约

@@ -41,7 +41,7 @@ def test_healthz_reports_actions_and_allowlist_hash() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["registered_actions"] == 2
+    assert body["registered_actions"] == 4
     assert body["actions_allowlist_hash"].startswith("sha256:")
     card = body["connectors"][0]
     assert card["alias"] == "u8"

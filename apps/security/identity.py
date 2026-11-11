@@ -163,6 +163,7 @@ class TokenBroker:
         ticket_id: str,
         requested_scope: Scope,
         field_whitelist: frozenset[str] = frozenset(),
+        level: WriteLevel | int | str = WriteLevel.W1,
         now: datetime | None = None,
     ) -> CredentialLease:
         current = _utc(now or self._clock())
@@ -197,8 +198,10 @@ class TokenBroker:
                 credential_ref=f"vault://lease/{uuid4()}",
             )
 
-        # B 级降级：客户系统不支持委派。字段白名单是硬前置，不能省略。
-        if not field_whitelist:
+        # B 级降级：客户系统不支持委派。字段白名单是**写**的硬前置，不能省略。
+        # W0（只读/审批/对账）不产生外部写入，不要求白名单，否则 B 级连接器一旦
+        # 装配，所有读路径都会被 401 拦死。
+        if WriteLevel.parse(level) >= WriteLevel.W1 and not field_whitelist:
             raise MissingFieldWhitelist(
                 f"B 级连接器 {connector_meta.system} 必须提供字段白名单（FR-1401）"
             )

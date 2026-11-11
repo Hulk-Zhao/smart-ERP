@@ -101,7 +101,7 @@ from apps.audit.store import AuditQuery
 from apps.platform.api.errors import ProblemError
 from apps.platform.contracts.errors import ErrorCode
 from apps.platform.contracts.ticket import TicketState
-from apps.platform.policy.levels import WriteLevel
+from apps.platform.policy.levels import ActionSpec, WriteLevel
 from apps.recon.engine import empty_result, reconcile
 from apps.recon.loader import build_request
 from apps.recon.models import (
@@ -205,6 +205,7 @@ def _authorize(
     amount: Decimal,
     touches_fund: bool = False,
     field_whitelist: frozenset[str] = frozenset(),
+    credential_level: WriteLevel | None = None,
 ) -> AccessGrant:
     meta = container.connector_meta(system)
     return container.authorize(
@@ -217,6 +218,7 @@ def _authorize(
             amount=amount,
             touches_fund=touches_fund,
             field_whitelist=field_whitelist,
+            credential_level=credential_level,
         )
     )
 
@@ -360,20 +362,59 @@ def _write_system(ticket: TicketRecord) -> str:
     return ticket.systems[0]
 
 
+def _pending_action(container: ApiContainer, ticket: TicketRecord) -> ActionSpec | None:
+    """工单锁定的写动作；未登记动作不留空窗，直接拒绝。"""
+
+    pending = ticket.pending_write
+    if pending is None:
+        return None
+    try:
+        action = container.actions.get(pending.action_key)
+    except KeyError as exc:
+        raise ProblemError(
+            ErrorCode.POLICY_LEVEL, f"动作 {pending.action_key} 未注册，拒绝执行"
+        ) from exc
+    if action.compensation_only:
+        raise ProblemError(
+            ErrorCode.POLICY_LEVEL,
+            f"动作 {pending.action_key} 只允许由补偿链路执行，不能作为正向写入",
+        )
+    return action
+
+
 def _pending_field_whitelist(
     container: ApiContainer, ticket: TicketRecord
 ) -> frozenset[str]:
     """B 级写只允许落动作登记的可写字段；未登记动作不留空窗。"""
 
-    pending = ticket.pending_write
-    if pending is None:
-        return frozenset()
-    try:
-        return container.actions.get(pending.action_key).writable_fields
-    except KeyError as exc:
-        raise ProblemError(
-            ErrorCode.POLICY_LEVEL, f"动作 {pending.action_key} 未注册，拒绝执行"
-        ) from exc
+    action = _pending_action(container, ticket)
+    return frozenset() if action is None else action.writable_fields
+
+
+def _pending_credential_level(
+    container: ApiContainer, ticket: TicketRecord
+) -> WriteLevel | None:
+    """凭据等级按**动作**取，而不是工单治理等级（W2 工单可能只执行 W1 草稿写）。"""
+
+    action = _pending_action(container, ticket)
+    return None if action is None else WriteLevel.parse(action.level)
+
+
+def _plan_field_whitelist(plan: RollbackPlan) -> frozenset[str]:
+    """B 级补偿的字段白名单必须取**反向动作**的可写字段。
+
+    补偿实际执行的是 delete 动作、写的是 ``cCode``；若拿正向动作的
+    ``source_doc_no/...`` 去满足白名单，「B 级必须有白名单」就只被无关字段
+    满足，``_assert_narrowed_fields`` 在补偿路径上等于死代码。
+    无法推导反向动作的项（FORBIDDEN/IMPOSSIBLE）不贡献字段；若整单都推不出，
+    返回空集，fail-closed：B 级租约按 deny-all 处置。
+    """
+
+    fields: set[str] = set()
+    for item in plan.items:
+        if item.action is not None:
+            fields |= set(item.action.writable_fields)
+    return frozenset(fields)
 
 
 # --------------------------------------------------------------------------- 工单
@@ -449,6 +490,9 @@ async def approve_ticket(
         amount=ticket.amount,
         touches_fund=ticket.touches_fund,
         field_whitelist=_pending_field_whitelist(container, ticket),
+        # 治理等级（审批链）与写入等级分开：B 级连接器只限制「写」，不应把
+        # W2 工单的 W1 草稿写一并拦掉（否则 W2 永远无法执行）。
+        credential_level=_pending_credential_level(container, ticket),
     )
 
     executed: list[TicketStepOut] = []
@@ -495,13 +539,13 @@ async def approve_ticket(
 def _lease_narrowed_fields(grant: AccessGrant) -> frozenset[str] | None:
     """把租约的字段白名单透传给写闸：只收窄、不放宽写等级。
 
-    委派模式下租约会话的 ``narrowed_fields`` 为空，此时传 ``None`` 表示沿用
-    动作自身的可写 scope；服务账号（B 级）才使用租约白名单。
+    委派模式下租约会话的 ``narrowed_fields`` 不参与收窄，此时传 ``None``；
+    服务账号（B 级）一律透传租约集合——**空集表示 deny-all**，不是「不收窄」。
     """
 
     if grant.lease.mode != "service_account":
         return None
-    return grant.lease.narrowed_fields or None
+    return frozenset(grant.lease.narrowed_fields)
 
 
 async def _execute_pending_write(
@@ -517,6 +561,11 @@ async def _execute_pending_write(
         raise ProblemError(
             ErrorCode.POLICY_LEVEL, f"动作 {pending.action_key} 未注册，拒绝执行"
         ) from exc
+    if action.compensation_only:
+        raise ProblemError(
+            ErrorCode.POLICY_LEVEL,
+            f"动作 {pending.action_key} 只允许由补偿链路执行，不能作为正向写入",
+        )
 
     gateway = container.gateway_for(
         pending.system,
@@ -741,8 +790,11 @@ async def compensate_ticket(
             ErrorCode.STATE_ILLEGAL, f"工单 {ticket.ticket_no} 没有可补偿的成功步骤"
         )
 
+    # 先做纯推导（不写库、不调连接器），白名单必须取反向动作的字段：
+    # 补偿实际写的是 delete 的 cCode，不是正向动作的 source_doc_no 等。
+    plan = RollbackPlanner(container.actions).plan(ticket.ticket_id, steps)
     max_level = max((WriteLevel.parse(step.level) for step in steps), default=WriteLevel.W0)
-    _authorize(
+    grant = _authorize(
         container,
         session,
         scope,
@@ -751,9 +803,10 @@ async def compensate_ticket(
         system=_write_system(ticket),
         amount=ticket.amount,
         touches_fund=ticket.touches_fund,
+        # B 级连接器的补偿也是外部写：白名单取反向动作的可写字段，缺了就 fail-closed。
+        field_whitelist=_plan_field_whitelist(plan),
     )
 
-    plan = RollbackPlanner(container.actions).plan(ticket.ticket_id, steps)
     # 先整单判定拒因，避免「部分系统已回写、部分系统被拒」的半截状态。
     if plan.has_forbidden:
         raise RollbackForbidden(
@@ -781,9 +834,14 @@ async def compensate_ticket(
 
     executed: list[TicketStepOut] = []
     manual_tasks: list[str] = []
+    # 同一份白名单交给写闸：补偿入参也必须在租约范围内，不能只靠 _authorize 走过场。
+    narrowed_fields = _lease_narrowed_fields(grant)
     for system, items in grouped:
         gateway = container.gateway_for(
-            system, str(ticket.ticket_id), _ticket_facts(ticket)
+            system,
+            str(ticket.ticket_id),
+            _ticket_facts(ticket),
+            narrowed_fields=narrowed_fields,
         )
         scene = container.scene_for(ticket.scene_code, max_level)
         service = RollbackService(gateway=gateway, ledger=container.ledger, scene=scene)

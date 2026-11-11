@@ -198,6 +198,26 @@ class ApiContainer:
 _CONTAINER: ApiContainer | None = None
 
 
+def register_u8_connector(container: ApiContainer, *, base_url: str | None = None) -> None:
+    """把 U8 连接器与可写动作装进容器（生产在 ``get_container`` 里调用）。
+
+    没有这一步，带 ``pending_write`` 的工单在审批通过后只会得到
+    ``E-CONN-UNAVAILABLE`` 503——演示里永远不会发生一次真实外部写入。
+    ``base_url`` 仅测试用；生产由 ``ERP_U8_BASE_URL`` 决定（未设置时是占位域名，
+    写入会显式失败，不会伪造成功）。
+    """
+
+    from apps.connectors.u8.actions import ACTIONS
+    from apps.connectors.u8.factory import build_u8_stack
+
+    if "u8" in container.connectors:
+        return
+    stack = build_u8_stack(base_url=base_url)
+    container.connectors["u8"] = stack.connector
+    for action in ACTIONS:
+        container.actions.register(action)
+
+
 def configure_container(container: ApiContainer) -> None:
     """测试/装配入口：替换进程内容器。"""
 
@@ -228,6 +248,7 @@ def get_container() -> ApiContainer:
         _CONTAINER.audit_integrity = AuditIntegrityScanner(metrics=_CONTAINER.metrics)
         # demo 档静态会话：部署期 env 注入，默认关闭；full/生产由 Settings 拒绝启动。
         bind_demo_session(_CONTAINER, get_settings())
+        register_u8_connector(_CONTAINER)
     return _CONTAINER
 
 
@@ -244,5 +265,6 @@ __all__ = [
     "SessionDirectory",
     "configure_container",
     "get_container",
+    "register_u8_connector",
     "reset_container",
 ]
