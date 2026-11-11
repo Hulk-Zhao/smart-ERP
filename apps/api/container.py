@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from apps.api.approval_sql import ApprovalStorePort
+from apps.api.audit_integrity import AuditIntegrityScanner
 from apps.api.errors import IdemConflict
 from apps.api.metering import MeteringPolicy
 from apps.api.price_book import PriceBookLookup
@@ -101,6 +103,10 @@ class ApiContainer:
     #: 工单端口：生产默认 PostgreSQL（读库 + 事件化写同一条路径）；
     #: 测试显式注入内存 ``TicketRepository``，不连库。
     tickets: TicketStorePort = field(default_factory=SqlTicketRepository)
+    #: 审批记录持久化端口；``None`` 表示纯进程内（单测默认，行为与改造前一致）。
+    approval_records: ApprovalStorePort | None = None
+    #: 孤儿 ``audit_image_id`` 巡检；``None`` 表示不启动后台巡检（单测默认）。
+    audit_integrity: AuditIntegrityScanner | None = None
     recon_batches: ReconBatchRepository = field(default_factory=ReconBatchRepository)
     recon_datasets: ReconDatasetRegistry = field(default_factory=ReconDatasetRegistry)
     ledger: AuditLedger = field(default_factory=AuditLedger)
@@ -199,7 +205,12 @@ def configure_container(container: ApiContainer) -> None:
 def get_container() -> ApiContainer:
     global _CONTAINER
     if _CONTAINER is None:
-        _CONTAINER = ApiContainer()
+        # 生产装配：工单/审批都落 PostgreSQL；巡检复用同一个指标注册表，
+        # 保证 ``/metrics`` 能读到后台巡检写的值。
+        from apps.api.approval_sql import SqlApprovalStore
+
+        _CONTAINER = ApiContainer(approval_records=SqlApprovalStore())
+        _CONTAINER.audit_integrity = AuditIntegrityScanner(metrics=_CONTAINER.metrics)
     return _CONTAINER
 
 

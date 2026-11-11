@@ -22,7 +22,7 @@ service 层抛 403；两处都不允许 ``IS NULL OR ...`` 的短路把未知放
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
@@ -30,9 +30,11 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import ARRAY, array
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.agents.state_machine import TransitionContext
 from apps.agents.store import TicketNotFound, TicketStore
+from apps.api.approval_sql import add_approval_row
 from apps.api.pagination import decode_cursor, encode_cursor
 from apps.api.store import PendingWrite, TicketRecord, TicketStepRecord
 from apps.platform.api.errors import ProblemError
@@ -40,6 +42,7 @@ from apps.platform.contracts.errors import ErrorCode
 from apps.platform.contracts.ticket import TicketState
 from apps.platform.db.models import Ticket, TicketStep
 from apps.platform.policy.levels import WriteLevel
+from apps.security.approvals import ApprovalRecord
 from apps.security.scope import Scope
 
 
@@ -65,6 +68,7 @@ class TicketStorePort(Protocol):
         actor_id: UUID | None = None,
         trace_id: str | None = None,
         payload: Mapping[str, Any] | None = None,
+        approval_record: ApprovalRecord | None = None,
     ) -> int: ...
 
     async def record_step(
@@ -159,6 +163,7 @@ class SqlTicketRepository:
         actor_id: UUID | None = None,
         trace_id: str | None = None,
         payload: Mapping[str, Any] | None = None,
+        approval_record: ApprovalRecord | None = None,
     ) -> int:
         # tenant 是查询条件：先钉住归属，再进事件事务（避免「改完再发现不是本租户」）。
         async with self._factory()() as session:
@@ -169,6 +174,16 @@ class SqlTicketRepository:
             )
         if owned is None:
             raise TicketNotFound(f"工单不存在: {ticket_id}")
+
+        before_append: Callable[[AsyncSession], None] | None = None
+        if approval_record is not None:
+            # 驳回决定与状态推进同一事务：见 ``TicketStore.transition`` 的钩子。
+
+            def _insert_approval(session: AsyncSession) -> None:
+                add_approval_row(session, tenant_id=tenant_id, record=approval_record)
+
+            before_append = _insert_approval
+
         await self._events().transition(
             ticket_id,
             target,
@@ -177,6 +192,7 @@ class SqlTicketRepository:
             actor_id=actor_id,
             trace_id=trace_id,
             payload=payload,
+            before_append=before_append,
         )
         async with self._factory()() as session:
             stored = await session.scalar(

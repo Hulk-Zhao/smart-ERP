@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -164,7 +164,7 @@ class ApprovalService:
                     break
         return tuple(roles)
 
-    def record(
+    def build(
         self,
         *,
         ticket_id: str,
@@ -177,6 +177,12 @@ class ApprovalService:
         exception_reason: str | None = None,
         scene_code: str | None = None,
     ) -> ApprovalRecord:
+        """校验并构造记录，但**不**写入进程内状态。
+
+        持久化路径必须先落库再入缓存：``build`` → 落库 → ``remember``。
+        否则「内存已记、库里没有」会在容器重建后凭空消失。
+        """
+
         if not ticket_id.strip():
             raise ApprovalError("ticket_id 不得为空")
         if approver.user_id == initiator_id:
@@ -207,8 +213,52 @@ class ApprovalService:
             decided_at=_utc(decided_at or self._clock()),
             exception_reason=exception_reason,
         )
-        self._records.setdefault(ticket_id, []).append(record)
         return record
+
+    def remember(self, record: ApprovalRecord) -> ApprovalRecord:
+        """把已构造（并已落库）的记录放进进程内判定缓存。
+
+        幂等：同一 ``id`` 不会重复追加，重复调用只会刷新一次水合结果。
+        """
+
+        rows = self._records.setdefault(record.ticket_id, [])
+        if not any(existing.id == record.id for existing in rows):
+            rows.append(record)
+        return record
+
+    def replace(self, ticket_id: str, records: Sequence[ApprovalRecord]) -> None:
+        """用库里的记录整体替换某工单的缓存（每个请求入口先水合）。"""
+
+        self._records[ticket_id] = list(records)
+
+    def record(
+        self,
+        *,
+        ticket_id: str,
+        role: str,
+        approver: UserPrincipal,
+        initiator_id: UUID,
+        decision: Literal["approved", "rejected"],
+        comment: str,
+        decided_at: datetime | None = None,
+        exception_reason: str | None = None,
+        scene_code: str | None = None,
+    ) -> ApprovalRecord:
+        """纯内存入口：校验、构造并直接进缓存（测试与无库场景保持旧行为）。"""
+
+        return self.remember(
+            self.build(
+                ticket_id=ticket_id,
+                role=role,
+                approver=approver,
+                initiator_id=initiator_id,
+                decision=decision,
+                comment=comment,
+                decided_at=decided_at,
+                exception_reason=exception_reason,
+                scene_code=scene_code,
+            )
+        )
 
     def records(self, ticket_id: str) -> tuple[ApprovalRecord, ...]:
         return tuple(self._records.get(ticket_id, ()))
