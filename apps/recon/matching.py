@@ -235,7 +235,9 @@ def _top_candidates(
 CANDIDATE_CONSUME_SCORE = Decimal("0.50")
 
 
-def _consume_plausible(scored: list[tuple[Decimal, int, str]], used_our: set[int]) -> None:
+def _consume_plausible(
+    scored: list[tuple[Decimal, int, str]], used_our: set[int]
+) -> None:
     for score, index, _reason in scored:
         if score >= CANDIDATE_CONSUME_SCORE:
             used_our.add(index)
@@ -273,6 +275,7 @@ def _match_merged(
     used_our: set[int],
     matched_supplier: set[int],
     outcome: MatchOutcome,
+    our_by_sku_unit: dict[tuple[str, str, str | None], list[int]],
 ) -> None:
     """一对多：一张供应商行覆盖多行我方行（合并账单），必须人工确认。"""
     for sup_index, supplier in enumerate(supplier_lines):
@@ -282,12 +285,10 @@ def _match_merged(
             continue
         candidates = [
             index
-            for index, our in enumerate(our_lines)
-            if index not in used_our
-            and our.supplier_code == supplier.supplier_code
-            and our.item_code == supplier.item_code
-            and our.unit == supplier.unit
-            and our.qty is not None
+            for index in our_by_sku_unit.get(
+                (supplier.supplier_code, supplier.item_code, supplier.unit), ()
+            )
+            if index not in used_our and our_lines[index].qty is not None
         ]
         if len(candidates) < 2 or len(candidates) > MERGE_MAX_CANDIDATES:
             continue
@@ -331,6 +332,7 @@ def _match_aggregated(
     used_our: set[int],
     matched_supplier: set[int],
     outcome: MatchOutcome,
+    our_by_sku_unit: dict[tuple[str, str, str | None], list[int]],
 ) -> None:
     """多对一：同物料多行供应商行合计匹配同一我方行（拆单）。"""
     groups: dict[tuple[str, str, str | None, str], list[int]] = {}
@@ -347,7 +349,9 @@ def _match_aggregated(
         )
         groups.setdefault(key, []).append(sup_index)
 
-    for key in sorted(groups, key=lambda item: (item[0], item[1], item[2] or "", item[3])):
+    for key in sorted(
+        groups, key=lambda item: (item[0], item[1], item[2] or "", item[3])
+    ):
         indexes = groups[key]
         if len(indexes) < 2:
             continue
@@ -356,12 +360,11 @@ def _match_aggregated(
         total_amount = _sum_amount(group)
         if total_qty is None:
             continue
-        for our_index, our in enumerate(our_lines):
+        for our_index in our_by_sku_unit.get((key[0], key[1], key[3]), ()):
             if our_index in used_our:
                 continue
-            if our.supplier_code != key[0] or our.item_code != key[1]:
-                continue
-            if our.qty is None or our.unit != key[3]:
+            our = our_lines[our_index]
+            if our.qty is None:
                 continue
             if not _close(total_qty, our.qty, tolerance.qty):
                 continue
@@ -399,9 +402,25 @@ def match_lines(
     matched_supplier: set[int] = set()
 
     # ① 单据号直配（同供应商 + 同单据号；行号一致优先）
+    # 索引一次建好：直配按单据号、合并/聚合按「供应商+物料+单位」、模糊配按
+    # 「供应商+物料编码」与「供应商+规范化物料名称」两个键。桶内候选与原全量
+    # 扫描的候选集合完全一致，只是把 O(n²) 降到 O(n·桶内行)。
     our_by_doc: dict[tuple[str, str], list[int]] = {}
+    our_by_sku: dict[tuple[str, str], list[int]] = {}
+    our_by_name: dict[tuple[str, str], list[int]] = {}
+    our_by_sku_unit: dict[tuple[str, str, str | None], list[int]] = {}
     for index, line in enumerate(our_lines):
         our_by_doc.setdefault((line.supplier_code, line.doc_no), []).append(index)
+        if line.item_code:
+            our_by_sku.setdefault((line.supplier_code, line.item_code), []).append(
+                index
+            )
+            our_by_sku_unit.setdefault(
+                (line.supplier_code, line.item_code, line.unit), []
+            ).append(index)
+        name = _normalize_name(line.item_name)
+        if name:
+            our_by_name.setdefault((line.supplier_code, name), []).append(index)
 
     for sup_index, supplier in enumerate(supplier_lines):
         free = [
@@ -439,20 +458,44 @@ def match_lines(
         )
 
     # ② 聚合匹配（一行对多行 / 多行对一行），先于模糊配避免拆单首行被单行吃掉
-    _match_merged(our_lines, supplier_lines, tolerance, used_our, matched_supplier, outcome)
+    _match_merged(
+        our_lines,
+        supplier_lines,
+        tolerance,
+        used_our,
+        matched_supplier,
+        outcome,
+        our_by_sku_unit,
+    )
     _match_aggregated(
-        our_lines, supplier_lines, tolerance, used_our, matched_supplier, outcome
+        our_lines,
+        supplier_lines,
+        tolerance,
+        used_our,
+        matched_supplier,
+        outcome,
+        our_by_sku_unit,
     )
 
     # ③ 模糊配 + 候选生成
     for sup_index, supplier in enumerate(supplier_lines):
         if sup_index in matched_supplier:
             continue
+        candidate_indexes: set[int] = set()
+        if supplier.item_code:
+            candidate_indexes.update(
+                our_by_sku.get((supplier.supplier_code, supplier.item_code), ())
+            )
+        supplier_name = _normalize_name(supplier.item_name)
+        if supplier_name:
+            candidate_indexes.update(
+                our_by_name.get((supplier.supplier_code, supplier_name), ())
+            )
         scored: list[tuple[Decimal, int, str]] = []
-        for index, our in enumerate(our_lines):
+        for index in sorted(candidate_indexes):
             if index in used_our:
                 continue
-            score, reason = _score(our, supplier, converters, tolerance)
+            score, reason = _score(our_lines[index], supplier, converters, tolerance)
             if score is None:
                 continue
             scored.append((score, index, reason))
