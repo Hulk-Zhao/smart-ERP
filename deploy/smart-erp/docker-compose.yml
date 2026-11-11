@@ -77,7 +77,10 @@ services:
       <<: *app-env
       ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
       ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-4}
-      ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-4}
+      # 单个 api 进程内有多个独立引擎（container / ticket_sql / approval_sql /
+      # audit_integrity / price_book / recon_store），它们共用 erp_app 的 20 连接上限；
+      # 实测并发 30 时各池一起扩容会打满上限并返回 500，故 api 的 overflow 固定为 0。
+      ERP_DB_MAX_OVERFLOW: "0"
       # 角色级已有默认；这里显式下发，避免实例 owner 漏设时没有兜底（C14）
       ERP_DB_STATEMENT_TIMEOUT_MS: ${ERP_DB_STATEMENT_TIMEOUT_MS:-30000}
       ERP_DB_LOCK_TIMEOUT_MS: ${ERP_DB_LOCK_TIMEOUT_MS:-3000}
