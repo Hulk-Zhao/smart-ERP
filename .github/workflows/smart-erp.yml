@@ -134,7 +134,18 @@ jobs:
         # -rs 把 skip 原因逐条打进日志（unittest 的 -v 虽也打印 skip 原因，但 -rs 是
         # pytest 专有；这里与 python-checks 统一用 pytest，保证「这条到底跑没跑」
         # 能直接翻日志回答，而不是靠人回忆）。
-        run: python -m pytest tests/deploy -q -o addopts="" -rs
+        # -v 而不是 -q：聚合的「63 passed」看不出哪条绿、哪条被跳过——2026-11-11 已
+        # 因此反复误判。必须能从日志读出 `...::test_xxx PASSED` 这种带用例名的一行，
+        # 才算证明「某条具体用例在 main 基线上是绿的」。
+        # job 日志要登录才能看（公共 API 对 logs 端点返回 403），annotation 公共可读，
+        # 所以把 pytest 自己打印的 PASSED 行原样转成 notice：不拼接措辞，不做成败判断。
+        # 只转 test_image_smoke_contract.py：GitHub 每步最多保留 10 条 annotation，
+        # 全量转会被截断（2026-11-11 实测：63 条只留下前 10 条，恰好截掉了本用例）。
+        # 失败不吞：GitHub 默认 shell 是 bash -e -o pipefail，pytest 非零即中止本步，
+        # awk 放在其后只在测试全绿时才执行；awk 无匹配也返回 0，不会制造假红。
+        run: |
+          python -m pytest tests/deploy -v -o addopts="" -rs 2>&1 | tee /tmp/deploy-static.log
+          awk '/^tests\/deploy\/test_image_smoke_contract\.py::.* PASSED/ { print "::notice::" $0 }' /tmp/deploy-static.log
 
       - name: compose 正向解析（demo 档）
         run: |
@@ -640,11 +651,25 @@ jobs:
           tag="ci-${GITHUB_SHA}"
           image="smart-erp/${{ matrix.image }}:${tag}"
           case "${{ matrix.image }}" in
-            app)          docker run --rm "$image" python -c "import apps.main" ;;
-            connector-gw) docker run --rm "$image" python -c "import apps.connectors.gateway" ;;
-            doc)          docker run --rm --entrypoint python "$image" \
-                            -c "import apps.docparse, pypdfium2" ;;
-            web)          docker run --rm --entrypoint nginx "$image" -t ;;
+            app)
+              # 同一镜像被 api / worker / scheduler / compensation / migrate 五个
+              # command 使用；只 import apps.main 等于只守了 api，漏包换个入口照样
+              # 复发（#89 刚新增 compensation 入口）。
+              docker run --rm "$image" python -c \
+                "import apps.main, core.runtime.worker, core.runtime.scheduler, apps.agents.compensation_worker"
+              docker run --rm --entrypoint alembic "$image" --version
+              ;;
+            connector-gw)
+              docker run --rm "$image" python -c "import apps.connectors.gateway"
+              ;;
+            doc)
+              # CMD 跑的是脚本而不是模块：以非 __main__ 执行，等价导入该入口的全部依赖
+              docker run --rm --entrypoint python "$image" -c \
+                "import runpy, pypdfium2; runpy.run_path('/app/docparse_service.py', run_name='__smoke__')"
+              ;;
+            web)
+              docker run --rm --entrypoint nginx "$image" -t
+              ;;
           esac
 
   # ---------------------------------------------------------------------------
