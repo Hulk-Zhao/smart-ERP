@@ -78,7 +78,14 @@ describe('会话返回后才请求审批待办', () => {
   beforeEach(async () => {
     server = await startApi((request) => {
       if (request.path === '/v1/auth/session') {
-        return { body: { user_id: REVIEWER_ID, tenant_id: TENANT_ID, roles: ['reviewer', 'approver'] } };
+        return {
+          body: {
+            user_id: REVIEWER_ID,
+            tenant_id: TENANT_ID,
+            roles: ['reviewer', 'approver'],
+            default_scope: { org_id: 'ORG-1', period: '2026-10', system_ids: ['u8', 'statement'] },
+          },
+        };
       }
       if (request.path === '/v1/approvals/pending') {
         return { body: { items: [approvalTask()], next_cursor: null } };

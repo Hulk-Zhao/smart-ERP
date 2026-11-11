@@ -5,14 +5,24 @@
  */
 
 import { useSyncExternalStore } from 'react';
-import type { ApprovalDecisionIn, ScopeIn } from './generated/contract';
+import type { ApprovalDecisionIn, ScopeIn, SessionScopeOut } from './generated/contract';
 
 export type ApprovalRole = ApprovalDecisionIn['role'];
+
+/**
+ * scope 的来源，决定能否被会话默认范围覆盖、以及要不要落本地存储：
+ * - `pending`：会话还没返回，此刻的 scope 只是环境变量/占位值，不能据此发查询；
+ * - `session`：由 `/v1/auth/session` 的 `default_scope` 带出，可被新会话继续覆盖；
+ * - `manual`：用户手填，优先级最高，不会被会话覆盖，且会持久化；
+ * - `unresolved`：会话返回了但没有完整范围（多组织 / 无账期），等待用户补齐。
+ */
+export type ScopeSource = 'pending' | 'session' | 'manual' | 'unresolved';
 
 export interface ApiConfig {
   baseUrl: string;
   token: string;
   scope: ScopeIn;
+  scopeSource: ScopeSource;
   /** 当前会话可用的审批角色；由 `/v1/auth/session` 写入，不再从环境变量猜。 */
   roles: ApprovalRole[];
   viewerName: string;
@@ -45,6 +55,8 @@ function defaults(): ApiConfig {
       period: ENV.VITE_PERIOD ?? '2026-10',
       system_ids: envList(ENV.VITE_SYSTEM_IDS, ['u8', 'statement']),
     },
+    // 会话返回前不把环境变量里的 org/period 当作既定事实：先标记 pending，等 default_scope 落地。
+    scopeSource: 'pending',
     // 身份与角色只认 `/v1/auth/session`：启动时为空，会话返回后由 applySessionIdentity 写入。
     roles: [],
     viewerName: ENV.VITE_VIEWER_NAME ?? '当前用户',
@@ -58,13 +70,16 @@ function load(): ApiConfig {
   try {
     const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
     if (!raw) return base;
-    const saved = JSON.parse(raw) as Partial<ApiConfig>;
+    const saved = JSON.parse(raw) as Partial<ApiConfig> & { scopeManual?: boolean };
+    // 只有用户显式改过并保存的 scope 才恢复（scopeManual）；旧版本存下的默认值一律视为待会话带出。
+    const manual = saved.scopeManual === true && !!saved.scope;
     return {
       ...base,
       ...saved,
       // 环境变量显式开启 mock 时不允许被本地存储覆盖为关闭
       mock: base.mock || saved.mock === true,
-      scope: { ...base.scope, ...(saved.scope ?? {}) },
+      scope: manual ? { ...base.scope, ...saved.scope } : base.scope,
+      scopeSource: manual ? 'manual' : 'pending',
       // 身份只认会话端点：旧版本存过的 roles / viewerId 一律不恢复，避免用过期身份猜权限。
       roles: base.roles,
       viewerId: base.viewerId,
@@ -89,7 +104,16 @@ export function configureApi(patch: Partial<ApiConfig>): void {
   };
   try {
     // 身份与 mock 开关不落本地存储：前者只认会话端点，后者只认构建期 VITE_USE_MOCK。
-    const { mock: _mock, roles: _roles, viewerId: _viewerId, ...persisted } = current;
+    // scope 只在用户手填（manual）时保存；会话带出的范围每次启动重新取，避免把旧 scope 当成本地事实。
+    const persisted: Record<string, unknown> = {
+      baseUrl: current.baseUrl,
+      token: current.token,
+      viewerName: current.viewerName,
+    };
+    if (current.scopeSource === 'manual') {
+      persisted.scope = current.scope;
+      persisted.scopeManual = true;
+    }
     globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(persisted));
   } catch {
     // 隐私模式下 localStorage 不可写；配置仍对当前会话生效
@@ -114,6 +138,43 @@ export function applySessionIdentity(identity: { user_id: string; roles: readonl
     roles.length === current.roles.length && roles.every((role, index) => role === current.roles[index]);
   if (sameRoles && current.viewerId === identity.user_id) return;
   current = { ...current, roles, viewerId: identity.user_id };
+  listeners.forEach((listener) => listener());
+}
+
+/**
+ * 把 `/v1/auth/session` 的 `default_scope` 写入运行期 scope。
+ *
+ * 规则（服务端返回 null 的含义必须原样保留，不能猜）：
+ * - `org_id === null`：令牌授权多个组织，清空 org_id 进入「待选择」，绝不回退到 ORG-1；
+ * - `period === null`：授权期内没有合法账期，清空 period 让用户补；
+ * - 整个 `default_scope` 为 null：保留现有值供手填，只把来源标成 unresolved；
+ * - 用户手填（manual）的 scope 优先级最高，会话不再覆盖。
+ */
+export function applySessionScope(scope: SessionScopeOut | null | undefined): void {
+  if (current.scopeSource === 'manual') return;
+
+  if (!scope) {
+    // 端点没给默认范围：保留现值供手填，但来源必须从 pending/session 降级为 unresolved。
+    if (current.scopeSource !== 'unresolved') {
+      current = { ...current, scopeSource: 'unresolved' };
+      listeners.forEach((listener) => listener());
+    }
+    return;
+  }
+
+  const orgId = scope.org_id ?? '';
+  const period = scope.period ?? '';
+  const systemIds = scope.system_ids.length > 0 ? [...scope.system_ids] : current.scope.system_ids;
+  const nextSource: ScopeSource = orgId && period ? 'session' : 'unresolved';
+
+  const unchanged =
+    current.scopeSource === nextSource &&
+    current.scope.org_id === orgId &&
+    current.scope.period === period &&
+    current.scope.system_ids.join(',') === systemIds.join(',');
+  if (unchanged) return;
+
+  current = { ...current, scope: { org_id: orgId, period, system_ids: systemIds }, scopeSource: nextSource };
   listeners.forEach((listener) => listener());
 }
 

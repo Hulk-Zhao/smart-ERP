@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { useSession } from '../api/session';
 import { IconAlert, IconArrowRight, IconClose, IconSparkles } from './icons';
 
 interface AssistantPanelProps {
@@ -25,12 +26,15 @@ interface Suggestion {
  */
 export function AssistantPanel({ onClose }: AssistantPanelProps) {
   const location = useLocation();
+  const session = useSession();
   const [question, setQuestion] = useState('');
   const [asked, setAsked] = useState<string | null>(null);
 
   const approvals = useQuery({
     queryKey: ['assistant', 'pending-approvals'],
     queryFn: () => api.listPendingApprovals({ limit: 50 }),
+    // 与其它页面同一条规矩：身份/范围没就绪前不发请求，避免把占位 org 打到后端。
+    enabled: session.canQuery,
     staleTime: 10_000,
   });
 

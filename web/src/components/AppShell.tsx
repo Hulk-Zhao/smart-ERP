@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { configureApi, useApiConfig } from '../api/config';
-import { useSession } from '../api/session';
+import { configureApi, useApiConfig, type ScopeSource } from '../api/config';
+import { useSession, type SessionState } from '../api/session';
 import { CONTRACT_PATH_COUNT, CONTRACT_VERSION } from '../api/types';
 import { OPEN_SETTINGS_EVENT } from '../lib/settings';
 import { shortId } from '../lib/format';
@@ -59,6 +59,40 @@ function pageMeta(pathname: string): { title: string; crumbs: string[] } {
   return { title: '工作台', crumbs: ['工作台'] };
 }
 
+type ScopePanelState =
+  | 'loading'
+  | 'ready'
+  | 'manual'
+  | 'multi-org'
+  | 'missing-period'
+  | 'missing'
+  | 'unavailable'
+  | 'error';
+
+const SCOPE_BADGE: Record<ScopePanelState, string> = {
+  loading: '获取中',
+  ready: '已从会话带出',
+  manual: '手动填写（优先）',
+  'multi-org': '待选择组织',
+  'missing-period': '待补全账期',
+  missing: '当前无法获取默认范围',
+  unavailable: '当前无法获取默认范围',
+  error: '当前无法获取默认范围',
+};
+
+const SCOPE_HINT: Record<ScopePanelState, string> = {
+  loading: '正在用当前令牌获取会话默认范围…',
+  ready: '三项已由 GET /v1/auth/session 的 default_scope 带出，直接保存即可；需要时仍可修改。',
+  manual: '当前三项是手动填写的范围，优先于会话默认范围；改成与会话一致的值保存即恢复自动跟随。',
+  'multi-org':
+    '该令牌授权了多个组织，服务端不替你选择。请填写要使用的 org_id，保存后才会加载数据。',
+  'missing-period': '该令牌的授权期内没有可用账期（period 为 null），请手动填写 period。',
+  missing: '当前无法获取默认范围：会话未返回 default_scope（端点可能未启用）。下面三项是未确认的旧值/环境默认值，核对后保存才会加载数据。',
+  unavailable:
+    '当前无法获取默认范围：会话端点返回 401（演示会话未启用或令牌无效）。下面三项未经确认，先核对保存或更换令牌。',
+  error: '当前无法获取默认范围：会话端点异常。请手动填写下面三项。',
+};
+
 function SettingsPanel({ onClose }: { onClose: () => void }) {
   const config = useApiConfig();
   const queryClient = useQueryClient();
@@ -66,24 +100,80 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [token, setToken] = useState(config.token);
   const [orgId, setOrgId] = useState(config.scope.org_id);
   const [period, setPeriod] = useState(config.scope.period);
-  const [systems, setSystems] = useState(config.scope.system_ids.join(','));
+  const [systems, setSystems] = useState(config.scope.system_ids.join(', '));
   const [viewerName, setViewerName] = useState(config.viewerName);
+  // 用户动过 scope 三项后就不再被会话默认范围覆盖，避免手打一半被重置。
+  const [scopeEdited, setScopeEdited] = useState(false);
   const session = useSession();
 
+  const defaultScope = session.session?.default_scope ?? null;
+  const scopeState: ScopePanelState =
+    session.status === 'ready'
+      ? !defaultScope
+        ? 'missing'
+        : !defaultScope.org_id
+          ? 'multi-org'
+          : !defaultScope.period
+            ? 'missing-period'
+            : config.scopeSource === 'manual'
+              ? 'manual'
+              : 'ready'
+      : session.status === 'loading'
+        ? 'loading'
+        : session.unavailable
+          ? 'unavailable'
+          : 'error';
+
+  // 会话把 default_scope 写进配置后同步到输入框（用户已手改则不覆盖）。
+  const systemsText = config.scope.system_ids.join(', ');
+  useEffect(() => {
+    if (scopeEdited) return;
+    setOrgId(config.scope.org_id);
+    setPeriod(config.scope.period);
+    setSystems(systemsText);
+  }, [config.scope.org_id, config.scope.period, systemsText, scopeEdited]);
+
+  /** 粘完令牌就探测会话：默认范围随令牌返回，不需要用户再点一次「获取」。 */
+  const probeSession = () => {
+    const next = token.trim();
+    if (next === config.token) return;
+    configureApi({
+      token: next,
+      // 换令牌就是换一次会话：重新等 default_scope 落地，避免旧范围被当成新令牌的事实。
+      scopeSource: 'pending',
+    });
+    void queryClient.invalidateQueries({ queryKey: ['auth', 'session'] });
+  };
+
+  const org = orgId.trim();
+  const periodValue = period.trim();
+  const systemIds = systems
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  // org_id 为空时禁止保存：多组织是服务端明确交给用户的选择，不能用默认值替代。
+  const canSave = org !== '' && periodValue !== '';
+
   const save = () => {
-    const systemIds = systems
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
+    if (!canSave) return;
+    const sameAsDefault =
+      !!defaultScope &&
+      (defaultScope.org_id ?? '') === org &&
+      (defaultScope.period ?? '') === periodValue &&
+      defaultScope.system_ids.join(',') === systemIds.join(',');
+    // 与会话默认范围一致就不落本地存储，下次启动继续跟随令牌；不一致则是用户核对后确认的范围。
+    // 保存动作本身就是确认：未确认的旧默认值只有经过这一步才会被当成可用范围。
+    const scopeSource: ScopeSource = sameAsDefault ? 'session' : 'manual';
     configureApi({
       baseUrl: baseUrl.trim() || '/erp/api',
       token: token.trim(),
       viewerName: viewerName.trim() || '当前用户',
       scope: {
-        org_id: orgId.trim() || 'ORG-1',
-        period: period.trim() || '2026-10',
-        system_ids: systemIds.length > 0 ? systemIds : ['u8', 'statement'],
+        org_id: org,
+        period: periodValue,
+        system_ids: systemIds.length > 0 ? systemIds : config.scope.system_ids,
       },
+      scopeSource,
     });
     queryClient.invalidateQueries();
     onClose();
@@ -96,7 +186,10 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
       aria-modal="true"
       aria-label="连接设置"
     >
-      <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-4 shadow-xl sm:max-w-lg sm:rounded-2xl">
+      <div
+        className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-4 shadow-xl sm:max-w-lg sm:rounded-2xl"
+        data-testid="connection-settings"
+      >
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-[15px] font-semibold text-slate-900">连接设置</h2>
@@ -122,25 +215,85 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
               type="password"
               value={token}
               onChange={(event) => setToken(event.target.value)}
+              onBlur={probeSession}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') probeSession();
+              }}
               placeholder="真实环境必填；mock 可留空"
               autoComplete="off"
+              data-testid="session-token"
             />
           </label>
 
+          <div
+            className={`min-w-0 rounded-lg border px-3 py-2.5 ${
+              scopeState === 'ready'
+                ? 'border-emerald-200 bg-emerald-50/70'
+                : scopeState === 'loading' || scopeState === 'manual'
+                  ? 'border-slate-200 bg-slate-50'
+                  : 'border-amber-200 bg-amber-50/70'
+            }`}
+            data-testid="scope-source"
+            data-state={scopeState}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="label">数据范围 org_id / period / system_ids</span>
+              <span
+                className={`badge ${
+                  scopeState === 'ready'
+                    ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+                    : scopeState === 'loading' || scopeState === 'manual'
+                      ? 'bg-slate-100 text-slate-600 ring-slate-200'
+                      : 'bg-amber-50 text-amber-700 ring-amber-200'
+                }`}
+              >
+                {SCOPE_BADGE[scopeState]}
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] leading-5 text-slate-600">{SCOPE_HINT[scopeState]}</p>
+          </div>
+
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="block min-w-0">
-              <span className="label">org_id</span>
-              <input className="input mt-1" value={orgId} onChange={(event) => setOrgId(event.target.value)} />
+              <span className="label">
+                org_id {org === '' ? <span className="text-amber-700">（必填）</span> : null}
+              </span>
+              <input
+                className={`input mt-1 ${org === '' ? 'ring-1 ring-amber-300' : ''}`}
+                value={orgId}
+                onChange={(event) => {
+                  setScopeEdited(true);
+                  setOrgId(event.target.value);
+                }}
+                placeholder={scopeState === 'multi-org' ? '请选择 / 填写要使用的 org_id' : 'ORG-1'}
+                data-testid="scope-org"
+              />
             </label>
             <label className="block min-w-0">
               <span className="label">period</span>
-              <input className="input mt-1" value={period} onChange={(event) => setPeriod(event.target.value)} />
+              <input
+                className="input mt-1"
+                value={period}
+                onChange={(event) => {
+                  setScopeEdited(true);
+                  setPeriod(event.target.value);
+                }}
+                data-testid="scope-period"
+              />
             </label>
           </div>
 
           <label className="block min-w-0">
             <span className="label">system_ids（逗号分隔）</span>
-            <input className="input mt-1" value={systems} onChange={(event) => setSystems(event.target.value)} />
+            <input
+              className="input mt-1"
+              value={systems}
+              onChange={(event) => {
+                setScopeEdited(true);
+                setSystems(event.target.value);
+              }}
+              data-testid="scope-systems"
+            />
           </label>
 
           <label className="block min-w-0">
@@ -183,6 +336,14 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <dd className="font-mono text-slate-700">
                   {session.session.roles.length > 0 ? session.session.roles.join(' / ') : '（空）'}
                 </dd>
+                <dt className="text-slate-500">default_scope</dt>
+                <dd className="font-mono text-slate-700">
+                  {session.session.default_scope
+                    ? `${session.session.default_scope.org_id ?? 'null（多组织，待选择）'} · ${
+                        session.session.default_scope.period ?? 'null'
+                      } · ${session.session.default_scope.system_ids.join(',') || '（空）'}`
+                    : '（未返回）'}
+                </dd>
               </dl>
             ) : (
               <p className="mt-1 text-[11px] leading-5 text-slate-500">
@@ -202,16 +363,65 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
             为避免误连假数据，界面不提供运行期切换。
           </p>
 
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {canSave ? null : (
+              <span className="mr-auto text-[11px] leading-5 text-amber-700" data-testid="save-blocked">
+                org_id 与 period 不能为空；补齐后保存会立即按该范围加载数据。
+              </span>
+            )}
             <button type="button" className="btn btn-secondary" onClick={onClose}>
               取消
             </button>
-            <button type="button" className="btn btn-primary" onClick={save}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={save}
+              disabled={!canSave}
+              title={canSave ? undefined : 'org_id 与 period 不能为空'}
+              data-testid="save-settings"
+            >
               保存并刷新
             </button>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+const SCOPE_GATE: Record<NonNullable<SessionState['scopeIssue']>, { title: string; detail: string }> = {
+  'multi-org': {
+    title: '请选择要使用的组织',
+    detail: '该会话令牌授权了多个组织，服务端不会替用户挑选。填写 org_id 后才会加载数据。',
+  },
+  'missing-period': {
+    title: '请补全账期',
+    detail: '该令牌的授权期内没有可用账期（period 为 null），需要手动填写后才能加载数据。',
+  },
+  'missing-scope': {
+    title: '请补全数据范围',
+    detail: '会话没有返回 default_scope，需要手动填写 org_id / period / system_ids。',
+  },
+  incomplete: {
+    title: '请补全数据范围',
+    detail: 'org_id 或 period 为空，补齐后才会加载数据。',
+  },
+};
+
+/** scope 未就绪时挡在页面之前：宁可空着让用户选，也不拿占位 org 去打后端。 */
+function ScopeGate({ session, onOpenSettings }: { session: SessionState; onOpenSettings: () => void }) {
+  const issue = session.scopeIssue ?? 'incomplete';
+  const copy = SCOPE_GATE[issue];
+  return (
+    <div className="mx-auto mt-10 max-w-xl" data-testid="scope-gate" data-state={issue}>
+      <section className="card p-6">
+        <div className="eyebrow">数据范围未就绪</div>
+        <h2 className="mt-1 text-[18px] font-semibold tracking-tight text-slate-900">{copy.title}</h2>
+        <p className="mt-2 text-[12px] leading-6 text-slate-600">{copy.detail}</p>
+        <button type="button" className="btn btn-primary mt-4" onClick={onOpenSettings}>
+          打开连接设置
+        </button>
+      </section>
     </div>
   );
 }
@@ -448,11 +658,12 @@ export function AppShell() {
 
           <span
             className="hidden max-w-[260px] items-center gap-1 truncate rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600 md:flex"
-            title={`${config.scope.org_id} · ${config.scope.period} · ${config.scope.system_ids.join(',')}`}
+            title={`${config.scope.org_id || '未选择组织'} · ${config.scope.period || '—'} · ${config.scope.system_ids.join(',')}`}
+            data-testid="scope-chip"
           >
-            <span className="status-dot bg-emerald-500" />
+            <span className={`status-dot ${config.scope.org_id ? 'bg-emerald-500' : 'bg-amber-500'}`} />
             <span className="truncate">
-              {config.scope.org_id} · {config.scope.period} · {config.scope.system_ids.join(',')}
+              {config.scope.org_id || '未选择组织'} · {config.scope.period || '—'} · {config.scope.system_ids.join(',')}
             </span>
           </span>
 
@@ -508,7 +719,11 @@ export function AppShell() {
         </header>
 
         <main className="app-content">
-          <Outlet />
+          {session.status === 'ready' && session.scopeIssue !== null ? (
+            <ScopeGate session={session} onOpenSettings={() => setSettingsOpen(true)} />
+          ) : (
+            <Outlet />
+          )}
         </main>
       </div>
 
