@@ -10,10 +10,16 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Response
 
 from apps.api.deps import SessionDep
-from apps.api.schemas import SessionOut, SessionScopeOut
+from apps.api.schemas import (
+    DemoIdentitiesOut,
+    DemoIdentityOut,
+    SessionOut,
+    SessionScopeOut,
+)
+from apps.platform.config import get_settings, parse_demo_identities
 from apps.security.scope import ScopeGrant
 
 router = APIRouter(prefix="/auth", tags=["会话"])
@@ -48,6 +54,32 @@ def read_session(session: SessionDep) -> SessionOut:
         roles=sorted(session.roles),
         default_scope=_default_scope(session.grant),
     )
+
+
+@router.get("/demo-identities", response_model=DemoIdentitiesOut)
+def list_demo_identities(response: Response) -> DemoIdentitiesOut:
+    """演示身份清单：仅 demo 档且显式开启时存在，其他环境一律 404。
+
+    返回的 token 是部署期注入的静态会话令牌，等于把「登录」做成一键演示，
+    所以必须过双闸：``ERP_APP_ENV=demo``（Settings 强制）与
+    ``ERP_DEMO_SESSION_ENABLED=true``。不写日志、禁止缓存。
+    """
+
+    settings = get_settings()
+    if not settings.demo_session_enabled:
+        raise HTTPException(status_code=404, detail="演示身份切换未开启")
+
+    response.headers["Cache-Control"] = "no-store"
+    items = [
+        DemoIdentityOut(
+            user_id=identity.user_id,
+            roles=sorted(identity.roles),
+            label=f"{str(identity.user_id)[:8]} · {'/'.join(sorted(identity.roles))}",
+            token=identity.token,
+        )
+        for identity in parse_demo_identities(settings.demo_session_identities)
+    ]
+    return DemoIdentitiesOut(items=items)
 
 
 __all__ = ["router"]
