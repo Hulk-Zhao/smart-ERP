@@ -344,6 +344,14 @@ class ReconDatasetIn(BaseModel):
     tolerance: ToleranceIn | None = None
 
 
+class ReconStatementOut(BaseModel):
+    """供应商对账单上传登记结果：只回文件名与解析行数。"""
+
+    statement_file: str
+    supplier_lines: int
+    our_lines: int
+
+
 class ReconSourcesIn(BaseModel):
     """取数来源声明（与 AG-1 入参 C7 的 ``sources`` 对齐）。"""
 
@@ -628,6 +636,7 @@ __all__ = [
     "ReconMetricsOut",
     "ReconRunIn",
     "ReconSourcesIn",
+    "ReconStatementOut",
     "ScopeIn",
     "SupplierMasterIn",
     "TicketAction",

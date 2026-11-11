@@ -1,18 +1,18 @@
 /**
  * 本文件由 `node scripts/gen-api-types.mjs` 从 C16 冻结契约生成，请勿手改。
  * 源文件：contracts/api/product_api.openapi.v1.json
- * 契约 sha256：34241bf0df2391d22ad36e9348c7fb6eb0b18bf1e592e668f9663da83686c457
+ * 契约 sha256：98159da0166e0ea9d8cb84628e6afbb1f5e870bf7a927033e9d9fd4e8c670828
  * 契约版本：1.0.0 · C16
  *
  * 契约变更流程：后端重新生成契约 → 执行 `npm run gen:api` → 评审类型差异。
  */
 
-export const CONTRACT_SHA256 = "34241bf0df2391d22ad36e9348c7fb6eb0b18bf1e592e668f9663da83686c457";
+export const CONTRACT_SHA256 = "98159da0166e0ea9d8cb84628e6afbb1f5e870bf7a927033e9d9fd4e8c670828";
 export const CONTRACT_VERSION = "1.0.0";
-export const CONTRACT_PATH_COUNT = 20;
+export const CONTRACT_PATH_COUNT = 21;
 
 /** 写接口（POST）路径；前端统一补 Idempotency-Key。 */
-export const WRITE_PATHS = ["/v1/approvals/{ticket_id}/approve","/v1/approvals/{ticket_id}/reject","/v1/assistant/suggest","/v1/recon/runs","/v1/tickets/{ticket_id}/actions/approve","/v1/tickets/{ticket_id}/actions/cancel","/v1/tickets/{ticket_id}/actions/compensate","/v1/tickets/{ticket_id}/actions/reject"] as const;
+export const WRITE_PATHS = ["/v1/approvals/{ticket_id}/approve","/v1/approvals/{ticket_id}/reject","/v1/assistant/suggest","/v1/recon/runs","/v1/recon/statements","/v1/tickets/{ticket_id}/actions/approve","/v1/tickets/{ticket_id}/actions/cancel","/v1/tickets/{ticket_id}/actions/compensate","/v1/tickets/{ticket_id}/actions/reject"] as const;
 
 /**
  * 工单动作入参；``comment`` 同时承担审批意见 / 终止原因（FR-107）。
@@ -117,6 +117,11 @@ export interface AuditImageOut {
  * 行/差异的计费桶：与计量表四类计数共用同一分类函数，禁止第二处重算。
  */
 export type BillingBucket = "billable" | "auto_released" | "dispute_hold" | "other_unbillable";
+
+export interface BodyUploadStatementV1ReconStatementsPost {
+  dataset: string; /** 我方数据 JSON：{our_lines: [...], master_data: {...}, tolerance: {...}} */
+  file: string; /** 供应商对账单 CSV；UTF-8/GBK、LF/CRLF 均可 */
+}
 
 export type DiffTypeCode = "unit_price" | "qty" | "scrap" | "uom" | "tax" | "missing_doc" | "duplicate" | "rounding_tolerance";
 
@@ -414,6 +419,15 @@ export interface ReconSourcesIn {
 }
 
 /**
+ * 供应商对账单上传登记结果：只回文件名与解析行数。
+ */
+export interface ReconStatementOut {
+  our_lines: number;
+  statement_file: string;
+  supplier_lines: number;
+}
+
+/**
  * G-05：三个字段缺一不可，只允许在授权范围内收窄。
  */
 export interface ScopeIn {
@@ -686,6 +700,11 @@ export interface ApiOperations {
   };
     body: never;
     response: ReconDiffDetailOut;
+  };
+  "POST /v1/recon/statements": {
+    query: never;
+    body: never;
+    response: ReconStatementOut;
   };
   "GET /v1/tickets": {
     query: {

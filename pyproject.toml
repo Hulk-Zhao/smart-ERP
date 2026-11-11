@@ -25,6 +25,9 @@ dependencies = [
     "alembic>=1.13",
     # connector-gw 的 U8 transport / mock 在导入期即依赖 httpx（非仅测试用）
     "httpx>=0.27",
+    # POST /v1/recon/statements 用 multipart（UploadFile + Form）；缺它 FastAPI
+    # 在装配路由时直接 RuntimeError，属运行期硬依赖而非测试依赖。
+    "python-multipart>=0.0.9,<0.1",
     # apps/platform/api 的中间件与错误处理直接 import starlette（middleware.base /
     # requests / responses / types / exceptions），属直接依赖而非纯传递依赖，故给区间；
     # 1.x（当前 1.10.0）与 fastapi 0.162.4 实测解析通过。

@@ -559,6 +559,27 @@
         "title": "BillingBucket",
         "type": "string"
       },
+      "Body_upload_statement_v1_recon_statements_post": {
+        "properties": {
+          "dataset": {
+            "description": "我方数据 JSON：{our_lines: [...], master_data: {...}, tolerance: {...}}",
+            "title": "Dataset",
+            "type": "string"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "供应商对账单 CSV；UTF-8/GBK、LF/CRLF 均可",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "dataset"
+        ],
+        "title": "Body_upload_statement_v1_recon_statements_post",
+        "type": "object"
+      },
       "DiffTypeCode": {
         "enum": [
           "unit_price",
@@ -2154,6 +2175,30 @@
           }
         },
         "title": "ReconSourcesIn",
+        "type": "object"
+      },
+      "ReconStatementOut": {
+        "description": "供应商对账单上传登记结果：只回文件名与解析行数。",
+        "properties": {
+          "our_lines": {
+            "title": "Our Lines",
+            "type": "integer"
+          },
+          "statement_file": {
+            "title": "Statement File",
+            "type": "string"
+          },
+          "supplier_lines": {
+            "title": "Supplier Lines",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "statement_file",
+          "supplier_lines",
+          "our_lines"
+        ],
+        "title": "ReconStatementOut",
         "type": "object"
       },
       "ScopeIn": {
@@ -4229,6 +4274,48 @@
           }
         },
         "summary": "差异明细",
+        "tags": [
+          "对账"
+        ]
+      }
+    },
+    "/v1/recon/statements": {
+      "post": {
+        "description": "演示用最小通路：multipart 上传供应商 CSV，解析为行级数据集并登记；随后 `POST /v1/recon/runs` 用 `sources.statement_files=[文件名]` 即可跑真实对账。\n\n`dataset` 表单字段是**我方数据**（`our_lines` 必填，`master_data`/`tolerance` 可选），不由上传文件反填——否则等于自己跟自己比。同名文件重复上传覆盖登记（按文件名幂等），因此不要求 `Idempotency-Key`。\n\n解析 fail-closed：坏文件整文件拒收，422 `E-PARSE-FAILED`，detail 带文件行号，不会只登记一半。登记是进程内状态（api 单 worker），上传后不要重启 api。",
+        "operationId": "upload_statement_v1_recon_statements_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_statement_v1_recon_statements_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconStatementOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "上传供应商对账单 CSV（登记为对账数据集）",
         "tags": [
           "对账"
         ]

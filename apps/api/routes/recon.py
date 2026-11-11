@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 
-from apps.api import service
+from apps.api import recon_ingest, service
 from apps.api.deps import (
     ContainerDep,
     IdempotencyKey,
@@ -25,9 +25,55 @@ from apps.api.schemas import (
     ReconDiffDetailOut,
     ReconDiffOut,
     ReconRunIn,
+    ReconStatementOut,
 )
 
 router = APIRouter(prefix="/recon", tags=["对账"])
+
+
+@router.post(
+    "/statements",
+    response_model=ReconStatementOut,
+    status_code=201,
+    summary="上传供应商对账单 CSV（登记为对账数据集）",
+    description=(
+        "演示用最小通路：multipart 上传供应商 CSV，解析为行级数据集并登记；随后 "
+        "`POST /v1/recon/runs` 用 `sources.statement_files=[文件名]` 即可跑真实对账。\n\n"
+        "`dataset` 表单字段是**我方数据**（`our_lines` 必填，`master_data`/`tolerance` "
+        "可选），不由上传文件反填——否则等于自己跟自己比。同名文件重复上传覆盖登记"
+        "（按文件名幂等），因此不要求 `Idempotency-Key`。\n\n"
+        "解析 fail-closed：坏文件整文件拒收，422 `E-PARSE-FAILED`，detail 带文件行号，"
+        "不会只登记一半。登记是进程内状态（api 单 worker），上传后不要重启 api。"
+    ),
+)
+async def upload_statement(
+    container: ContainerDep,
+    session: SessionDep,
+    file: Annotated[
+        UploadFile, File(description="供应商对账单 CSV；UTF-8/GBK、LF/CRLF 均可")
+    ],
+    dataset: Annotated[
+        str,
+        Form(
+            description=(
+                "我方数据 JSON：{our_lines: [...], master_data: {...}, tolerance: {...}}"
+            )
+        ),
+    ],
+):
+    with translated():
+        source = await file.read()
+        result = recon_ingest.ingest_statement(
+            container,
+            filename=file.filename or "",
+            source=source,
+            our_side_raw=dataset,
+        )
+    return ReconStatementOut(
+        statement_file=result.statement_file,
+        supplier_lines=result.supplier_lines,
+        our_lines=result.our_lines,
+    )
 
 
 @router.post(
