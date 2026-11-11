@@ -623,7 +623,12 @@ curl -X POST http://127.0.0.1:8021/stub/reset      # 清空请求/回执/注入�
 | --- | --- | --- |
 | 建单 / 发起 | `aaaaaaaa`（执行体，**不是**演示登录用户 `dddddddd`） | **种子预置** |
 | 第一条复核（reviewer） | 第二个 `user_id` | **种子预置**一条 reviewer 记录（由 S1 补进种子；未带上时演示前先补） |
-| 第二条复核（approver） | 演示登录用户 `dddddddd` | **现场点**（演示动作只有这一步） |
+| 第二条复核（approver） | `eeeeeeee`（`reviewer,approver,finance`） | **现场点**（演示动作只有这一步） |
+| 类目闸反例 | `dddddddd`（无 `finance`） | **现场点会 403**：`E-AUTHZ-001 不能复核 finance 类场景` |
+
+> 2026-11-12 排练实测纠正：`dddddddd` **不能**投 W2 的 approver 票（场景
+> `ag2_processing_fee` 属 finance 类，要求 finance 角色），必须由 `eeeeeeee` 补票；
+> `dddddddd` 留作「类目闸拒绝」的反例演示（与 `demo/README.md` 身份表一致）。
 | 触发写入 | 发起人 `aaaaaaaa`（执行体） | 由执行体触发，不是演示用户点的 |
 
 W2 要求两个 **distinct** `user_id` 各落一条记录，一个账号满足不了，所以第一条必须在种子里
@@ -911,5 +916,34 @@ reset 后也没有它们的冲销回执。**不要说「桩上能查到冲销」
 生效。复核：`default_scope.period=2026-09`、`/v1/approvals/pending` 4 条
 （W2 5,000 / 0003 735,000 / 0002 268,000 / 0001 86,000）、2026-09 工单 18 张。
 第 0 条从此只是「确认」，不再是手工步骤。
+
+### 10.5 2026-11-12 完整排练实测（f1bdbc9，demo 档）
+
+从登录到复位全走一遍（允许写库），实际值如下，可用于对照演示脚本：
+
+| 步 | 动作 | 实际返回 |
+| --- | --- | --- |
+| 1 | `dddddddd` 登录 | 200，`default_scope=ORG-SZ/2026-09` |
+| 2 | 待办 | `GET /v1/approvals/pending` 4 条：W2 5,000 / 0003 735,000 / 0002 268,000 / 0001 86,000 |
+| 3 | W2 详情 | `待审批`，`approval_missing_roles=["approver"]`，`execution_missing_roles=["approver"]` |
+| 4 | `dddddddd` 点通过 | **403** `E-AUTHZ-001`（finance 类场景缺 finance 角色）|
+| 5 | `eeeeeeee` 点通过 | 200，`satisfied=true`，`approval_missing_roles=[]` |
+| 6 | `aaaaaaaa` 执行 | 200，`state=执行中`，`executed_steps[0].object_id=PO-STUB-000001` |
+| 7 | 桩回执 | 1 条：`cCode=PO-STUB-000001`、`source_doc_no=PO-STUB-DEMO-W2-WRITE-9001`、`cVenCode=S-STL-0001` |
+| 8 | 影像 | `audit_image_count=1`，`field_diff` 长度 10 |
+| 9 | 上传 | `{"supplier_lines":3,"our_lines":3}`（`supplier_statement_2026-09.csv`）|
+| 10 | 对账 | 批次 `bb2839fb…`，`matched=3`、`diff_lines=1`、`diff_amount=10.0000`、`status=已对账` |
+| 11 | 计量 | `expected_lines=3`、`auto_released_lines=3`、`billable_lines=3` |
+| 12 | 补偿三单 | `TK-202609-0011` 补偿中 / `0012` 已回滚 / `0013` 已回滚，各 2 张影像 |
+| 13 | 验链（排练中） | `seed_images=54 runtime_added=1 images=55 problems=0` |
+
+复位后（当前 live 基线）：重灌种子 + 清 `erp.connector_idempotency` + 重启 api +
+`POST /stub/reset` → `receipts=0`、`connector_idempotency=0`、待办 4 条、
+`default_scope=2026-09`、验链 `54/0/54/0`、四身份 4×200。
+
+穿帮点记录：
+- 旧文档写「`dddddddd` 现场点第二票」是错的，实跑会 403；正确身份是 `eeeeeeee`
+  （§9.5 已改，`dddddddd` 留作类目闸反例）。
+- 对账跑一次会在 `erp.recon_batch` 留下新批次（本次 `bb2839fb…`），复位重灌后清掉。
 
 
