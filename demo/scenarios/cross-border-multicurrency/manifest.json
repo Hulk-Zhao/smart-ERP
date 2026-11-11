@@ -75,9 +75,9 @@
   "erp_counts": {
     "recon_batches": 3,
     "recon_lines": 312,
-    "tickets": 16,
+    "tickets": 18,
     "ticket_steps": 20,
-    "ticket_events": 61,
+    "ticket_events": 65,
     "audit_images": 18,
     "approval_records": 25,
     "recon_line_links": 16,
@@ -145,6 +145,6 @@
     "fx_rate.csv": "a2ad2370fff4bd6804ec5e621eb06eb756226aab72f5930e3bc3478b54e29a88",
     "customs_declaration.csv": "732cb4fc5709cd3d708b25d746c34a702188e0b31249cc7ee775d35dad76fa9a",
     "intercompany_settlement.csv": "fa5f4be0849557e152a5e3c44acf575b198123cf1dc095a59c043744b5d75bbf",
-    "erp_seed.json": "e74fcb4e2bbee713c0b576f4f8f4527c67bfe59a2d4023c186c074bec06acc3a"
+    "erp_seed.json": "9a813e5cd4e572d9736a3d0b89c3bab6a314f02c8b93b0122caff595e5f14fd6"
   }
 }

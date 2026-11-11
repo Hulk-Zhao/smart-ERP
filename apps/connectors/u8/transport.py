@@ -27,7 +27,12 @@ from apps.connectors.errors import (
 )
 from apps.connectors.idempotency import IdempotencyStore, IdemStatus, request_hash
 from apps.connectors.runtime import ResilientCaller
-from apps.connectors.u8.actions import ARRIVAL_DRAFT_KEY, PO_DRAFT_KEY, READ_LIMIT_KEY
+from apps.connectors.u8.actions import (
+    ARRIVAL_DRAFT_KEY,
+    DELETE_ACTIONS,
+    PO_DRAFT_KEY,
+    READ_LIMIT_KEY,
+)
 from apps.connectors.u8.mapping import build_arrival_draft_body, build_po_draft_body
 
 # 动作 → 草稿接口路径；未声明的动作在发送前就被拒绝。
@@ -94,6 +99,16 @@ class U8Transport:
         rows = await self.get(route, {"source_doc_no": source_doc_no})
         return rows[0] if rows else None
 
+    async def get_draft_by_code(self, action_key: str, c_code: str) -> Mapping[str, Any] | None:
+        """按 U8 单号（cCode）查草稿；冲销前像与冲销校验共用。"""
+
+        route = self._route(action_key)
+        rows = await self.get(route, {})
+        for row in rows:
+            if str(row.get("cCode") or "") == c_code:
+                return row
+        return None
+
     async def delete_draft(self, action_key: str, external_id: str) -> bool:
         route = self._route(action_key)
 
@@ -108,7 +123,7 @@ class U8Transport:
         return await self._caller.call(action_key, operation, phase="write")
 
     def _route(self, action_key: str) -> str:
-        route = DRAFT_ROUTES.get(action_key)
+        route = DRAFT_ROUTES.get(action_key) or DELETE_ACTIONS.get(action_key)
         if route is None:
             raise ConnectorError(ErrorKind.INVALID, f"动作 {action_key} 没有声明草稿路由")
         return route
@@ -118,6 +133,9 @@ class U8Transport:
         """由 ``BaseConnector._transport_write()`` 调用；``request`` 只按属性读取。"""
 
         action_key = str(request.action_key)
+        if action_key in DELETE_ACTIONS:
+            return await self._send_delete(action_key, request)
+
         route = self._route(action_key)
         builder = self._builders.get(action_key)
         if builder is None:
@@ -173,6 +191,44 @@ class U8Transport:
             body=created,
             before_ref=stored["before_ref"] or None,
             after_ref=stored["after_ref"],
+        )
+
+    async def _send_delete(self, action_key: str, request: Any) -> U8TransportResponse:
+        """反向动作：按 cCode 删除草稿；已不存在视为幂等命中，不当失败。"""
+
+        c_code = str(request.payload.get("cCode") or "").strip()
+        if not c_code:
+            raise ConnectorError(ErrorKind.INVALID, f"动作 {action_key} 缺 cCode，无法冲销")
+        fingerprint = request_hash({"action": action_key, "cCode": c_code})
+
+        decision = await self._idem.begin(str(request.idem_key), fingerprint)
+        if decision.status is IdemStatus.REPLAY and decision.response is not None:
+            stored = dict(decision.response)
+            return U8TransportResponse(
+                external_id=stored.get("external_id"),
+                body=stored.get("body", {}),
+                before_ref=stored.get("before_ref"),
+                after_ref=stored.get("after_ref"),
+            )
+
+        try:
+            deleted = await self.delete_draft(action_key, c_code)
+        except ConnectorError:
+            await self._idem.fail(str(request.idem_key))
+            raise
+
+        stored = {
+            "external_id": c_code,
+            "body": {"cCode": c_code, "deleted": deleted},
+            "before_ref": c_code,
+            "after_ref": None,
+        }
+        await self._idem.complete(str(request.idem_key), stored)
+        return U8TransportResponse(
+            external_id=c_code,
+            body=stored["body"],
+            before_ref=c_code,
+            after_ref=None,
         )
 
     # -------------------------------------------------------------------- HTTP

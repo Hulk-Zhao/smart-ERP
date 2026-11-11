@@ -51,6 +51,10 @@ class AccessRequest:
     amount: Decimal | int | str
     touches_fund: bool = False
     field_whitelist: frozenset[str] = frozenset()
+    #: 凭据等级上限的比对口径；缺省等于 ``level``。
+    #: 审批通过执行写计划时传**动作**等级：W2 工单可能只执行 W1 草稿写入，
+    #: 治理等级（决定审批链）不该被拿来误判 B 级凭据的写入上限。
+    credential_level: WriteLevel | int | str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,9 +71,14 @@ class AccessGate:
 
     def authorize(self, request: AccessRequest) -> AccessGrant:
         level = WriteLevel.parse(request.level)
+        credential_level = (
+            level
+            if request.credential_level is None
+            else WriteLevel.parse(request.credential_level)
+        )
 
         # 闸 3 前置：W3 没有身份、范围、审批可补救，直接拒绝且不换令牌。
-        if level is WriteLevel.W3:
+        if level is WriteLevel.W3 or credential_level is WriteLevel.W3:
             raise W3AccessDenied("W3 动作无执行路径（FR-1407）")
 
         # 闸 2：范围独立校验；不依赖调用方是否记得在 SQL 里加条件。
@@ -82,13 +91,14 @@ class AccessGate:
             ticket_id=request.ticket_id,
             requested_scope=request.requested_scope,
             field_whitelist=request.field_whitelist,
+            level=credential_level,
         )
 
         # 闸 3：连接器/凭据等级上限（B 级只能 W1）。
-        if level > lease.max_level:
+        if credential_level > lease.max_level:
             raise LevelNotAllowed(
                 f"连接器 {lease.system} 当前凭据最高 {lease.max_level.name}，"
-                f"拒绝 {level.name} 写入"
+                f"拒绝 {credential_level.name} 写入"
             )
 
         # 闸 4：审批阈值 + 双人复核；B 级强制双人。

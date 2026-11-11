@@ -1940,6 +1940,109 @@ def build_erp_seed(cfg: Scenario, data: dict[str, list[dict]], rng: random.Rando
                     "created_at": (created + timedelta(hours=1)).isoformat(),
                 }
             )
+    # ---- 演示写路径专用工单（外部系统 = 本地 u8-stub，模拟系统） -----------
+    # 这两张工单不来自 ticket_case：它们是「跨系统写入 + 可审计回滚」的现场演示
+    # 入口，锁定动作与载荷，审批通过后由真实 U8 连接器发往 u8-stub。
+    # W2 证明「审批 → 真实写入 → 审计影像」；W3 证明「资金类硬拒绝、零写入」。
+    demo_supplier = data["supplier"][0]["supplier_code"]
+    demo_item = data["item"][0]
+    demo_org = data["ticket_case"][0]["org_id"]
+    demo_period = data["ticket_case"][0]["period"]
+    demo_created = datetime.combine(TODAY, datetime.min.time(), TZ).replace(hour=10, minute=5)
+    demo_specs = (
+        ("DEMO-W2-WRITE-9001", 2, "委外加工费差异（演示：审批后写入模拟外部系统 u8-stub）", "5000.00", False),
+        ("DEMO-W3-FUND-9002", 3, "资金类写入（演示：W3 硬拒绝，不产生任何外部写入）", "100.00", True),
+    )
+    for ticket_no, level, subject, amount, touches_fund in demo_specs:
+        demo_ticket_id = uid("ticket", cfg.code, ticket_no)
+        demo_payload = {
+            "source_doc_no": f"PO-STUB-{ticket_no}",
+            "supplier_code": demo_supplier,
+            "doc_date": iso(TODAY),
+            "lines": [
+                {
+                    "item_code": demo_item["item_code"],
+                    "quantity": "10",
+                    "unit": demo_item["uom"],
+                    "unit_price": "12.50",
+                }
+            ],
+            "memo": f"演示：写入模拟外部系统（u8-stub），不是真实 U8 —— {ticket_no}",
+        }
+        created_payload = {"ticket_no": ticket_no, "subject": subject}
+        trace = hashlib.sha256(f"{cfg.code}:{ticket_no}:1".encode()).hexdigest()[:32]
+        prev_hash = "0" * 64
+        created_hash = _event_hash(prev_hash, 1, "created", None, "计划中", created_payload, trace)
+        seed["ticket_events"].append(
+            {
+                "id": uid("event", cfg.code, ticket_no, "1"),
+                "tenant_id": tenant,
+                "ticket_id": demo_ticket_id,
+                "seq": 1,
+                "event_type": "created",
+                "from_state": None,
+                "to_state": "计划中",
+                "actor_id": USERS["initiator"],
+                "payload": created_payload,
+                "trace_id": trace,
+                "prev_hash": prev_hash,
+                "hash": created_hash,
+                "created_at": demo_created.isoformat(),
+            }
+        )
+        approved_at = demo_created + timedelta(hours=2)
+        trace = hashlib.sha256(f"{cfg.code}:{ticket_no}:2".encode()).hexdigest()[:32]
+        transition_hash = _event_hash(
+            created_hash, 2, "transition", "计划中", "待审批", {"reason": subject}, trace
+        )
+        seed["ticket_events"].append(
+            {
+                "id": uid("event", cfg.code, ticket_no, "2"),
+                "tenant_id": tenant,
+                "ticket_id": demo_ticket_id,
+                "seq": 2,
+                "event_type": "transition",
+                "from_state": "计划中",
+                "to_state": "待审批",
+                "actor_id": USERS["initiator"],
+                "payload": {"reason": subject},
+                "trace_id": trace,
+                "prev_hash": created_hash,
+                "hash": transition_hash,
+                "created_at": approved_at.isoformat(),
+            }
+        )
+        seed["tickets"].append(
+            {
+                "id": demo_ticket_id,
+                "tenant_id": tenant,
+                "ticket_no": ticket_no,
+                "scene_code": "ag2_processing_fee",
+                "initiator_id": USERS["initiator"],
+                "trigger_kind": "manual",
+                "business_key": demo_payload["source_doc_no"],
+                "state": "待审批",
+                "version": 1,
+                "diff_amount": amount,
+                "systems_count": 1,
+                "touches_fund": touches_fund,
+                "lease_owner": None,
+                "lease_expires_at": None,
+                "created_at": demo_created.isoformat(),
+                "org_id": demo_org,
+                "period": demo_period,
+                "systems": ["u8"],
+                "write_level": level,
+                "amount": amount,
+                "pending_write": {
+                    "action_key": "u8.po.create_draft",
+                    "system": "u8",
+                    "payload": demo_payload,
+                    "idem_key": f"demo-{ticket_no.lower()}",
+                },
+                "updated_at": approved_at.isoformat(),
+            }
+        )
     return seed
 
 

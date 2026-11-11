@@ -101,7 +101,7 @@ from apps.audit.store import AuditQuery
 from apps.platform.api.errors import ProblemError
 from apps.platform.contracts.errors import ErrorCode
 from apps.platform.contracts.ticket import TicketState
-from apps.platform.policy.levels import WriteLevel
+from apps.platform.policy.levels import ActionSpec, WriteLevel
 from apps.recon.engine import empty_result, reconcile
 from apps.recon.loader import build_request
 from apps.recon.models import (
@@ -205,6 +205,7 @@ def _authorize(
     amount: Decimal,
     touches_fund: bool = False,
     field_whitelist: frozenset[str] = frozenset(),
+    credential_level: WriteLevel | None = None,
 ) -> AccessGrant:
     meta = container.connector_meta(system)
     return container.authorize(
@@ -217,6 +218,7 @@ def _authorize(
             amount=amount,
             touches_fund=touches_fund,
             field_whitelist=field_whitelist,
+            credential_level=credential_level,
         )
     )
 
@@ -360,20 +362,54 @@ def _write_system(ticket: TicketRecord) -> str:
     return ticket.systems[0]
 
 
+def _pending_action(container: ApiContainer, ticket: TicketRecord) -> ActionSpec | None:
+    """工单锁定的写动作；未登记动作不留空窗，直接拒绝。"""
+
+    pending = ticket.pending_write
+    if pending is None:
+        return None
+    try:
+        return container.actions.get(pending.action_key)
+    except KeyError as exc:
+        raise ProblemError(
+            ErrorCode.POLICY_LEVEL, f"动作 {pending.action_key} 未注册，拒绝执行"
+        ) from exc
+
+
 def _pending_field_whitelist(
     container: ApiContainer, ticket: TicketRecord
 ) -> frozenset[str]:
     """B 级写只允许落动作登记的可写字段；未登记动作不留空窗。"""
 
-    pending = ticket.pending_write
-    if pending is None:
-        return frozenset()
-    try:
-        return container.actions.get(pending.action_key).writable_fields
-    except KeyError as exc:
-        raise ProblemError(
-            ErrorCode.POLICY_LEVEL, f"动作 {pending.action_key} 未注册，拒绝执行"
-        ) from exc
+    action = _pending_action(container, ticket)
+    return frozenset() if action is None else action.writable_fields
+
+
+def _pending_credential_level(
+    container: ApiContainer, ticket: TicketRecord
+) -> WriteLevel | None:
+    """凭据等级按**动作**取，而不是工单治理等级（W2 工单可能只执行 W1 草稿写）。"""
+
+    action = _pending_action(container, ticket)
+    return None if action is None else WriteLevel.parse(action.level)
+
+
+def _steps_field_whitelist(
+    container: ApiContainer, steps: list[StepWrite]
+) -> frozenset[str]:
+    """B 级补偿同样要字段白名单：取已执行步骤动作的可写字段并集。
+
+    未登记动作不在这里报错——``RollbackPlanner`` 会把它判为不可回滚并整单拒绝，
+    补偿入口不需要第二套判定口径。
+    """
+
+    fields: set[str] = set()
+    for step in steps:
+        try:
+            fields |= set(container.actions.get(step.action_key).writable_fields)
+        except KeyError:
+            continue
+    return frozenset(fields)
 
 
 # --------------------------------------------------------------------------- 工单
@@ -449,6 +485,9 @@ async def approve_ticket(
         amount=ticket.amount,
         touches_fund=ticket.touches_fund,
         field_whitelist=_pending_field_whitelist(container, ticket),
+        # 治理等级（审批链）与写入等级分开：B 级连接器只限制「写」，不应把
+        # W2 工单的 W1 草稿写一并拦掉（否则 W2 永远无法执行）。
+        credential_level=_pending_credential_level(container, ticket),
     )
 
     executed: list[TicketStepOut] = []
@@ -751,6 +790,8 @@ async def compensate_ticket(
         system=_write_system(ticket),
         amount=ticket.amount,
         touches_fund=ticket.touches_fund,
+        # B 级连接器的补偿也是外部写：白名单按已执行步骤动作取，缺了就 fail-closed。
+        field_whitelist=_steps_field_whitelist(container, steps),
     )
 
     plan = RollbackPlanner(container.actions).plan(ticket.ticket_id, steps)
