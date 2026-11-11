@@ -124,8 +124,9 @@ pg_restore -l smart_erp-*.dump | head -30   # 只列目录，不连库
 2. 目标库非空 → 默认拒绝（exit 4），必须显式 `--force`；
 3. **`--force` ≠ 整库重置**：它只是给 `pg_restore` 加 `--clean --if-exists`，清掉的是
    **备份包 TOC 里出现过的对象**。备份包里没有的旧表、旧序列、旧外键会原样留下，
-   形成「半新半旧」的库。脚本恢复后会做差集校验（§2.2），差集非空以 exit 5 拒绝通过；
-   真要整库重置，只能由实例 owner 另做 `DROP DATABASE / CREATE DATABASE`，恢复脚本不做；
+   形成「半新半旧」的库。`--force` 会在 `pg_restore` **之前**先做一次差集预检（见 §2.2），
+   差集非空以 exit 5 拒绝，避免 `--clean` 的 `DROP SCHEMA erp` 被残留对象挡住、校验还没跑就退出；
+   恢复后再做一次完整差集校验。真要整库重置（删库）仍只能由实例 owner 另做 `DROP DATABASE`；
 4. 恢复后**不自动跑迁移**：先比对 `.meta.txt` 的 `alembic_revision`，再按第 3 节决定是否升级。
 
 ### 2.2 操作
@@ -138,6 +139,12 @@ scripts/restore-smart-erp.sh \
 
 # 覆盖已有库（谨慎）
 scripts/restore-smart-erp.sh --dump <file> --target-url <url> --force
+
+# 灾备：源库已被 DROP、目标库也不存在（一条命令建库+恢复）
+#   连接串用有 CREATEDB 的 DBA 角色，库主必须是应用迁移角色
+scripts/restore-smart-erp.sh --dump <file> \
+  --target-url 'postgresql+asyncpg://postgres:***@hulkai_aps_postgres:5432/smart_erp_restore' \
+  --create-db --create-db-owner erp_migrator
 
 # 连对象卷一起恢复
 scripts/restore-smart-erp.sh --dump <file> --target-url <url> \
@@ -152,6 +159,13 @@ scripts/restore-smart-erp.sh --dump <file> --target-url <url> \
 - **库内 − 备份包 ≠ 空**：说明 `--force` 留下了备份里没有的旧对象，打印 `+ 旧对象` 清单并以
   **exit 5** 退出。确认可删后手工 `DROP`，再用同一备份重跑；不要忽略这行；
 - **备份包 − 库内 ≠ 空**：`pg_restore` 没恢复完整，同样 exit 5，先查 stderr 再用新库重来。
+
+目标库不存在时不会再把 `psql` 的裸 `FATAL: database ... does not exist` 抛给人看：
+
+- 未加 `--create-db` → **exit 6**，并打印可直接照抄的 `CREATE DATABASE ... OWNER ...`；
+- 加了 `--create-db` 但连接角色没有 CREATEDB（或无权指定库主）→ **exit 7**，提示换连接串或补 `--create-db-owner`。
+  以 `postgres` 建库却没指定 `--create-db-owner erp_migrator` 时，脚本会额外告警：这种库的
+  owner 是 postgres，应用迁移角色后续连 `CREATE SCHEMA` 都会被拒。
 
 ### 2.3 演练结论（最近一次，2026-11-11 实测）
 
