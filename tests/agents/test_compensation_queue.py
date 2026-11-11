@@ -21,6 +21,10 @@ from apps.platform.contracts.ticket import TicketState
 PAYLOAD = {"supplier": "SUP-1", "amount": "10.00"}
 
 
+async def _noop_sleep(_seconds: float) -> None:
+    """不睡觉：退避由 ``next_retry_at`` 表达，测试只验证「到期后能继续」。"""
+
+
 async def _succeeded_step(env, ticket_id, step_no: int, action_key: str | None = None):
     action = action_key or f"fake.draft.create.{step_no}"
     step = await env.store.intent_step(
@@ -230,13 +234,12 @@ def test_compensation_failure_requires_manual_handling(db: str) -> None:
 
 
 def test_compensation_round_distinguishes_backoff_from_empty(db: str) -> None:
-    """``claim_next() is None`` 的两种含义必须分开留痕。
+    """``claim_next() is None`` 的两种含义必须分开留痕、也必须分开决定状态。
 
-    旧实现在两种情况下都静默 ``break``：看起来都像「本轮做完了」，实际可能是
-    「还有 N 条在退避闸门里」。回拨（本机已实测 0.84–1.43s）把 ``next_retry_at``
-    推远时，这一轮少处理 N 条、``attempts`` 不涨，而工单随后因 ``counts.queued > 0``
-    转 MANUAL_REQUIRED——下一轮不会被自动接上，因为 ``compensate`` 要求工单仍在
-    「补偿中」。今天没有评估器，日志是唯一落点。
+    旧实现在两种情况下都静默 ``break``，随后 ``counts.queued > 0`` 就转
+    MANUAL_REQUIRED；而 ``compensate`` 要求工单仍在「补偿中」，于是退避到期后
+    没有任何一轮会再来处理它。现在：仍在退避 → 工单保持「补偿中」并留
+    ``reason=backoff``（带未处理条数）；队列真空 → ``reason=empty``。
     """
 
     async def scenario() -> None:
@@ -264,13 +267,79 @@ def test_compensation_round_distinguishes_backoff_from_empty(db: str) -> None:
 
             messages = [str(call.args[0] % call.args[1:]) for call in warning.call_args_list]
             assert any("reason=backoff" in m and "未处理=1" in m for m in messages), messages
-            assert report.status is TicketState.MANUAL_REQUIRED
+            assert report.status is TicketState.COMPENSATING
+            assert (await env.store.get_ticket(ticket.id)).state == TicketState.COMPENSATING.value
 
             task = next(
                 t for t in await env.queue.list_tasks(ticket.id) if t.id == gated.id
             )
             assert task.state == "queued"
             assert task.attempts == attempts_after_fail, "本轮没执行到它，attempts 不应上涨"
+
+    asyncio.run(scenario())
+
+
+def test_compensation_retry_survives_backoff_and_finishes(db: str) -> None:
+    """第一次补偿失败（retry_in>0）不得判人工；退避到期后第二轮要能做完。
+
+    这是「补偿重试真的在工作」的唯一证据：旧实现里第一次可重试失败就会因
+    ``claim_next() is None`` → ``counts.queued > 0`` 转 MANUAL_REQUIRED，
+    重试永远没有下一轮，之后只会每秒抛 ``RuntimeGuardError``。
+    """
+
+    async def scenario() -> None:
+        async with db_env(db) as env:
+            ticket = await prepare_executing(env.store)
+            for step_no in (1, 2):
+                await _succeeded_step(env, ticket.id, step_no)
+            await env.store.transition(
+                ticket.id,
+                "补偿中",
+                "step_failed",
+                context=TransitionContext(fail_code="F6", step_states=("succeeded", "failed")),
+            )
+
+            # 只失败一次：seq=2 的第一次撤销失败，别的都成功
+            connector = ScriptedConnector(compensate_failures=1)
+            runtime = build_runtime(
+                env,
+                connector,
+                compensation_retry_seconds=8.0,
+                sleep=_noop_sleep,
+            )
+
+            first = await runtime.compensate(ticket.id, owner="comp-1")
+
+            assert first.status is TicketState.COMPENSATING
+            assert (await env.store.get_ticket(ticket.id)).state == TicketState.COMPENSATING.value, (
+                "任务还在退避就转人工，重试路径永远走不到"
+            )
+            gated = next(
+                t for t in await env.queue.list_tasks(ticket.id) if t.compensate_seq == 2
+            )
+            assert gated.state == "queued"
+            assert gated.attempts == 1, "第一次失败后 attempts 应已 +1"
+            assert first.failed == 0, "报告数字只能来自库：没有终态失败就不能写 1"
+
+            # 让退避到期：不睡觉，直接把闸门打开（与生产「时间到了」等价）
+            async with env.sf() as session, session.begin():
+                await session.execute(
+                    text(
+                        "UPDATE erp.compensation_task SET next_retry_at = NULL "
+                        "WHERE ticket_id = :ticket"
+                    ),
+                    {"ticket": ticket.id},
+                )
+
+            second = await runtime.compensate(ticket.id, owner="comp-1")
+
+            assert second.status is TicketState.ROLLED_BACK
+            assert (await env.store.get_ticket(ticket.id)).state == TicketState.ROLLED_BACK.value
+            final = {
+                t.compensate_seq: t.state for t in await env.queue.list_tasks(ticket.id)
+            }
+            assert final == {1: "done", 2: "done"}
+            assert second.done == 2 and second.failed == 0
 
     asyncio.run(scenario())
 

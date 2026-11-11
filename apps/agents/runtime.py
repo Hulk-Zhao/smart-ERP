@@ -661,21 +661,48 @@ class TicketRuntime:
                 and step.error_code == RECOVERY_THRESHOLD_ERROR
                 for step in steps
             )
-            if counts.failed or counts.running or counts.queued or recovery_threshold_hit:
-                failed = max(1, counts.failed)
+            pending = counts.queued + counts.running
+            order = tuple(task.compensate_seq for task in tasks)
+
+            # 停止原因决定状态：只有「剩余全是终态失败」或「恢复重试耗尽」才转人工。
+            # 仍在退避或被他人持有（pending>0）时必须保持「补偿中」——否则任何一次
+            # 可重试失败都会在第一次就把工单判死，而 ``compensate()`` 之后要求工单
+            # 仍在「补偿中」，重试路径永远走不到，只会每秒抛 RuntimeGuardError。
+            if recovery_threshold_hit or (counts.failed and not pending):
                 await self._store.transition(
                     ticket_id,
                     TicketState.MANUAL_REQUIRED,
                     "compensation_failed",
-                    context=TransitionContext(compensation_failed=failed),
+                    # 状态机要求该数非零；恢复阈值是硬停、任务行里可能没有 failed，
+                    # 只在上下文里兜 1。报告与指标一律只用库里的真实数字。
+                    context=TransitionContext(compensation_failed=counts.failed or 1),
                     trace_id=trace_id,
                 )
                 return CompensationReport(
                     ticket_id=ticket_id,
                     status=TicketState.MANUAL_REQUIRED,
-                    order=tuple(task.compensate_seq for task in tasks),
+                    order=order,
                     done=counts.done,
-                    failed=failed,
+                    failed=counts.failed,
+                )
+
+            if pending:
+                logger.warning(
+                    "补偿本轮结束、工单保持补偿中 ticket=%s pending=%d queued=%d "
+                    "running=%d failed=%d done=%d（退避到期后下一轮继续）",
+                    ticket_id,
+                    pending,
+                    counts.queued,
+                    counts.running,
+                    counts.failed,
+                    counts.done,
+                )
+                return CompensationReport(
+                    ticket_id=ticket_id,
+                    status=TicketState.COMPENSATING,
+                    order=order,
+                    done=counts.done,
+                    failed=counts.failed,
                 )
 
             await self._store.transition(
@@ -688,9 +715,9 @@ class TicketRuntime:
             return CompensationReport(
                 ticket_id=ticket_id,
                 status=TicketState.ROLLED_BACK,
-                order=tuple(task.compensate_seq for task in tasks),
+                order=order,
                 done=counts.done,
-                failed=0,
+                failed=counts.failed,
             )
         finally:
             if lease_task is not None and lease_stop is not None:
