@@ -462,7 +462,9 @@ def build_env() -> MatrixEnv:
             container.broker, _principal(REVIEWER, frozenset({"reviewer"}))
         ),
         "approver": container.session_directory.issue(
-            container.broker, _principal(APPROVER, frozenset({"approver"}))
+            # 矩阵工单全部是 ag2_processing_fee（finance 类）：审批人必须持有
+            # 该业务类别角色，否则业务类别闸会拒绝其落票（这正是 §4.2 的语义）。
+            container.broker, _principal(APPROVER, frozenset({"approver", "finance"}))
         ),
         "auditor": container.session_directory.issue(
             container.broker, _principal(AUDITOR, frozenset({"auditor"}))

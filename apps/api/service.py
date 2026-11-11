@@ -1091,6 +1091,9 @@ def _build_decision(
         initiator_id=ticket.initiator_id,
         decision=decision,  # type: ignore[arg-type]
         comment=comment,
+        # 业务类别闸的判据只能来自工单自身（库里的 NOT NULL 字段），
+        # 不能由审批请求体提供，否则越类复核人可自证。
+        scene_code=ticket.scene_code,
     )
 
 
