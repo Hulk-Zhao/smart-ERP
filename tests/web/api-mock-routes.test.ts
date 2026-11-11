@@ -7,6 +7,7 @@ import {
   meteringPath,
   PENDING_APPROVALS_PATH,
   RECON_BATCHES_PATH,
+  RECON_STATEMENTS_PATH,
   SESSION_PATH,
   TICKETS_PATH,
   ticketPath,
@@ -67,8 +68,28 @@ describe('mock 路由与 client 路径同源', () => {
   });
 });
 
-describe('mock 助手建议覆盖 llm / rule 两种来源', () => {
-  const ask = (id: string) =>
+describe('mock 对账单上传与 client 路径同源', () => {
+  it('multipart 登记命中 mock 并返回 201 与真实行数', async () => {
+    const response = await mockSend(
+      'POST',
+      RECON_STATEMENTS_PATH,
+      {},
+      {
+        file_name: 'supplier_statement_2026-10.csv',
+        dataset: { our_lines: [{ doc_no: 'PO-1' }, { doc_no: 'PO-2' }, { doc_no: 'PO-3' }] },
+      },
+      config,
+    );
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      statement_file: 'supplier_statement_2026-10.csv',
+      supplier_lines: 3,
+      our_lines: 3,
+    });
+  });
+});
+
+describe('mock 助手建议覆盖 llm / rule 两种来源', () => {  const ask = (id: string) =>
     mockSend('POST', ASSISTANT_SUGGEST_PATH, {}, { ticket_id: id, kind: 'next_action' }, config);
 
   it('普通工单返回 llm + 模型名', async () => {
