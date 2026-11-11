@@ -291,7 +291,9 @@ async def scenario_kill9_reclaim(url: str) -> dict:
             reclaimed = await store.reclaim_stale()
             again = await store.claim(["agent"], owner="s8-fresh", lease_seconds=30)
             if again is not None:
-                await store.complete(again.id, owner="s8-fresh")
+                await store.complete(
+                    again.id, owner="s8-fresh", lease_gen=again.lease_gen
+                )
         finally:
             await engine.dispose()
     finally:
