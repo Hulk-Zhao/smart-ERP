@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ApiConfig } from '../../web/src/api/config';
 import {
+  ASSISTANT_SUGGEST_PATH,
   auditPath,
   batchPath,
   meteringPath,
@@ -10,7 +11,7 @@ import {
   TICKETS_PATH,
   ticketPath,
 } from '../../web/src/api/client';
-import type { SessionOut } from '../../web/src/api/types';
+import type { SessionOut, SuggestOut } from '../../web/src/api/types';
 import { mockSend } from '../../web/src/api/mock';
 
 /**
@@ -32,8 +33,20 @@ const config: ApiConfig = {
 const ticketId = 'd0000000-0000-4000-8000-000000000002';
 const batchId = 'e0000000-0000-4000-8000-000000000001';
 
-const routes: Array<{ name: string; path: string; query?: Record<string, unknown> }> = [
+const routes: Array<{
+  name: string;
+  method?: string;
+  path: string;
+  query?: Record<string, unknown>;
+  body?: unknown;
+}> = [
   { name: '会话身份', path: SESSION_PATH },
+  {
+    name: '助手建议',
+    method: 'POST',
+    path: ASSISTANT_SUGGEST_PATH,
+    body: { ticket_id: ticketId, kind: 'next_action' },
+  },
   { name: '工单列表', path: TICKETS_PATH, query: { limit: 5 } },
   { name: '工单详情', path: ticketPath(ticketId) },
   { name: '审批待办', path: PENDING_APPROVALS_PATH },
@@ -48,9 +61,30 @@ const routes: Array<{ name: string; path: string; query?: Record<string, unknown
 ];
 
 describe('mock 路由与 client 路径同源', () => {
-  it.each(routes)('$name $path 命中 mock 而非 404', async ({ path, query }) => {
-    const response = await mockSend('GET', path, query ?? {}, undefined, config);
+  it.each(routes)('$name $method $path 命中 mock 而非 404', async ({ path, query, method, body }) => {
+    const response = await mockSend(method ?? 'GET', path, query ?? {}, body, config);
     expect(response.status).toBe(200);
+  });
+});
+
+describe('mock 助手建议覆盖 llm / rule 两种来源', () => {
+  const ask = (id: string) =>
+    mockSend('POST', ASSISTANT_SUGGEST_PATH, {}, { ticket_id: id, kind: 'next_action' }, config);
+
+  it('普通工单返回 llm + 模型名', async () => {
+    const response = await ask(ticketId);
+    const body = response.body as SuggestOut;
+    expect(body.source).toBe('llm');
+    expect(body.model).toBe('mock-assistant-v0');
+    expect(body.fallback_reason ?? null).toBeNull();
+  });
+
+  it('W3 工单返回 rule + fallback_reason，供本地看降级路径', async () => {
+    const response = await ask('d0000000-0000-4000-8000-000000000001');
+    const body = response.body as SuggestOut;
+    expect(body.source).toBe('rule');
+    expect(body.fallback_reason).toBe('llm_not_configured');
+    expect(body.reasons.length).toBeGreaterThan(0);
   });
 });
 

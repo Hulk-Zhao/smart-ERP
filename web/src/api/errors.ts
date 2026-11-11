@@ -74,6 +74,16 @@ export function isNetworkFailure(error: unknown): boolean {
   return name === 'AbortError' || name === 'TimeoutError' || name === 'NetworkError';
 }
 
+/** 前端等待超时（client 侧等待上限主动抛 TimeoutError）。 */
+export function isTimeoutFailure(error: unknown): boolean {
+  return (error as Error | undefined)?.name === 'TimeoutError';
+}
+
+/** 限流：助手建议每租户每分钟有上限，429 必须与普通失败区分。 */
+export function isRateLimited(error: unknown): boolean {
+  return isApiError(error) && (error.status === 429 || error.code === 'E-CONN-RATE_LIMIT');
+}
+
 /** 资源不存在：契约已定版为 E-RESOURCE-NOTFOUND（404），不再按 status 猜。 */
 export function isNotFoundFailure(error: unknown): boolean {
   return isApiError(error) && error.code === 'E-RESOURCE-NOTFOUND';

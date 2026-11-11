@@ -27,6 +27,8 @@ import type {
   ReconDiffDetailOut,
   ReconRunIn,
   SessionOut,
+  SuggestIn,
+  SuggestOut,
   TicketDetailOut,
 } from './types';
 
@@ -110,7 +112,12 @@ async function sendJson(method: string, path: string, options: SendOptions): Pro
   const config = getApiConfig();
   const query = buildQuery(config, options.query, options.omitScope);
   const isWrite = method !== 'GET';
-  const payload = isWrite ? { ...(options.body as object), scope: config.scope } : undefined;
+  // 会话与助手建议不是 G-05 业务写接口，请求体不带 scope（后端 extra="forbid"）。
+  const payload = isWrite
+    ? options.omitScope
+      ? options.body
+      : { ...(options.body as object), scope: config.scope }
+    : undefined;
 
   if (config.mock) {
     const response = await mockSend(method, path, Object.fromEntries(query) as Record<string, unknown>, payload, config);
@@ -136,7 +143,8 @@ async function sendJson(method: string, path: string, options: SendOptions): Pro
       signal: options.signal,
     });
   } catch (error) {
-    if ((error as Error)?.name === 'AbortError') throw error;
+    const name = (error as Error)?.name;
+    if (name === 'AbortError' || name === 'TimeoutError') throw error;
     throw new ApiError(
       {
         status: 0,
@@ -184,6 +192,7 @@ export function ticketPath(ticketId: string, suffix = ''): string {
  * 保证「client 改路径而 mock 不认」时测试立刻变红。
  */
 export const SESSION_PATH = '/v1/auth/session';
+export const ASSISTANT_SUGGEST_PATH = '/v1/assistant/suggest';
 export const RECON_BATCHES_PATH = '/v1/recon/batches';
 export const TICKETS_PATH = '/v1/tickets';
 export const PENDING_APPROVALS_PATH = '/v1/approvals/pending';
@@ -215,10 +224,44 @@ export interface MeteringExport {
   rowCount: number;
 }
 
+export interface SuggestOptions {
+  /** 前端等待上限；后端 LLM 硬超时 8s，这里留出网络余量。 */
+  timeoutMs?: number;
+}
+
 export const api = {
   /** 当前会话身份：前端唯一的身份来源，替代 VITE_SESSION_ROLES / VITE_VIEWER_ID。 */
   getSession(): Promise<SessionOut> {
     return request<'GET /v1/auth/session'>('GET', SESSION_PATH, { omitScope: true });
+  },
+
+  /**
+   * 助手下一步建议（`POST /v1/assistant/suggest`）。
+   *
+   * 降级时接口仍返回 200 且 `source="rule"`，调用方必须展示 `fallback_reason`，
+   * 不能靠 HTTP 状态码判断真假，也不能在 rule 时展示模型名。
+   * 请求体不带 G-05 scope：该端点入参只接受 `{ticket_id, kind}`。
+   */
+  async suggestNextAction(ticketId: string, options: SuggestOptions = {}): Promise<SuggestOut> {
+    const { timeoutMs = 12_000 } = options;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // 用 Promise.race 做前端等待上限，而不是把 AbortSignal 传给 fetch：
+    // 不同运行环境的 AbortSignal 实现可能不互通（如 jsdom 与 undici），
+    // 浏览器端多等一个已发出的请求也无害。
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new DOMException('助手响应超时', 'TimeoutError')), timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        request<'POST /v1/assistant/suggest'>('POST', ASSISTANT_SUGGEST_PATH, {
+          body: { ticket_id: ticketId, kind: 'next_action' } satisfies SuggestIn,
+          omitScope: true,
+        }),
+        timeout,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   },
 
   listTickets(params: ListTicketsParams = {}): Promise<PageTicketOut> {

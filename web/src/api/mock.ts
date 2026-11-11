@@ -26,6 +26,8 @@ import type {
   ReconLineResultOut,
   ReconRunIn,
   SessionOut,
+  SuggestIn,
+  SuggestOut,
   TicketDetailOut,
   TicketOut,
   TicketStepOut,
@@ -1005,6 +1007,37 @@ function chain(): AuditChainOut {
   };
 }
 
+/**
+ * 助手建议离线样本。
+ *
+ * 两种 `source` 都要能在本地看到：W3 工单（T-20261111-009）固定走 rule + fallback_reason，
+ * 其余工单走 llm。rule 建议文案与后端 `_rule_suggestion` 的 W3 分支一致，避免 mock 教坏页面。
+ */
+function assistantSuggestion(row: TicketOut): SuggestOut {
+  if (row.write_level === 'W3') {
+    return {
+      suggestion: 'W3 动作禁止自动执行，转人工或线下处理。',
+      reasons: [`工单当前状态：${row.state}`, '写等级：W3', 'W3 无自动执行路径'],
+      source: 'rule',
+      model: 'rule/next_action-v1',
+      generated_at: new Date().toISOString(),
+      fallback_reason: 'llm_not_configured',
+    };
+  }
+  return {
+    suggestion: '（离线 mock）请按工单当前状态核对审批与执行回执，再决定下一步。',
+    reasons: [
+      `工单当前状态：${row.state}`,
+      `写等级：${row.write_level}`,
+      row.touches_fund ? '涉及资金，审批与校验需留痕' : '不涉及资金，按状态机留痕',
+    ],
+    source: 'llm',
+    model: 'mock-assistant-v0',
+    generated_at: new Date().toISOString(),
+    fallback_reason: null,
+  };
+}
+
 export interface MockResponse {
   status: number;
   body?: unknown;
@@ -1035,6 +1068,15 @@ export async function mockSend(
         default_scope: { org_id: 'ORG-1', period: '2026-10', system_ids: ['u8', 'statement'] },
       } satisfies SessionOut,
     };
+  }
+  if (method === 'POST' && path === '/v1/assistant/suggest') {
+    const payload = (body ?? {}) as Partial<SuggestIn>;
+    if (payload.kind && payload.kind !== 'next_action') {
+      return problem(422, 'E-PARSE-FAILED', `不支持的助手建议类型：${payload.kind}`);
+    }
+    const row = TICKETS.find((item) => item.ticket_id === payload.ticket_id);
+    if (!row) return problem(422, 'E-DATA-MISSING', `工单 ${payload.ticket_id ?? '空'} 不存在`);
+    return { status: 200, body: assistantSuggestion(row) };
   }
   if (method === 'GET' && path === '/v1/recon/batches') {
     const limit = Math.min(Number(q.limit ?? 20) || 20, 50);
