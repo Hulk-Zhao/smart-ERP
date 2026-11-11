@@ -58,6 +58,7 @@ PO_DELETE_DRAFT = ActionSpec(
     writable_fields=frozenset({"cCode"}),
     verify=VerifySpec(kind="read_po_draft_by_code", fields=("cCode",)),
     rate_limit=RateLimit(qps=2.0, daily_quota=500, concurrency=2),
+    compensation_only=True,
 )
 
 ARRIVAL_DELETE_DRAFT = ActionSpec(
@@ -66,6 +67,7 @@ ARRIVAL_DELETE_DRAFT = ActionSpec(
     writable_fields=frozenset({"cCode"}),
     verify=VerifySpec(kind="read_arrival_draft_by_code", fields=("cCode",)),
     rate_limit=RateLimit(qps=1.0, daily_quota=300, concurrency=1),
+    compensation_only=True,
 )
 
 ACTIONS: tuple[ActionSpec, ...] = (

@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from uuid import UUID
 
@@ -21,10 +22,12 @@ from fastapi.testclient import TestClient
 from apps.api import configure_container, reset_container
 from apps.api.container import ApiContainer, register_u8_connector
 from apps.api.store import PendingWrite, TicketRepository
+from apps.audit.rollback import RollbackService
 from apps.connectors.u8.stub_server import StubU8Server
 from apps.main import create_app
 from apps.platform.config import Settings
 from apps.platform.contracts.ticket import TicketState
+from apps.platform.policy.gateway import FieldScopeViolation, WriteGateway
 from apps.platform.policy.levels import SceneSpec, WriteLevel
 from apps.security.identity import ScopeGrant, UserPrincipal
 from conftest import (
@@ -66,6 +69,7 @@ def _po_payload(source_doc_no: str) -> dict:
 class WriteEnv:
     client: TestClient
     stub: StubU8Server
+    container: ApiContainer
     tickets: dict[str, UUID] = field(default_factory=dict)
     tokens: dict[str, str] = field(default_factory=dict)
 
@@ -139,6 +143,19 @@ def write_env() -> WriteEnv:
                 idem_key="idem-demo-w3",
             ),
         ),
+        # 反向动作只允许补偿链路执行：不得被当作工单的正向写入。
+        "delete_forward": _ticket(
+            ticket_no="T-DEL-9003",
+            level=WriteLevel.W0,
+            state=TicketState.PENDING_APPROVAL,
+            amount="0.00",
+            pending=PendingWrite(
+                action_key="u8.po.delete_draft",
+                system=SYSTEM,
+                payload={"cCode": "PO-STUB-DEMO-W2-001"},
+                idem_key="idem-demo-delete",
+            ),
+        ),
     }
     for ticket in tickets.values():
         container.tickets.add(ticket)
@@ -174,6 +191,7 @@ def write_env() -> WriteEnv:
     env = WriteEnv(
         client=client,
         stub=stub,
+        container=container,
         tickets={name: ticket.ticket_id for name, ticket in tickets.items()},
         tokens=tokens,
     )
@@ -253,3 +271,67 @@ def test_compensation_is_visible_on_stub_as_reversal(write_env: WriteEnv) -> Non
     assert reversals[0]["cCode"] == receipt["cCode"]
     assert reversals[0]["source_doc_no"] == "PO-DEMO-W2-001"
     assert reversals[0]["simulated"] is True
+
+
+def test_compensation_gateway_gets_inverse_action_whitelist(
+    write_env: WriteEnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """白名单必须是 delete 动作的 ``cCode``，而不是正向动作的 5 个字段。"""
+
+    write_env.approve_both("w2")
+    assert write_env.execute("w2").status_code == 200
+
+    captured: list[frozenset[str] | None] = []
+    original = RollbackService.execute
+
+    async def spy(self, plan, **kwargs):  # type: ignore[no-untyped-def]
+        captured.append(self._gateway._narrowed_fields)
+        return await original(self, plan, **kwargs)
+
+    monkeypatch.setattr(RollbackService, "execute", spy)
+
+    compensated = write_env.client.post(
+        f"{PREFIX}/tickets/{write_env.tickets['w2']}/actions/compensate",
+        json={"scope": write_env.scope(), "comment": "步骤失败", "fail_code": "F1"},
+        headers=write_env.headers("initiator", "k-compensate-whitelist"),
+    )
+    assert compensated.status_code == 200, compensated.text
+    # 空集/正向字段都算错：补偿入参只有 cCode。
+    assert captured == [frozenset({"cCode"})]
+
+
+def test_wrong_whitelist_is_rejected_before_any_external_write(
+    write_env: WriteEnv,
+) -> None:
+    """取错白名单必须当场红：正向动作的字段集在补偿动作上会命中 FieldScopeViolation。"""
+
+    delete_action = write_env.container.actions.get("u8.po.delete_draft")
+    forward_fields = frozenset(
+        {"source_doc_no", "supplier_code", "doc_date", "lines", "memo"}
+    )
+    gateway = WriteGateway(
+        write_env.container.connectors[SYSTEM], narrowed_fields=forward_fields
+    )
+    scene = SceneSpec(code=SCENE, max_level=WriteLevel.W2)
+
+    with pytest.raises(FieldScopeViolation):
+        asyncio.run(
+            gateway.execute(
+                delete_action,
+                {"cCode": "PO-STUB-WRONG-WHITELIST"},
+                ticket_id="t-demo",
+                idem_key="idem-wrong-whitelist",
+                scene=scene,
+            )
+        )
+    # 校验发生在任何外部调用之前：桩上没有请求，也没有冲销。
+    assert write_env.stub.state.requests == []
+    assert write_env.stub.state.reversals == []
+
+
+def test_compensation_only_action_cannot_be_forward_write(write_env: WriteEnv) -> None:
+    executed = write_env.execute("delete_forward")
+
+    assert executed.status_code == 403, executed.text
+    assert executed.json()["code"] == "E-POLICY-LEVEL"
+    assert write_env.stub.state.requests == []
