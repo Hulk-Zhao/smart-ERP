@@ -582,10 +582,41 @@ class TicketRuntime:
                 )
 
             tasks = await self._queue.enqueue(ticket_id)
+            processed = 0
             for _ in range(len(tasks) * self._max_comp_attempts + 1):
                 task = await self._queue.claim_next(ticket_id, owner_name)
                 if task is None:
+                    # ``None`` 只说明「此刻没有可领取的行」，不等于「队列空了」：剩余行可能
+                    # 全在退避闸门内（``next_retry_at > now()``），而时钟回拨会让闸门看起来
+                    # 更远。两者必须分开留痕——前者本轮真的做完了；后者有一批任务本轮没被
+                    # 执行、``attempts`` 不涨，且工单随后因 ``counts.queued > 0`` 转
+                    # MANUAL_REQUIRED，下一轮不会自动接上（``compensate`` 要求工单仍在
+                    # 「补偿中」）。日志是唯一观测落点，不能让「为什么停」消失。
+                    remaining = await self._queue.counts(ticket_id)
+                    if remaining.queued:
+                        logger.warning(
+                            "补偿本轮停止 reason=backoff ticket=%s owner=%s processed=%d "
+                            "未处理=%d done=%d failed=%d running=%d",
+                            ticket_id,
+                            owner_name,
+                            processed,
+                            remaining.queued,
+                            remaining.done,
+                            remaining.failed,
+                            remaining.running,
+                        )
+                    else:
+                        logger.info(
+                            "补偿本轮停止 reason=empty ticket=%s owner=%s "
+                            "processed=%d done=%d failed=%d",
+                            ticket_id,
+                            owner_name,
+                            processed,
+                            remaining.done,
+                            remaining.failed,
+                        )
                     break
+                processed += 1
                 if task.attempts > self._max_comp_attempts:
                     await self._queue.mark_failed(
                         task.id,
@@ -612,6 +643,15 @@ class TicketRuntime:
                 await self._queue.heartbeat(task.id, owner_name)
                 await self._run_compensation(
                     ticket_id, task, owner=owner_name, trace_id=trace_id
+                )
+            else:
+                logger.warning(
+                    "补偿本轮停止 reason=budget ticket=%s owner=%s processed=%d "
+                    "上限=%d（未收敛，需人工核对是否退避/竞态卡住）",
+                    ticket_id,
+                    owner_name,
+                    processed,
+                    len(tasks) * self._max_comp_attempts + 1,
                 )
 
             counts = await self._queue.counts(ticket_id)
