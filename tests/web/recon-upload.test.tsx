@@ -7,6 +7,7 @@ import { ReconBatchPage } from '../../web/src/pages/ReconBatchPage';
 import { ReconPage } from '../../web/src/pages/ReconPage';
 import { BATCH_ID, reconBatch, reconDiff } from './helpers/fixtures';
 import { problem, startApi, type TestApi } from './helpers/server';
+import { renderPage } from './helpers/render';
 
 const SESSION = {
   user_id: 'aaaaaaaa-0000-4000-8000-000000000000',
@@ -162,6 +163,16 @@ describe('对账页上传：CSV → 开始对账 → 批次详情', () => {
     });
     expect(screen.queryByText('差异列表')).toBeNull();
     expect(screen.queryByText('暂无批次')).toBeNull();
+  });
+
+  it('不再提供可点击的 MES 开关，只留「本期不含」说明', async () => {
+    renderPage(<ReconPage />, { route: '/recon', path: '/recon' });
+
+    await screen.findByText('供应商编码 suppliers（逗号/空格分隔，最多 200）');
+    // 旧实现是一个 chip + checkbox，勾了不生效；现在必须没有可交互的 MES 控件。
+    expect(screen.queryByRole('checkbox', { name: 'MES' })).toBeNull();
+    expect(screen.getByTestId('mes-not-available')).toHaveTextContent('MES（本期不含）');
+    expect(screen.getByText(/MES 接入属实施项，本期不含/)).toBeInTheDocument();
   });
 });
 

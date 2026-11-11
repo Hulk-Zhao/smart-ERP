@@ -1,15 +1,15 @@
 /**
  * 本文件由 `node scripts/gen-api-types.mjs` 从 C16 冻结契约生成，请勿手改。
  * 源文件：contracts/api/product_api.openapi.v1.json
- * 契约 sha256：96b53be6a40cab485970f4018d779b9acb993eda564122953331577b1a7eb22e
+ * 契约 sha256：91dd8af973cd5c1f69b879222eb67815a2505e6e20e2e658b2c5a1d858d89d8b
  * 契约版本：1.0.0 · C16
  *
  * 契约变更流程：后端重新生成契约 → 执行 `npm run gen:api` → 评审类型差异。
  */
 
-export const CONTRACT_SHA256 = "96b53be6a40cab485970f4018d779b9acb993eda564122953331577b1a7eb22e";
+export const CONTRACT_SHA256 = "91dd8af973cd5c1f69b879222eb67815a2505e6e20e2e658b2c5a1d858d89d8b";
 export const CONTRACT_VERSION = "1.0.0";
-export const CONTRACT_PATH_COUNT = 21;
+export const CONTRACT_PATH_COUNT = 22;
 
 /** 写接口（POST）路径；前端统一补 Idempotency-Key。 */
 export const WRITE_PATHS = ["/v1/approvals/{ticket_id}/approve","/v1/approvals/{ticket_id}/reject","/v1/assistant/suggest","/v1/recon/runs","/v1/recon/statements","/v1/tickets/{ticket_id}/actions/approve","/v1/tickets/{ticket_id}/actions/cancel","/v1/tickets/{ticket_id}/actions/compensate","/v1/tickets/{ticket_id}/actions/reject"] as const;
@@ -121,6 +121,24 @@ export type BillingBucket = "billable" | "auto_released" | "dispute_hold" | "oth
 export interface BodyUploadStatementV1ReconStatementsPost {
   dataset: string; /** 我方数据 JSON：{our_lines: [...], master_data: {...}, tolerance: {...}} */
   file: string; /** 供应商对账单 CSV；UTF-8/GBK、LF/CRLF 均可 */
+}
+
+/**
+ * 演示身份清单；非 demo 环境该端点一律 404。
+ */
+export interface DemoIdentitiesOut {
+  items: DemoIdentityOut[];
+}
+
+/**
+ * 演示身份：只在 demo 档且 ERP_DEMO_SESSION_ENABLED=true 时返回，
+ * ``token`` 即该身份的静态会话令牌（等同演示登录凭据）。
+ */
+export interface DemoIdentityOut {
+  label: string;
+  roles: string[];
+  token: string;
+  user_id: string;
 }
 
 export type DiffTypeCode = "unit_price" | "qty" | "scrap" | "uom" | "tax" | "missing_doc" | "duplicate" | "rounding_tolerance";
@@ -636,6 +654,11 @@ export interface ApiOperations {
   };
     body: never;
     response: PageAuditImageOut;
+  };
+  "GET /v1/auth/demo-identities": {
+    query: never;
+    body: never;
+    response: DemoIdentitiesOut;
   };
   "GET /v1/auth/session": {
     query: never;
