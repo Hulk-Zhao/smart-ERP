@@ -48,7 +48,8 @@ _CLAIM_SQL = text(
        SET state = 'running',
            attempts = attempts + 1,
            lease_owner = :owner,
-           heartbeat_at = now()
+           heartbeat_at = now(),
+           updated_at = now()
      WHERE id = (
            SELECT id
              FROM erp.compensation_task
@@ -75,7 +76,7 @@ _RECLAIM_SQL = text(
     f"""
     UPDATE erp.compensation_task
        SET state = 'queued', lease_owner = NULL, heartbeat_at = NULL,
-           next_retry_at = NULL
+           next_retry_at = NULL, updated_at = now()
      WHERE ticket_id = :ticket_id AND {_RECLAIM_WHERE}
     RETURNING id, ticket_id, original_step, compensate_seq, action_key, state,
               attempts, lease_owner, heartbeat_at
@@ -86,7 +87,7 @@ _RECLAIM_ALL_SQL = text(
     f"""
     UPDATE erp.compensation_task
        SET state = 'queued', lease_owner = NULL, heartbeat_at = NULL,
-           next_retry_at = NULL
+           next_retry_at = NULL, updated_at = now()
      WHERE {_RECLAIM_WHERE}
     RETURNING id, ticket_id, original_step, compensate_seq, action_key, state,
               attempts, lease_owner, heartbeat_at
@@ -105,7 +106,7 @@ _DONE_SQL = text(
     """
     UPDATE erp.compensation_task
        SET state = 'done', last_error = NULL,
-           lease_owner = NULL, heartbeat_at = NULL
+           lease_owner = NULL, heartbeat_at = NULL, updated_at = now()
      WHERE id = :task_id AND state = 'running'
        AND (CAST(:owner AS text) IS NULL OR lease_owner = :owner)
     """
@@ -125,7 +126,8 @@ _FAILED_SQL = text(
                -- 出队 SQL 直接返回空。NULL 与 reclaim_stale 同义：没有重试闸门。
                WHEN :retry_in <= 0 THEN NULL
                ELSE now() + make_interval(secs => :retry_in)
-           END
+           END,
+           updated_at = now()
      WHERE id = :task_id
        AND (CAST(:owner AS text) IS NULL OR lease_owner = :owner)
     """
@@ -137,6 +139,35 @@ _COUNTS_SQL = text(
       FROM erp.compensation_task
      WHERE ticket_id = :ticket_id
      GROUP BY state
+    """
+)
+
+# 观测口径（README §6.1.4）：全库 queued 的「到期未领取」。
+# NULL 分支不能省：零延迟重试写 NULL 后没有闸门，行会一直停在 queued，
+# 只统计 next_retry_at 非空等于把这块变成新的静默面。
+_OVERDUE_SQL = text(
+    """
+    SELECT count(*) AS n
+      FROM erp.compensation_task
+     WHERE state = 'queued'
+       AND (
+            (next_retry_at IS NOT NULL
+             AND next_retry_at < now() - make_interval(secs => :overdue_seconds))
+         OR (next_retry_at IS NULL
+             AND coalesce(updated_at, created_at)
+                 < now() - make_interval(secs => :overdue_seconds))
+       )
+    """
+)
+
+# 未来 18s 之后才可重试：正常情况下 mark_failed 的退避默认 8s，
+# 出现这种行说明写入时看到的 now() 比真实时钟超前——时钟回拨的唯一信号。
+_FUTURE_RETRY_SQL = text(
+    """
+    SELECT count(*) AS n
+      FROM erp.compensation_task
+     WHERE state = 'queued'
+       AND next_retry_at > now() + make_interval(secs => :future_seconds)
     """
 )
 
@@ -293,3 +324,25 @@ class CompensationQueue:
             done=data["done"],
             failed=data["failed"],
         )
+
+    async def metrics_counts(
+        self, *, overdue_seconds: float = 60.0, future_seconds: float = 18.0
+    ) -> tuple[int, int]:
+        """全库观测口径：``(overdue, future_retry)``，每个补偿轮次只调一次。
+
+        采集失败直接向上抛，由调用方决定「缺样本」——这里绝不返回 ``(0, 0)``，
+        因为假 0 会让告警看起来一切正常。
+        """
+
+        params = {
+            "overdue_seconds": float(overdue_seconds),
+            "future_seconds": float(future_seconds),
+        }
+        async with self._sf() as session:
+            overdue = (
+                await session.execute(_OVERDUE_SQL, params)
+            ).scalar_one()
+            future = (
+                await session.execute(_FUTURE_RETRY_SQL, params)
+            ).scalar_one()
+        return int(overdue), int(future)

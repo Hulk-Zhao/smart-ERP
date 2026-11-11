@@ -179,6 +179,8 @@ class ApiContainer:
             connector,
             approvals=ApprovalGateAdapter(self.approvals, {ticket_id: facts}),
             narrowed_fields=narrowed_fields,
+            # 必须用容器注册表：``/metrics`` 挂的是它，用默认单例会写出「端点 200 但空值」。
+            metrics=self.metrics,
         )
 
 

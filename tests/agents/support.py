@@ -180,6 +180,7 @@ def build_runtime(
     compensation_retry_seconds: float = 0.0,
     lease_ttl_seconds: int = 30,
     alert_sink: Any = None,
+    metrics: Any = None,
 ) -> TicketRuntime:
     """把测试替身装配成运行时（写入仍走真实 WriteGateway）。"""
 
@@ -189,6 +190,7 @@ def build_runtime(
         connector,
         approvals=AlwaysApproved(),
         breaker_cap=(breaker.cap if breaker is not None else None),
+        metrics=metrics,
     )
 
     async def verify(planned: Any) -> Any:
@@ -211,4 +213,5 @@ def build_runtime(
         compensation_stale_seconds=compensation_stale_seconds,
         lease_ttl_seconds=lease_ttl_seconds,
         alert_sink=alert_sink,
+        metrics=metrics,
     )
