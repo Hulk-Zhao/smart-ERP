@@ -254,7 +254,12 @@ class TicketRuntime:
             raise LeaseNotHeld(f"工单 {ticket_id} 已被 {owner!r} 之外的 worker 持有租约")
         try:
             ticket = await self._store.get_ticket(ticket_id)
-            if TicketState(ticket.state) is not TicketState.EXECUTING:
+            state = TicketState(ticket.state)
+            if state is TicketState.VERIFYING:
+                # 崩溃窗口：步骤已全部成功、迁移到「校验中」后进程死亡。
+                # 续跑不得重放步骤，也不该把工单永久卡在校验中；按库内步骤状态收口。
+                return await self._resume_verifying(ticket_id, trace_id=trace_id)
+            if state is not TicketState.EXECUTING:
                 raise RuntimeGuardError(
                     f"工单 {ticket_id} 当前为 {ticket.state}，必须先审批进入「执行中」"
                 )
@@ -342,6 +347,38 @@ class TicketRuntime:
             await self._leases.release(ticket_id, owner)
 
     # ------------------------------------------------------------- 单步推进
+    async def _resume_verifying(
+        self, ticket_id: UUID, *, trace_id: str | None = None
+    ) -> ExecutionReport:
+        """「校验中」崩溃恢复：所有步骤已成功则直接补记终态，否则拒绝结单。"""
+
+        steps = await self._store.list_steps(ticket_id)
+        states = tuple(step.state for step in steps)
+        if not steps or any(item not in {"succeeded", "skipped"} for item in states):
+            raise RuntimeGuardError(
+                f"工单 {ticket_id} 处于「校验中」但步骤未全部成功（{states}），拒绝结单"
+            )
+        await self._store.transition(
+            ticket_id,
+            TicketState.COMPLETED,
+            "verified",
+            context=TransitionContext(verified=True, step_states=states),
+            trace_id=trace_id,
+        )
+        return ExecutionReport(
+            ticket_id=ticket_id,
+            status=TicketState.COMPLETED,
+            outcomes=tuple(
+                StepOutcome(
+                    step_no=step.step_no,
+                    action_key=step.action_key,
+                    state=step.state,
+                    recovered=True,
+                )
+                for step in steps
+            ),
+        )
+
     async def _execute_step(
         self,
         *,
@@ -362,7 +399,19 @@ class TicketRuntime:
                 recovered=True,
             )
 
-        # 2) 崩溃恢复：已落 intent 的步骤先 verify，不盲目重放
+        # 2) 崩溃恢复：步骤已判失败/未决，说明进程死在「失败 → 转补偿」的窗口里。
+        #    此时不能再落 intent（同一步骤会撞 uq_ticket_step_no，工单永久卡在执行中），
+        #    直接交回失败分支，由 execute 转「补偿中」。
+        if existing is not None and existing.state in {"failed", "unresolved"}:
+            return StepOutcome(
+                step_no=step_no,
+                action_key=planned.action.key,
+                state=existing.state,
+                fail_code="F6" if existing.state == "unresolved" else None,
+                recovered=True,
+            )
+
+        # 3) 崩溃恢复：已落 intent 的步骤先 verify，不盲目重放
         if existing is not None and existing.state in {"intent", "running"}:
             observed = await self._verify(planned)
             if observed.matches():
