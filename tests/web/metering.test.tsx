@@ -344,4 +344,14 @@ describe('计量表：四类行 + data_gaps 显式可见 + CSV 摘要', () => {
     const link = await screen.findByRole('link', { name: '计量表 →' });
     expect(link).toHaveAttribute('href', `/recon/${BATCH_ID}/metering`);
   });
+
+  it('差异分页页脚写清「本页 / 共」，避免把一页当成全部差异', async () => {
+    renderPage(<ReconBatchPage />, {
+      route: `/recon/${BATCH_ID}`,
+      path: '/recon/:batchId',
+    });
+
+    // fixture 的 diff_count=1、本页 0 条：两个数字必须分开出现。
+    expect(await screen.findByText(/本页 0 条 \/ 共 1 条/)).toBeInTheDocument();
+  });
 });

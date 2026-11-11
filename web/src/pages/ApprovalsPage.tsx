@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api, type ApprovalDecision, type ApprovalPayload } from '../api/client';
 import { useApiConfig, type ApprovalRole } from '../api/config';
 import { useSession } from '../api/session';
@@ -398,6 +398,14 @@ export function ApprovalsPage() {
                       ? ' 审批链已满足。'
                       : ` 仍需角色：${mutation.data.approval_missing_roles.join('、') || '—'}。`}
                     {mutation.data.ticket_state ? ` 工单状态：${mutation.data.ticket_state}。` : ''}
+                    {mutation.data.decision === 'approved' ? (
+                      <Link
+                        to={`/tickets/${mutation.data.ticket_id}`}
+                        className="mt-1 flex w-fit items-center gap-1 font-semibold text-emerald-700 underline underline-offset-2"
+                      >
+                        {mutation.data.satisfied ? '查看执行步骤 →' : '查看工单 →'}
+                      </Link>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

@@ -52,6 +52,16 @@ let approveReply: () => ReturnType<typeof problem> | { body: ActionOut };
 beforeEach(async () => {
   approveReply = () => ({ body: APPROVE_OK });
   server = await startApi((request) => {
+    if (request.method === 'GET' && request.path === '/v1/auth/session') {
+      return {
+        body: {
+          user_id: 'dddddddd-0000-4000-8000-000000000000',
+          tenant_id: 'T-1',
+          roles: ['reviewer', 'approver', 'cfo'],
+          default_scope: { org_id: 'ORG-1', period: '2026-10', system_ids: ['u8', 'statement'] },
+        },
+      };
+    }
     if (request.method === 'GET' && request.path === `/v1/tickets/${W3_TICKET_ID}`) {
       // W1 + 待审批：可审批，正常执行写路径。
       return { body: ticketDetail({ state: '待审批', write_level: 'W1' }) };
@@ -99,6 +109,9 @@ describe('工单详情：执行回执可见', () => {
     const steps = within(list).getAllByTestId('executed-step');
     expect(steps).toHaveLength(2);
 
+    // 当前身份必须跟令牌会话走，而不是 env 里的固定名字。
+    expect(await screen.findByText(/dddddddd… · reviewer \/ approver \/ cfo/)).toBeInTheDocument();
+
     const first = steps[0];
     expect(within(first).getByText('u8.po.create_draft')).toBeInTheDocument();
     expect(within(first).getByText(/写入 u8 · purchase_order:PO-2026-0001/)).toBeInTheDocument();
@@ -120,6 +133,9 @@ describe('工单详情：执行回执可见', () => {
     const panel = screen.getByTestId('error-panel');
     expect(panel.getAttribute('data-kind')).toBe('forbidden');
     expect(panel.textContent).toContain('角色 [reviewer] 不能复核 finance 类场景');
+    expect(panel.textContent).toContain('业务类别闸拒绝');
+    // 类别闸不是缺角色：不能给出「请管理员开通角色/scope」这种会误导现场的解释。
+    expect(panel.textContent).not.toContain('缺少所需角色或 scope');
     expect(panel.textContent).not.toContain('操作失败');
   });
 });

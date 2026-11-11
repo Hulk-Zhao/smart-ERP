@@ -61,6 +61,16 @@ export function isScopeDenied(error: unknown): boolean {
   return isApiError(error) && (error.status === 401 || error.status === 403);
 }
 
+/**
+ * 业务类别闸拒绝：403 且服务端原文指明「角色 … 不能复核 … 类场景」。
+ *
+ * 与 scope 越权同为 `E-AUTHZ-001`，只能靠 detail 区分。这不是「缺角色」：
+ * 该身份已有审批角色，只是不能复核这一类业务场景，现场要按原文解释而不是让管理员开通。
+ */
+export function isCategoryGateRejection(error: unknown): boolean {
+  return isApiError(error) && error.status === 403 && error.detail.includes('不能复核');
+}
+
 /** 错误大类：统一决定界面文案与下一步动作，页面不再各自判断 status/code。 */
 export type ErrorKind = 'forbidden' | 'notfound' | 'conflict' | 'config' | 'network' | 'generic';
 

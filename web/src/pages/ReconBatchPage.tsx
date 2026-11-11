@@ -76,6 +76,8 @@ export function ReconBatchPage() {
 
   const metrics = batch.data?.metrics;
   const diffItems = diffs.data?.items ?? [];
+  // 页大小 20 是服务端分页上限；页脚必须同时给出总量，否则现场会以为差异只有一屏。
+  const totalDiffCount = batch.data?.diff_count ?? metrics?.diff_lines ?? null;
   const currentPhase = batch.data ? phaseIndex(batch.data.status) : 0;
 
   return (
@@ -355,7 +357,9 @@ export function ReconBatchPage() {
 
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-3 py-2">
                 <span className="text-[10.5px] text-slate-400">
-                  本页 {diffItems.length} 条{diffs.data?.next_cursor ? ' · 还有下一页' : ''}
+                  本页 {diffItems.length} 条
+                  {totalDiffCount !== null ? ` / 共 ${totalDiffCount} 条` : ''}
+                  {diffs.data?.next_cursor ? ' · 还有下一页' : ''}
                 </span>
                 <div className="flex gap-1.5">
                   <button type="button" className="btn btn-secondary btn-sm" disabled={!cursor} onClick={() => setCursor(undefined)}>

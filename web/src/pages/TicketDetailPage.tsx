@@ -285,7 +285,12 @@ export function TicketDetailPage() {
           <section className="card min-w-0">
             <div className="card-head">
               <h2 className="section-title">双人复核</h2>
-              <span className="text-[10.5px] text-slate-400">当前身份：{config.viewerName}</span>
+              <span className="text-[10.5px] text-slate-400">
+                当前身份：
+                {session.session
+                  ? `${shortId(session.session.user_id)} · ${session.session.roles.join(' / ') || '无角色'}`
+                  : config.viewerName}
+              </span>
             </div>
             <div className="card-body">
               <ApprovalOpinions

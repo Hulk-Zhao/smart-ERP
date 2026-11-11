@@ -2,8 +2,9 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { configureApi, resetApiConfig } from '../../web/src/api/config';
 import { OverviewPage } from '../../web/src/pages/OverviewPage';
+import { TicketsPage } from '../../web/src/pages/TicketsPage';
 import { approvalTask, ticketOut } from './helpers/fixtures';
-import { renderPage } from './helpers/render';
+import { renderPage, renderShell } from './helpers/render';
 import { problem, startApi, type TestApi } from './helpers/server';
 
 const TENANT_ID = '11111111-1111-1111-1111-111111111111';
@@ -68,6 +69,19 @@ describe('演示会话关闭时的降级（401）', () => {
     const paths = server.requests.map((request) => request.path);
     expect(paths).toContain('/v1/auth/session');
     expect(paths).not.toContain('/v1/approvals/pending');
+    expect(paths).not.toContain('/v1/tickets');
+  });
+
+  it('直接开工单页：整壳显示会话提示，不停在骨架屏', async () => {
+    renderShell(<TicketsPage />, { route: '/tickets' });
+
+    const notice = await screen.findByTestId('session-notice');
+    await waitFor(() => expect(notice.textContent).toContain('E-AUTHZ-001'));
+    // 旧行为：canQuery=false 时查询一直 pending，页面渲染无限骨架屏，看不出是没身份。
+    expect(document.querySelector('.skeleton')).toBeNull();
+    expect(screen.queryByTestId('empty-state')).toBeNull();
+    const paths = server.requests.map((request) => request.path);
+    expect(paths).toContain('/v1/auth/session');
     expect(paths).not.toContain('/v1/tickets');
   });
 });

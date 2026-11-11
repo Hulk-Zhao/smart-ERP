@@ -5,6 +5,7 @@ import {
   errorTitle,
   isApiError,
   isApprovalConflict,
+  isCategoryGateRejection,
   isW3Forbidden,
   type ErrorKind,
 } from '../api/errors';
@@ -111,6 +112,7 @@ export function ErrorPanel({
   const resolvedNotFoundKind = notFoundKind ?? 'resource';
   const apiError = isApiError(error) ? error : null;
   const w3 = isW3Forbidden(error);
+  const categoryGate = isCategoryGateRejection(error);
   const approval = isApprovalConflict(error);
   const body = (apiError?.body ?? {}) as Record<string, unknown>;
   const rolesOf = (value: unknown): string[] =>
@@ -144,7 +146,15 @@ export function ErrorPanel({
 
       {kind === 'forbidden' ? (
         <div className="mt-2 rounded-lg border border-rose-200 bg-white/80 px-2.5 py-2 text-[12px] text-rose-800">
-          {w3 ? (
+          {categoryGate ? (
+            <>
+              <div className="font-semibold">业务类别闸拒绝</div>
+              <p className="mt-1 break-words">
+                该身份有审批角色，但不能复核这一类业务场景（判据见上方服务端原文）。这不是缺角色，也不是 scope 配置问题；
+                换持有对应类别角色的身份复核，或按服务端原文处理。
+              </p>
+            </>
+          ) : w3 ? (
             <>
               <div className="font-semibold">连接器零写入</div>
               <p className="mt-1 break-words">
