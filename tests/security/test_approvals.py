@@ -60,6 +60,22 @@ def test_self_approval_is_rejected():
     assert service.records("T-1") == ()
 
 
+def test_build_requires_scene_code_at_construction():
+    """scene_code 必填：漏传在构造时就失败，不能被默认值静默放行。"""
+
+    service = _service()
+    with pytest.raises(TypeError, match="scene_code"):
+        service.build(
+            ticket_id="T-1",
+            role="reviewer",
+            approver=principal(REVIEWER, {"reviewer", "finance"}),
+            initiator_id=INITIATOR,
+            decision="approved",
+            comment="漏传场景",
+        )
+    assert service.records("T-1") == ()
+
+
 def test_platform_admin_cannot_review_business():
     service = _service()
     with pytest.raises(SoDViolation):

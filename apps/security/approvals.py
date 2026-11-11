@@ -173,16 +173,47 @@ class ApprovalService:
         initiator_id: UUID,
         decision: Literal["approved", "rejected"],
         comment: str,
+        scene_code: str,
         decided_at: datetime | None = None,
         exception_reason: str | None = None,
-        scene_code: str | None = None,
     ) -> ApprovalRecord:
         """校验并构造记录，但**不**写入进程内状态。
 
         持久化路径必须先落库再入缓存：``build`` → 落库 → ``remember``。
         否则「内存已记、库里没有」会在容器重建后凭空消失。
+
+        ``scene_code`` 必填：业务类别闸不能留「缺省即放行」的退路。漏传时
+        由 Python 直接 ``TypeError``，而不是默认 ``None`` 后被策略静默放行。
         """
 
+        self._validate_approval(
+            ticket_id=ticket_id,
+            role=role,
+            approver=approver,
+            initiator_id=initiator_id,
+        )
+        self._categories.assert_reviewer(
+            scene_code=scene_code, role=role, principal=approver
+        )
+        return self._assemble(
+            ticket_id=ticket_id,
+            role=role,
+            approver=approver,
+            initiator_id=initiator_id,
+            decision=decision,
+            comment=comment,
+            decided_at=decided_at,
+            exception_reason=exception_reason,
+        )
+
+    def _validate_approval(
+        self,
+        *,
+        ticket_id: str,
+        role: str,
+        approver: UserPrincipal,
+        initiator_id: UUID,
+    ) -> None:
         if not ticket_id.strip():
             raise ApprovalError("ticket_id 不得为空")
         if approver.user_id == initiator_id:
@@ -190,18 +221,26 @@ class ApprovalService:
         if "platform_admin" in approver.roles:
             raise SoDViolation("平台管理员不得参与业务复核（FR-1403）")
         self._assert_role_capability(role, approver.roles)
-        # 不传 scene_code 等价旧行为；API 路径必须传，按场景类别收口复核权限。
-        self._categories.assert_reviewer(
-            scene_code=scene_code, role=role, principal=approver
-        )
 
+    def _assemble(
+        self,
+        *,
+        ticket_id: str,
+        role: str,
+        approver: UserPrincipal,
+        initiator_id: UUID,
+        decision: Literal["approved", "rejected"],
+        comment: str,
+        decided_at: datetime | None,
+        exception_reason: str | None,
+    ) -> ApprovalRecord:
         existing = self._records.get(ticket_id, [])
         if any(record.approver_id == approver.user_id for record in existing):
             raise DuplicateApprover(
                 f"{approver.user_id} 已在工单 {ticket_id} 留下审批记录（复核人 ≠ 审批人）"
             )
 
-        record = ApprovalRecord(
+        return ApprovalRecord(
             id=str(uuid4()),
             ticket_id=ticket_id,
             role=role,
@@ -213,7 +252,6 @@ class ApprovalService:
             decided_at=_utc(decided_at or self._clock()),
             exception_reason=exception_reason,
         )
-        return record
 
     def remember(self, record: ApprovalRecord) -> ApprovalRecord:
         """把已构造（并已落库）的记录放进进程内判定缓存。
@@ -244,10 +282,25 @@ class ApprovalService:
         exception_reason: str | None = None,
         scene_code: str | None = None,
     ) -> ApprovalRecord:
-        """纯内存入口：校验、构造并直接进缓存（测试与无库场景保持旧行为）。"""
+        """纯内存入口：**仅供测试与无库场景**，不参与生产闸门判定。
 
+        生产路径一律走 ``build`` → 落库 → ``remember``。这里保留
+        ``scene_code`` 可选只是为了给测试夹具播种；传了仍会过业务类别闸，
+        不传则跳过——因此本方法不得用于任何真实审批入口。
+        """
+
+        self._validate_approval(
+            ticket_id=ticket_id,
+            role=role,
+            approver=approver,
+            initiator_id=initiator_id,
+        )
+        if scene_code is not None:
+            self._categories.assert_reviewer(
+                scene_code=scene_code, role=role, principal=approver
+            )
         return self.remember(
-            self.build(
+            self._assemble(
                 ticket_id=ticket_id,
                 role=role,
                 approver=approver,
@@ -256,7 +309,6 @@ class ApprovalService:
                 comment=comment,
                 decided_at=decided_at,
                 exception_reason=exception_reason,
-                scene_code=scene_code,
             )
         )
 
