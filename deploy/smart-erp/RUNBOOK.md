@@ -497,7 +497,7 @@ docker compose -f deploy/smart-erp/docker-compose.yml --profile full exec alertm
 > `SmartErpAuditChainBroken` 在 t+0s `inactive` → t+11s `pending` → t+83s `firing`，
 > Alertmanager `/api/v2/alerts` 出现 `severity=P0` 条目，`status.state=active`，receiver=`erp-unrouted`。
 
-## 6. 档位混跑与 `erp_app` 连接预算
+## 8. 档位混跑与 `erp_app` 连接预算
 
 **demo 档 `worker` 与 full 档 `worker-agent` / `worker-io` 不得同时运行。** 两个后果叠加：
 
