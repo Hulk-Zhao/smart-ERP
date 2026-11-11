@@ -4,7 +4,7 @@
   "updated_at": "2026-11-11 21:30",
   "append_only": true,
   "rebuild_note": "2026-11-10 23:54 全量重建：按工作树真实文件 + 可跑通测试逐项核对后重写种子与留底；原文件（133 条，含 T201/TP7xx 等与工作树不符的声明）完整归档于本目录 ledger/_archive-dev-ledger-20261110-2345.json。2026-11-11 00:18 追加：按各流实测输出（platform 94 / connectors 82 / recon 63 / agents 59 / audit+security 51 / docparse 90 / deploy 30 / api 25 / observability 18 / e2e 11）校正 9 条状态并新增 T008/T608/T708/T901；未改写历史。本机时钟曾回拨（23:50→23:37），ts 仅供参考，先后一律以 seq 为准。2026-11-11 03:10 追加：独立复核 main=14ce70a 门禁四项通过；修正看板头部/差距块/T405；补记 T608 关闭（seq#135）；记录下一轮派单与 gh 未登录阻塞（seq#136）。",
-  "next_seq": 491,
+  "next_seq": 492,
   "fields": {
     "seq": "单调递增整数，写入时分配（本地最大 seq + 1）；排序与「谁覆盖谁」的唯一依据",
     "ts": "ISO 时间，本地时区，精确到分钟；仅用于展示与时钟异常检测（ts 倒退/未来 ts 告警），不参与排序",
@@ -6293,6 +6293,19 @@
       "actor": "集成会话",
       "evidence": "本 PR：`docs/ledger-board-sync`。",
       "note": "把 `#145` 合入时快照之后的看板与台账补齐：台账原 main 只到 seq 465，本 PR 带入 466–477 并追加 478 起；看板 170 卡、无重复、`node --check` 通过。新增卡：`T503`(历史补录)、`B-GATE-RETRO-VERIFY`、`B-BATCH-VIEW-PERF`、`B-DOCHEADER-SUPPLIER-CODE`、`B-DOCLINE-PHYSICAL-LINENO`、`B-CONTAINER-IDEM-INMEMORY`、`B-DOMAIN-DIR-DRIFT`、`B-DB-CONN-REPLICA-DECISION`、`B-DOC-JOB-QUEUE`、`B-CI-BUILD-TRIGGER`。同步 `00-协作规约` §13/§14（卡文真源、paths 校验、领域层落点、分阶段性能口径、head 同步、5 条教训）与新增「演示前统一重建清单」。**live 演示栈全程只读，未重灌/未重启/未写入。**另：本机时钟与其他会话不一致（本机 21:2x，台账既有条目 22:xx–23:xx），ts 仅供参考，先后以 seq 为准。"
+    },
+    {
+      "seq": 491,
+      "ts": "2026-11-11 21:39",
+      "task_id": "DEMO-REBUILD-BASELINE",
+      "task_title": "演示前统一重建清单按事实更新（8416788 + 迁移 0014）",
+      "stream": "集成",
+      "type": "补充记录",
+      "from": "—",
+      "to": "—",
+      "actor": "集成会话",
+      "evidence": "本 PR：`docs/product/tech/演示前统一重建清单.md`、`deploy/smart-erp/RUNBOOK.md` §10。",
+      "note": "`12ba3e3 → 8416788`：9 个提交、65 个文件、+20751/−140；迁移 +1（`0014_connector_idem_grants`，head 0013→0014），审计链零改动。清单新增「迁移先行」（重建前 `alembic upgrade head`，`alembic current` 必须是 0014）、api+web 同批重建、`#158` 合入后需再同步一次（破坏性字段改名）；验证点补迁移 head 与重启后同 `idem_key` 仍 REPLAY。RUNBOOK 新增 §10 同口径。**live 演示栈全程只读，未重灌/未重启/未写入。**"
     }
   ]
 }
