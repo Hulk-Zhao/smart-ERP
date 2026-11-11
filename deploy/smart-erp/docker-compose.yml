@@ -1,12 +1,13 @@
 # =============================================================================
-# 聚合型 AI ERP · 云端精简档（demo：4C4G 现机 5 容器 / full：8G 起 9 容器）
+# 聚合型 AI ERP · 云端精简档（demo：4C4G 现机 5 容器 / full：8G 起 10 容器）
 # -----------------------------------------------------------------------------
 # 依据：docs/product/tech/01-技术架构.md §1A.3（compose 拓扑）/ §1A.4（网络与端口）
 #       §1A.6（健康检查与限额）/ §1A.7（共用 PG15 隔离）
 #
 # 档位差异（与 §1A.3 差异表一致）：
 #   demo：api / worker（agent+io 合一）/ scheduler / connector-gw / web，合计 1200MiB；
-#   full：demo 全部 + doc（3G）/ worker-agent（2G）/ worker-io（1G）/ migrate（一次性）。
+#   full：demo 全部 + doc（3G）/ worker-agent（2G）/ worker-io（1G）/ migrate（一次性）
+#         / compensation（256m，补偿执行器）。
 #         full 档通过 `--profile full` 启动；migrate 不进常驻循环（restart: "no"）。
 #
 # 档位口径（唯一权威，T802 定稿 2026-11-11）：只有 demo / full 两个档位，
@@ -200,6 +201,49 @@ services:
       # 近 5 分钟无心跳即判死；锁丢失时返回非 0（§1A.6）。--check 一次性退出，不走 8011
       test: ["CMD", "python", "-m", "tools.health", "scheduler", "--check"]
       interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # compensation：补偿执行器（独立进程，消费 erp.compensation_task）
+  # 只认队列有到期行（不按工单/步骤状态扫）；自 serve /metrics 与 /healthz（8013 内网）
+  # full 档专属：demo 档仍由 API 同步回滚，不需要执行器；预算 256m / 0.5 核
+  # ---------------------------------------------------------------------------
+  compensation:
+    profiles: ["full"]
+    image: *app-image
+    container_name: erp_compensation
+    restart: unless-stopped
+    stop_grace_period: 60s
+    command: ["python", "-m", "apps.agents.compensation_worker"]
+    environment:
+      <<: *app-env
+      ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
+      ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-2}
+      ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
+      ERP_COMPENSATION_PORT: ${ERP_COMPENSATION_PORT:-8013}
+      ERP_COMPENSATION_POLL_SECONDS: ${ERP_COMPENSATION_POLL_SECONDS:-1.0}
+      ERP_COMPENSATION_STALE_SECONDS: ${ERP_COMPENSATION_STALE_SECONDS:-60}
+    volumes:
+      - erp_logs:/app/logs
+    networks:
+      - smart-erp-net
+      - erp-db-net
+    # 只在内网可抓 /metrics 与 /healthz，不发布宿主端口
+    expose:
+      - "8013"
+    mem_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      # 只探本进程的 /healthz：最近一次 tick 超时即 503
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8013/healthz', timeout=5)"
+      interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s

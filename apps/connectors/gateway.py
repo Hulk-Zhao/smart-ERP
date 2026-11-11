@@ -58,6 +58,10 @@ class GatewayRegistry:
     def aliases(self) -> tuple[str, ...]:
         return tuple(sorted(self._items))
 
+    def connector_for(self, alias: str) -> Any:
+        """按注册别名取连接器实例（供同进程执行器复用，不经 HTTP）。"""
+        return self._items[alias].connector
+
     @property
     def actions(self) -> tuple[Any, ...]:
         return tuple(
