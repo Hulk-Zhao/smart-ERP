@@ -80,8 +80,16 @@ CREATE SCHEMA IF NOT EXISTS erp AUTHORIZATION erp_migrator;
 -- 5. 扩展：统一建在 erp schema，避免升级时与别的项目打架
 --    pg_trgm / pgcrypto 是 trusted，库 owner 可建；
 --    vector 非 trusted，必须由 SUPERUSER（实例 owner）执行。
+--    vector 当前没有任何代码依赖：可用则建，不可用只告警跳过，不阻断开通。
 -- -----------------------------------------------------------------------------
-CREATE EXTENSION IF NOT EXISTS vector   SCHEMA erp;
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS vector SCHEMA erp;
+  RAISE NOTICE 'pgvector 已就绪：erp schema';
+EXCEPTION WHEN OTHERS THEN
+  RAISE WARNING 'pgvector 不可用，已跳过：%', SQLERRM;
+  RAISE WARNING '受影响能力：向量检索/相似度匹配（当前无代码依赖）；对账、工单、审批、补偿、审计、计量不受影响';
+END $$;
 CREATE EXTENSION IF NOT EXISTS pg_trgm  SCHEMA erp;
 CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA erp;
 
