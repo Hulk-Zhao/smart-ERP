@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { api, downloadText, type TicketAction, type TicketActionPayload } from '../api/client';
 import { useApiConfig, type ApprovalRole } from '../api/config';
 import { useSession } from '../api/session';
-import { LevelBadge, StateBadge } from '../components/Badges';
+import { LevelBadge, StateBadge, StepStateBadge } from '../components/Badges';
 import { ApprovalOpinions } from '../components/ApprovalOpinions';
 import { ErrorPanel } from '../components/ErrorPanel';
 import { StateRail } from '../components/StateRail';
@@ -146,6 +146,8 @@ export function TicketDetailPage() {
 
   const detail = ticket.data!;
   const actions = availableActions(detail.state);
+  // 动作回执里的写入步骤：审批/执行刚完成时详情可能还没刷新，先按回执如实展示。
+  const executedSteps = [...(mutation.data?.executed_steps ?? [])].sort((left, right) => left.step_no - right.step_no);
   const imagesList = images.data?.items ?? [];
   const auditChain = chain.data;
   const dirtyDiffMissing = imagesList.some((item) => item.diff_missing);
@@ -509,9 +511,35 @@ export function TicketDetailPage() {
 
               {mutation.isSuccess ? (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-[11px] leading-4 text-emerald-800">
-                  已完成：{mutation.data.action} → {mutation.data.state}（v{mutation.data.version}）。
-                  {(mutation.data.executed_steps?.length ?? 0) > 0 ? ` 步骤 ${mutation.data.executed_steps?.length} 个。` : ''}
-                  {(mutation.data.manual_tasks?.length ?? 0) > 0 ? ` 人工任务 ${mutation.data.manual_tasks?.length} 个。` : ''}
+                  <div>
+                    已完成：{mutation.data.action} → {mutation.data.state}（v{mutation.data.version}）。
+                    {executedSteps.length > 0 ? ` 步骤 ${executedSteps.length} 个。` : ''}
+                    {(mutation.data.manual_tasks?.length ?? 0) > 0 ? ` 人工任务 ${mutation.data.manual_tasks?.length} 个。` : ''}
+                  </div>
+                  {executedSteps.length > 0 ? (
+                    <ol className="mt-2 space-y-1.5" data-testid="executed-steps">
+                      {executedSteps.map((step) => (
+                        <li
+                          key={step.step_id}
+                          data-testid="executed-step"
+                          className="min-w-0 rounded-lg border border-emerald-200 bg-white px-2 py-1.5"
+                        >
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-mono text-[10px] text-slate-400">#{String(step.step_no).padStart(2, '0')}</span>
+                            <span className="font-mono text-[11px] font-semibold text-slate-900">{step.action_key}</span>
+                            <StepStateBadge state={step.state} />
+                            <LevelBadge level={step.level} />
+                          </div>
+                          <div className="mt-1 break-all text-slate-600">
+                            写入 {step.system} · {step.object_type}:{step.object_id}
+                          </div>
+                          <div className="break-all text-slate-500">
+                            幂等键 <span className="font-mono">{step.idem_key}</span>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : null}
                 </div>
               ) : null}
             </div>

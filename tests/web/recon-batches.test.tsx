@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { configureApi, resetApiConfig } from '../../web/src/api/config';
 import type { ReconBatchSummaryOut } from '../../web/src/api/types';
@@ -28,7 +28,7 @@ const LEGACY: ReconBatchSummaryOut = {
   created_at: '2026-09-30T16:20:00Z',
 };
 
-type BatchesReply = 'projected' | 'legacy' | 'empty' | 'forbidden' | 'unauthorized';
+type BatchesReply = 'projected' | 'paged' | 'legacy' | 'empty' | 'forbidden' | 'unauthorized';
 
 let server: TestApi;
 let reply: BatchesReply = 'projected';
@@ -45,10 +45,15 @@ function sessionReply() {
   };
 }
 
-function batchesReply() {
+function batchesReply(query: Record<string, string[]> = {}) {
   switch (reply) {
     case 'projected':
       return { body: { items: [PROJECTED, LEGACY], next_cursor: null } };
+    case 'paged':
+      // 真键集分页：第一页带 cursor，第二页必须按该 cursor 取。
+      return query.cursor?.[0] === 'cursor-2'
+        ? { body: { items: [LEGACY], next_cursor: null } }
+        : { body: { items: [PROJECTED], next_cursor: 'cursor-2' } };
     case 'legacy':
       return { body: { items: [LEGACY], next_cursor: null } };
     case 'empty':
@@ -65,7 +70,7 @@ beforeEach(async () => {
   reply = 'projected';
   server = await startApi((request) => {
     if (request.path === '/v1/auth/session') return sessionReply();
-    if (request.path === '/v1/recon/batches') return batchesReply();
+    if (request.path === '/v1/recon/batches') return batchesReply(request.query);
     return problem(404, 'E-RESOURCE-NOTFOUND', `unexpected ${request.path}`);
   });
   resetApiConfig();
@@ -138,5 +143,20 @@ describe('最近批次来自 /v1/recon/batches', () => {
     expect(batchRequest?.query.limit).toEqual(['10']);
     expect(batchRequest?.query.org_id).toEqual(['ORG-1']);
     expect(batchRequest?.query.period).toEqual(['2026-10']);
+  });
+
+  it('加载更多按 next_cursor 取下一页并追加，而不是重复第一页', async () => {
+    reply = 'paged';
+    renderPage(<ReconPage />, { route: '/recon', path: '/recon' });
+
+    await waitFor(() => expect(batchRows()).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: '加载更多' }));
+
+    await waitFor(() => expect(batchRows()).toHaveLength(2));
+    // 第二页必须用第一页返回的 cursor；旧实现若忽略 cursor 会再次拿到同一页。
+    const paged = server.requests.filter((request) => request.path === '/v1/recon/batches');
+    expect(paged).toHaveLength(2);
+    expect(paged[1].query.cursor).toEqual(['cursor-2']);
+    expect(within(batchRows()[1]).getAllByTestId('batch-metric-missing')).toHaveLength(3);
   });
 });
