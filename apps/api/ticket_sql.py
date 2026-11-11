@@ -1,9 +1,19 @@
-"""工单投影的 PostgreSQL 读路径（PR2）。
+"""工单投影的 PostgreSQL 读写路径（PR2 读 / PR3 写）。
 
-与内存 ``TicketRepository`` 同语义：租户是查询条件（不是取到再判断）、scope 过滤
-落在 SQL 里、键集游标沿用 ``{"t": iso, "i": uuid}``。本文件只做读；建单与状态推进的
-事件化在 PR3，因此 ``add`` / ``save`` 显式拒绝——不让「读库、写内存/写投影」的半截
-状态被装配进来。
+读：与内存 ``TicketRepository`` 同语义——租户是查询条件（不是取到再判断）、
+scope 过滤落在 SQL 里、键集游标沿用 ``{"t": iso, "i": uuid}``。
+
+写：全部经 :class:`apps.agents.store.TicketStore`，事件与投影同事务；
+``add`` / ``save`` 仍显式拒绝，避免任何入口绕过事件直接改投影：
+
+- 建单 → ``create`` → ``TicketStore.create_ticket``（created 事件）；
+- 状态推进 → ``transition`` → ``TicketStore.transition``（transition 事件）；
+- 执行完的步骤 → ``record_step`` → ``TicketStore.record_step``（step 事件）；
+- ``save`` 只被 ``compensate_ticket`` 使用；同步回滚本期关闭，SQL 模式下一律
+  fail-closed（503），且发生在任何连接器调用之前。
+
+``version`` 对外是「建单即 1」，DB 里存的是迁移次数（建单 0）。两个实现
+（内存/SQL）都在端口边界做同样的 0→1 偏移，``ActionOut.version`` 因此不变。
 
 ``systems IS NULL`` 的语义：**不可见**（fail-closed）。NULL 表示「涉及系统未知」，
 不是「全部」：列表用显式的 ``systems IS NOT NULL`` 与 ``@>`` 两个条件，详情在
@@ -12,6 +22,7 @@ service 层抛 403；两处都不允许 ``IS NULL OR ...`` 的短路把未知放
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
@@ -20,8 +31,12 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import ARRAY, array
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
+from apps.agents.state_machine import TransitionContext
+from apps.agents.store import TicketNotFound, TicketStore
 from apps.api.pagination import decode_cursor, encode_cursor
 from apps.api.store import PendingWrite, TicketRecord, TicketStepRecord
+from apps.platform.api.errors import ProblemError
+from apps.platform.contracts.errors import ErrorCode
 from apps.platform.contracts.ticket import TicketState
 from apps.platform.db.models import Ticket, TicketStep
 from apps.platform.policy.levels import WriteLevel
@@ -29,13 +44,38 @@ from apps.security.scope import Scope
 
 
 class TicketStorePort(Protocol):
-    """容器注入的工单投影端口；内存实现见 ``apps.api.store.TicketRepository``。"""
+    """容器注入的工单端口；内存实现见 ``apps.api.store.TicketRepository``。"""
 
     def add(self, ticket: TicketRecord) -> TicketRecord: ...
+
+    async def create(self, ticket: TicketRecord) -> TicketRecord: ...
 
     async def get(self, *, tenant_id: UUID, ticket_id: UUID) -> TicketRecord | None: ...
 
     async def save(self, ticket: TicketRecord) -> None: ...
+
+    async def transition(
+        self,
+        *,
+        tenant_id: UUID,
+        ticket_id: UUID,
+        target: TicketState,
+        trigger: str,
+        context: TransitionContext | None = None,
+        actor_id: UUID | None = None,
+        trace_id: str | None = None,
+        payload: Mapping[str, Any] | None = None,
+    ) -> int: ...
+
+    async def record_step(
+        self,
+        *,
+        tenant_id: UUID,
+        ticket_id: UUID,
+        step: TicketStepRecord,
+        request_hash: str,
+        trace_id: str | None = None,
+    ) -> None: ...
 
     async def list(
         self,
@@ -57,6 +97,7 @@ class SqlTicketRepository:
 
     def __init__(self, session_factory: Any | None = None) -> None:
         self._session_factory = session_factory
+        self._store: TicketStore | None = None
 
     def _factory(self) -> Any:
         if self._session_factory is None:
@@ -65,14 +106,121 @@ class SqlTicketRepository:
             self._session_factory = build_session_factory(build_engine())
         return self._session_factory
 
+    def _events(self) -> TicketStore:
+        if self._store is None:
+            self._store = TicketStore(self._factory())
+        return self._store
+
     def add(self, ticket: TicketRecord) -> TicketRecord:
         raise NotImplementedError(
-            "PR2 只做读路径；建单在 PR3 走 TicketStore.create_ticket（ticket_event 为真源）"
+            "SQL 模式请用 await create(...)（ticket_event 为真源）；add 只属于内存测试仓储"
         )
 
     async def save(self, ticket: TicketRecord) -> None:
-        raise NotImplementedError(
-            "PR2 不写库；状态推进在 PR3 走 TicketStore.transition（事件与投影同事务）"
+        # 只有 compensate_ticket 会走到这里：同步回滚本期关闭，SQL 模式下必须
+        # fail-closed，且在连接器调用之前——不能靠「直写投影」制造链外状态。
+        raise ProblemError(
+            ErrorCode.ROLLBACK_UNAVAILABLE,
+            "同步回滚尚未接入事件化写（SQL 模式）：本次未调用任何连接器，工单状态未改变。",
+        )
+
+    async def create(self, ticket: TicketRecord) -> TicketRecord:
+        created = await self._events().create_ticket(
+            tenant_id=ticket.tenant_id,
+            ticket_no=ticket.ticket_no,
+            scene_code=ticket.scene_code,
+            initiator_id=ticket.initiator_id,
+            trigger_kind="manual",
+            business_key=ticket.business_key,
+            org_id=ticket.org_id or None,
+            period=ticket.period or None,
+            systems=ticket.systems,
+            write_level=int(ticket.write_level)
+            if ticket.write_level is not None
+            else None,
+            amount=ticket.amount,
+            systems_count=(len(ticket.systems) if ticket.systems is not None else None),
+            touches_fund=ticket.touches_fund,
+            pending_write=_pending_payload(ticket.pending_write),
+        )
+        fetched = await self.get(tenant_id=ticket.tenant_id, ticket_id=created.id)
+        if fetched is None:  # pragma: no cover - 刚提交的行不可能读不到
+            raise TicketNotFound(f"工单不存在: {created.id}")
+        return fetched
+
+    async def transition(
+        self,
+        *,
+        tenant_id: UUID,
+        ticket_id: UUID,
+        target: TicketState,
+        trigger: str,
+        context: TransitionContext | None = None,
+        actor_id: UUID | None = None,
+        trace_id: str | None = None,
+        payload: Mapping[str, Any] | None = None,
+    ) -> int:
+        # tenant 是查询条件：先钉住归属，再进事件事务（避免「改完再发现不是本租户」）。
+        async with self._factory()() as session:
+            owned = await session.scalar(
+                sa.select(Ticket.id).where(
+                    Ticket.id == ticket_id, Ticket.tenant_id == tenant_id
+                )
+            )
+        if owned is None:
+            raise TicketNotFound(f"工单不存在: {ticket_id}")
+        await self._events().transition(
+            ticket_id,
+            target,
+            trigger,
+            context=context,
+            actor_id=actor_id,
+            trace_id=trace_id,
+            payload=payload,
+        )
+        async with self._factory()() as session:
+            stored = await session.scalar(
+                sa.select(Ticket.version).where(
+                    Ticket.id == ticket_id, Ticket.tenant_id == tenant_id
+                )
+            )
+        if stored is None:
+            raise TicketNotFound(f"工单不存在: {ticket_id}")
+        return int(stored) + 1
+
+    async def record_step(
+        self,
+        *,
+        tenant_id: UUID,
+        ticket_id: UUID,
+        step: TicketStepRecord,
+        request_hash: str,
+        trace_id: str | None = None,
+    ) -> None:
+        # tenant 是查询条件：先在端口上钉住归属，再进事件事务。
+        async with self._factory()() as session:
+            owned = await session.scalar(
+                sa.select(Ticket.id).where(
+                    Ticket.id == ticket_id, Ticket.tenant_id == tenant_id
+                )
+            )
+        if owned is None:
+            raise TicketNotFound(f"工单不存在: {ticket_id}")
+        await self._events().record_step(
+            ticket_id=ticket_id,
+            step_id=step.step_id,
+            step_no=step.step_no,
+            action_key=step.action_key,
+            target_system=step.system,
+            write_level=int(step.level),
+            idem_key=step.idem_key,
+            request_hash=request_hash,
+            state=step.state,
+            object_type=step.object_type or None,
+            object_id=step.object_id or None,
+            audit_image_id=step.audit_image_id,
+            executed_at=step.executed_at,
+            trace_id=trace_id,
         )
 
     async def get(self, *, tenant_id: UUID, ticket_id: UUID) -> TicketRecord | None:
@@ -192,12 +340,24 @@ def _to_record(row: Ticket, steps: list[TicketStepRecord]) -> TicketRecord:
         amount=row.amount,
         touches_fund=row.touches_fund,
         state=TicketState(row.state),
-        version=row.version,
+        # DB 存迁移次数（建单 0），对外统一 +1：前端乐观并发的起点是 1。
+        version=row.version + 1,
         created_at=row.created_at,
         updated_at=row.updated_at,
         pending_write=_to_pending(row.pending_write),
         steps=steps,
     )
+
+
+def _pending_payload(pending: PendingWrite | None) -> dict[str, Any] | None:
+    if pending is None:
+        return None
+    return {
+        "action_key": pending.action_key,
+        "system": pending.system,
+        "payload": dict(pending.payload),
+        "idem_key": pending.idem_key,
+    }
 
 
 def _to_pending(raw: Any) -> PendingWrite | None:

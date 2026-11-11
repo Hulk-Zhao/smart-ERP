@@ -23,7 +23,7 @@ from apps.api.container import ApiContainer
 from apps.api.price_book import PriceLookup
 from apps.api.recon_store import FileReconStore
 from apps.api.rollback_gate import ENV_ROLLBACK_SYNC_ENABLED
-from apps.api.store import PendingWrite, TicketRecord
+from apps.api.store import PendingWrite, TicketRecord, TicketRepository
 from apps.main import create_app
 from apps.platform.config import Settings
 from apps.platform.connectors.sdk import (
@@ -248,6 +248,8 @@ def env(tmp_path: Path) -> ApiEnv:
         recon_store=store,
         # 不连库：默认价目为空，走 env 回落或全 NULL（需要真价目时用例自行注入）。
         price_book=EmptyPriceBook(),
+        # 生产默认是 PostgreSQL 适配器；单测显式用内存仓储（种入即见）。
+        tickets=TicketRepository(),
     )
     container.actions.register(_reverse_action())
     container.actions.register(_forward_action())
