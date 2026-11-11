@@ -703,6 +703,19 @@ HTTP/1.1 500 Internal Server Error
    `curl 127.0.0.1:8021/stub/receipts` 能看回执，但**远程/公网访问不到 8021**，
    公网入口只有 web 的 nginx（`/erp/api/`）。api 走容器内网 `http://u8-stub:8021`，
    不受宿主绑定影响。所以「当场展示回执」只能用演示机本机终端或经 api 的 executed_steps。
+5. **改了 demo 身份就要 `--force-recreate api`，`docker restart` 不重读 env。**
+   容器环境变量在创建时固定，restart 只换进程。补 `ERP_DEMO_SESSION_IDENTITIES`
+   的 `periods` 时必须 `up -d --no-deps --force-recreate api`，再用
+   `docker exec erp_api printenv ERP_DEMO_SESSION_IDENTITIES` 确认进去了。
+6. **上传的对账单登记在 api 进程内存里。** `POST /v1/recon/statements` 之后必须由
+   **同一个 api 进程**跑 `/v1/recon/runs`（`sources.statement_files`），否则
+   `422 E-DATA-MISSING（F1）`；api 一旦重启/重建，要重新上传。
+7. **上传演示是 `2026-10` 期。** 四个演示身份的 `periods` 必须包含 `2026-10`，
+   否则「开始对账」直接 `403 E-AUTHZ-001 超出授权`（种子工单用的是 07/08/09）。
+8. **同步回滚入口默认关闭。** `POST /v1/tickets/{id}/actions/compensate` 返回
+   `503 E-ROLLBACK-UNAVAILABLE`（`ERP_ROLLBACK_SYNC_ENABLED` 未随 compose 下发，
+   与 `12ba3e3` 行为一致），连接器零调用、工单状态不变。演示补偿请展示种子里的
+   `TK-202609-0012/0013` 已回滚链，不要现场点 compensate。
 
 ### 10.2 开演前 10 分钟检查单（逐条照抄，`$SHA` = 冻结 sha）
 
@@ -786,5 +799,19 @@ curl -s -o /dev/null -w 'api=%{http_code}\n' http://127.0.0.1:8088/erp/api/healt
 ```
 
 任一条不符：不要开演。先按 §3 回滚到上一个可用 sha，再查原因。
+
+若今天要演「对账上传」，再加一条：
+
+8）上传演示通路（`matched=3` / 1 条单价差异）
+
+```bash
+curl -s -X POST http://127.0.0.1:8010/v1/recon/statements -H "X-Session-Token: $TOKEN_D" \
+  -F "file=@fixtures/recon/upload_demo/supplier_statement_2026-10.csv" \
+  -F "dataset=$(cat fixtures/recon/upload_demo/our_dataset.json)"
+# 期望：{"statement_file":"supplier_statement_2026-10.csv","supplier_lines":3,"our_lines":3}
+# 然后（必须同一个 api 进程）POST /v1/recon/runs（scope 用 ORG-SZ / 2026-10 / u8，
+# sources.statement_files=["supplier_statement_2026-10.csv"]，带 Idempotency-Key）
+# 期望 metrics：supplier_lines=3 matched=3 diff_lines=1 diff_amount=10.0000
+```
 
 
