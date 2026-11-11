@@ -43,7 +43,7 @@ async def _decide(
     ticket_id: UUID,
 ) -> JSONResponse:
     async def action() -> tuple[int, dict]:
-        result = service.decide_approval(
+        result = await service.decide_approval(
             container,
             session,
             ticket_id=ticket_id,
@@ -81,7 +81,7 @@ async def pending(
     limit: PageLimit = None,
 ):
     with translated():
-        items, next_cursor = service.list_pending_approvals(
+        items, next_cursor = await service.list_pending_approvals(
             container,
             session,
             scope_in=scope.payload,
