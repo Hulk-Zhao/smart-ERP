@@ -275,13 +275,13 @@ ERP_IMAGE_TAG=<old-sha> docker compose --env-file deploy/smart-erp/.env \
 # ② /metrics —— 站点根路径上的同名路径，防御性兜底（不是本应用的转发路径，
 #    同机其它站点或默认 server 若暴露 /metrics 会被它挡住）。
 location = /erp/api/metrics {
-    deny all;          # 或：return 404;
+    deny all;          # 只接受 deny all（403）；不要写 return 404（见下方验收矩阵）
 }
 location = /metrics {
-    deny all;          # 或：return 404;
+    deny all;          # 只接受 deny all（403）；不要写 return 404（见下方验收矩阵）
 }
 
-# 业务 API 反代到广州宿主回环地址；proxy_pass 结尾**必须带 "/"**（剥掉 /erp/api/ 前缀）。
+# 业务 API 反代到广州宿主回环地址；上游写字面量时，proxy_pass 结尾**必须带 "/"**（剥掉 /erp/api/ 前缀）。
 # 机制：uvicorn 把 root_path 拼到 scope["path"] 前，Starlette 路由匹配时再剥一次，
 # 净效果是应用只认无前缀路径；保留前缀会让所有 /erp/api/* 返回 404。
 # --root-path 只用于 docs/openapi 的 server 地址，不能既保留前缀又开 root-path。
@@ -295,24 +295,94 @@ location /erp/api/ {
 }
 ```
 
-**nginx 侧验收口径（两条都必须满足，任一 200 即视为指标外泄、发布不通过）：**
+> **禁止写法（2026-11-11 真容器实测）**：不要为了「请求时解析上游」把地址抽成变量再带 URI，
+> 例如 `set $erp_api_upstream http://api:8010;` + `proxy_pass $erp_api_upstream/;`。
+> nginx 在 `proxy_pass` 使用变量时**不做 location 前缀替换**，URI 会按指令原样发送，
+> 该 location 下的所有请求都被压成这个 URI，全部 404（与后端是否开 `--root-path` 无关）。
+> 若确需保留变量，必须写成 `proxy_pass $erp_api_upstream;`（不带 URI）+
+> `rewrite ^/erp/api/(.*)$ /$1 break;`；`(.*)` 空匹配时 `/erp/api/` 会变成 `/`，
+> 不会产生空 URI。
+>
+> **也不要为了剥前缀改回字面量上游**（2026-11-11 CI 事故）：字面量
+> `proxy_pass http://api:8010/;` 会让 nginx 在启动时用系统解析器解析 `api`，
+> `resolver` 上的 `ipv6=off` 随之失效——Docker DNS 同时返回 A/AAAA 时 nginx 可能
+> 选中 AAAA，而 api 只监听 IPv4，结果是 502；api 尚不可解析时更会直接
+> `host not found in upstream "api"` 退出。
+>
+> 因此仓库内 `web-nginx.conf`（**仅本机预览/compose demo 使用**）保留
+> `resolver 127.0.0.11 valid=10s ipv6=off;` + 变量式 `proxy_pass $erp_api_upstream;`
+> + 上面的 `rewrite`。`tests/deploy` 有两层回归：静态断言禁止「变量 + URI」并要求
+> resolver 带 `ipv6=off`；真容器用例在 CI deploy-static 里用 `nginx -T` 校验运行中
+> 配置，并断言「web 经 Docker DNS 解析到的 api 地址族 == api 实际监听的地址族」，
+> 再直打 `/erp/api/healthz`、`/erp/api/openapi.json`。
+>
+> 云上路径不受这条影响：公网 → hk-web nginx → `proxy_pass http://127.0.0.1:8010/;`
+> → 广州宿主 erp_api，不经过 web 容器。
+
+**指标验收口径（三行矩阵，按 1 → 2 → 3 顺序执行，缺一行都不算通过）：**
+
+> 判断原则：**只有第 2 行（开启后容器内直连 200）能证明端点存在，第 3 行才有意义。**
+> 跳过第 2 行直接看第 3 行，等于在验一个可能不存在的端点——`#48` 的 deny 规则
+> 就是这样保护了一个不存在的端点，靠 404 通过，属于假通过。
+
+> 探针与 nginx 的 deny 必须用同一个路径；改了 `ERP_METRICS_PATH` 就同步替换下面的
+> `/metrics` 和 nginx 片段里的路径。
+
+容器内探针（app 镜像自带 python，不依赖镜像里有没有 curl）：
 
 > **前提：转发必须已剥掉 `/erp/api/` 前缀**（`proxy_pass .../;`）。若沿用旧写法保留前缀，
 > `/erp/api/metrics` 会因应用只认 `/metrics` 而返回 404——**这种 404 不是拦截生效的证据**。
 > 必须先验 `/erp/api/healthz` 为 200（证明前缀通路与剥前缀都正确），再看 metrics 的 403/404。
 
 ```bash
-# ① App 指标的真实公网路径：必须 403/404，不得 200
-curl -m 5 -o /dev/null -sS -w '%{http_code}\n' https://<域名>/erp/api/metrics
-# 期望输出：403 或 404
-
-# ② 站点根路径兜底：必须 403/404，不得 200
-curl -m 5 -o /dev/null -sS -w '%{http_code}\n' https://<域名>/metrics
-# 期望输出：403 或 404
+probe() {
+  docker exec -T erp_api python -c "
+import urllib.request, urllib.error
+try:
+    r = urllib.request.urlopen('http://127.0.0.1:8010/metrics', timeout=5)
+    print(r.status)
+    print(r.read().decode()[:2000])
+except urllib.error.HTTPError as e:
+    print(e.code)
+"
+}
 ```
 
-配合 5.3 第 ③ 条（`http://<公网IP>:8010/metrics` 必须连接失败），三条合起来才算
-「指标既不能绕过 nginx，也不能直连宿主」。换域名/改前缀后必须重跑这三条。
+| # | 操作 | 期望 | 证明了什么 |
+|---|---|---|---|
+| 1 | `deploy/smart-erp/.env` 里 `ERP_METRICS_ENABLED=`（空）或 `0`，`docker compose --env-file deploy/smart-erp/.env --profile full up -d --force-recreate api` 后执行 `probe` | **404** | 关闭时端点不暴露 |
+| 2 | `deploy/smart-erp/.env` 里 `ERP_METRICS_ENABLED=1`（`true/yes/on` 等价），同样重建后执行 `probe` | **200**，且正文含 `smart_erp_recon_batches_total` | 端点确实挂载、指标在产出 |
+| 3 | 保持第 2 行的开启状态，从外网访问 | **403**（`curl -m 5 -o /dev/null -sS -w '%{http_code}\n' https://<域名>/erp/api/metrics`） | nginx 的 deny 生效，而不是「端点不存在」 |
+
+第 3 行返回 **404 不算通过**：它与第 1 行同码，既可能是 nginx 写成了 `return 404` 而不是
+`deny all`，也可能是配置没 reload。先改配置再重测；返回 200 即指标外泄，发布不通过。
+
+站点根路径兜底仍需单独验（它不是应用的转发路径，漏配时同样会 200）：
+
+```bash
+curl -m 5 -o /dev/null -sS -w '%{http_code}\n' https://<域名>/metrics   # 期望 403
+```
+
+配合 5.3 第 ③ 条（`http://<公网IP>:8010/metrics` 必须连接失败），「矩阵三行 + 根路径兜底 +
+公网直连失败」全部通过，才算「指标既不能绕过 nginx，也不能直连宿主」。换域名/改前缀后必须重跑。
+
+> **接线与开关下发位置**：
+>
+> - 挂载点在 `apps/main.py:35`：`install_metrics(app, get_container().metrics)`（#65）。
+>   指标注册表取的是容器里同一个 `metrics` 实例，业务埋点与 `/metrics` 输出是同一份数据。
+> - `ERP_METRICS_ENABLED` 只认 `1/true/yes/on`（大小写不敏感），空值或其它值一律视为关闭；
+>   关闭时 `install_metrics` 直接返回、不注册路由，所以第 1 行是 404。
+>   `docker-compose.yml` 已把该键显式下发给 `api`（schema `scope=compose`、`services=["api"]`），
+>   `deploy/smart-erp/.env.example` 保持空值——生产默认关闭。
+> - 端点路径由 `ERP_METRICS_PATH` 决定（默认 `/metrics`），同样由 compose 下发给 `api`。
+>   改这个值必须同步改探针 URL 和 nginx 的 `location = /erp/api/metrics`；且它**必须以 `/`
+>   开头**，否则启动期 `install_metrics` 抛 `MetricError`，api 容器直接起不来——不是运行期 404，
+>   而是 `docker compose ps` 里 restart 计数一路涨。
+> - 做第 2 行时在 `deploy/smart-erp/.env` 里临时写 `ERP_METRICS_ENABLED=1`，验收完删掉该行
+>   （或改回 `0`）并再次 `--force-recreate api`；`env/prod.env` 不登记该键，避免「关闭」
+>   在线上偶发变成「开启」。
+> - 镜像口径：以上按 #65 的装配实现写。若镜像主干 sha 早于 #65 合入（例如 `c3c662b`），
+>   `apps/main.py` 里还没有这行调用，第 2 行会恒为 404——那是镜像内容问题，不是开关没生效。
 
 ### 5.3 发布后自检（三条都要过）
 

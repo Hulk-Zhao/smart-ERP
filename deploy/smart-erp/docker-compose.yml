@@ -93,6 +93,9 @@ services:
       ERP_LLM_API_KEY: ${ERP_LLM_API_KEY:-}
       ERP_LLM_MODEL: ${ERP_LLM_MODEL:-}
       ERP_LLM_TIMEOUT_SECONDS: ${ERP_LLM_TIMEOUT_SECONDS:-60}
+      # 默认不挂载 /metrics；验收时临时在 .env 置 1/true/yes/on（RUNBOOK §5.2 三行矩阵）
+      ERP_METRICS_ENABLED: "${ERP_METRICS_ENABLED:-}"
+      ERP_METRICS_PATH: "${ERP_METRICS_PATH:-/metrics}"
     ports:
       # 只绑回环：公网入口只有 hk-web 的 nginx（/erp/api/ → 127.0.0.1:8010），
       # 宿主不再监听 0.0.0.0。4C4G 演示机若确需宿主直连，显式设 ERP_API_BIND=0.0.0.0。
