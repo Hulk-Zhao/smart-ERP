@@ -9,8 +9,10 @@ import { problem, startApi, type TestApi } from './helpers/server';
 const SECRET = 'SECRET-REVIEWER-OPINION-发起人不可见';
 
 let server: TestApi;
+let approveSucceeds = false;
 
 beforeEach(async () => {
+  approveSucceeds = false;
   resetApiConfig();
   server = await startApi((request) => {
     if (request.method === 'GET' && request.path === '/v1/approvals/pending') {
@@ -44,6 +46,20 @@ beforeEach(async () => {
       };
     }
     if (request.method === 'POST' && request.path === `/v1/approvals/${DUAL_TICKET_ID}/approve`) {
+      if (approveSucceeds) {
+        return {
+          body: {
+            ticket_id: DUAL_TICKET_ID,
+            role: 'approver',
+            decision: 'approved',
+            decided_at: '2026-11-10T09:30:00Z',
+            satisfied: true,
+            required_roles: ['reviewer', 'approver'],
+            missing_roles: [],
+            ticket_state: '待审批',
+          },
+        };
+      }
       return problem(409, 'E-POLICY-APPROVAL', '审批未满足：还需 reviewer 审批', {
         approval_required_roles: ['reviewer', 'approver'],
         approval_missing_roles: ['reviewer'],
@@ -97,5 +113,16 @@ describe('审批页：双人意见脱敏 + 409 审批未满足', () => {
       role: 'approver',
       scope: { org_id: 'ORG-1', period: '2026-10' },
     });
+  });
+
+  it('通过后给出「查看执行步骤 →」，可直接跳到工单详情看写入步骤', async () => {
+    approveSucceeds = true;
+    renderPage(<ApprovalsPage />, { route: '/approvals', path: '/approvals' });
+
+    await screen.findByText('双人复核意见');
+    fireEvent.click(screen.getByRole('button', { name: '通过' }));
+
+    const link = await screen.findByRole('link', { name: '查看执行步骤 →' });
+    expect(link).toHaveAttribute('href', `/tickets/${DUAL_TICKET_ID}`);
   });
 });
