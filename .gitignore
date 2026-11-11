@@ -45,6 +45,8 @@ scratch/
 .env
 .env.*
 !.env.example
+# demo 档一体化模板（不含真实密钥，口令为 CHANGE_ME 占位符）
+!.env.demo
 *.pem
 *.key
 

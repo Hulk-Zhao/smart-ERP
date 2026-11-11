@@ -22,6 +22,12 @@
 #   确认只用于本地验证时才加 --allow-dirty：tag 自动追加 "-dirty"，deploy-images.sh
 #   会因 tag 不是 40 位 sha 拒绝下发。
 #
+# Git Bash（MSYS）路径改写：MSYS 会把 `--build-arg ERP_WEB_BASE=/` 的 `/` 改写成 Git
+#   安装根，产物 index.html 引用 /Program Files/Git/assets/*，容器里 404、页面空白。
+#   因此只在 build 子进程上设 MSYS_NO_PATHCONV=1（见 build_one 的 `env ... docker build`），
+#   不 export 到全局：全局关掉会让同脚本里的 `git -C /e/...` 失去路径转换而直接失败。
+#   关掉转换后 docker 不认 /e/... 形式，故 Dockerfile 与 context 用 cygpath -w 转 Windows 路径。
+#
 # 退出码：0 成功；2 参数/前置条件不满足（含工作树不干净）；其它为 docker 自身错误。
 # =============================================================================
 set -euo pipefail
@@ -127,12 +133,20 @@ fi
 # ---- 3. 构建 --------------------------------------------------------------
 build_one() {
   local name="$1" dockerfile="$2"; shift 2
-  local -a cmd=(docker build --file "${DOCKER_DIR}/${dockerfile}"
+  # Git Bash（MSYS）会把 `--build-arg ERP_WEB_BASE=/` 的 `/` 改写成 Git 安装根目录，
+  # 产物 index.html 里就会出现 /Program Files/Git/assets/...；只对 build 进程关闭转换。
+  # 关掉转换后 docker 不再认 /e/... 这类 POSIX 路径，Dockerfile 与 context 需转成 Windows 路径。
+  local dockerfile_path="${DOCKER_DIR}/${dockerfile}" context_path="${REPO_ROOT}"
+  if command -v cygpath >/dev/null 2>&1; then
+    dockerfile_path="$(cygpath -w "${dockerfile_path}")"
+    context_path="$(cygpath -w "${context_path}")"
+  fi
+  local -a cmd=(env MSYS_NO_PATHCONV=1 docker build --file "${dockerfile_path}"
                 --tag "smart-erp/${name}:${TAG}")
   [[ -n "$PLATFORM" ]] && cmd+=(--platform "${PLATFORM}")
   (( NO_CACHE )) && cmd+=(--no-cache)
   cmd+=("$@")
-  cmd+=("${REPO_ROOT}")
+  cmd+=("${context_path}")
 
   echo "+ ${cmd[*]}"
   (( DRY_RUN )) || "${cmd[@]}"
