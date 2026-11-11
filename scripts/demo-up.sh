@@ -14,7 +14,8 @@
 #   scripts/demo-up.sh --skip-load          # 只起栈，不重灌数据
 #   scripts/demo-up.sh --down               # 停栈（保留 PG 与数据卷）
 #
-# 端口默认 8010 / 8088 / 55441；被占用时先 --down 或改 ERP_API_PORT / ERP_WEB_PORT。
+# 端口默认 8010 / 8088 / 55441，u8-stub 另占宿主回环 8021（仅演示取证用）；
+# 被占用时先 --down 或改 ERP_API_PORT / ERP_WEB_PORT。
 # =============================================================================
 set -euo pipefail
 
@@ -122,10 +123,10 @@ info "6/7 docker compose --profile demo up -d"
 docker compose --project-directory "${DEMO_DIR}" --profile demo up -d
 
 # ---- 7. 等 healthy ---------------------------------------------------------
-info "7/7 等待容器 healthy（api/web/gw/worker/scheduler，最多 180s）"
+info "7/7 等待容器 healthy（api/web/gw/worker/scheduler/u8-stub，最多 180s）"
 for _ in $(seq 1 60); do
   states="$(docker inspect -f '{{.Name}}={{.State.Health.Status}}' \
-    erp_api erp_web erp_gw erp_worker erp_scheduler 2>/dev/null || true)"
+    erp_api erp_web erp_gw erp_worker erp_scheduler erp_u8_stub 2>/dev/null || true)"
   unhealthy="$(printf '%s\n' "${states}" | grep -v '=healthy' || true)"
   if [[ -z "${unhealthy}" && -n "${states}" ]]; then
     printf '%s\n' "${states}"
@@ -143,4 +144,6 @@ cat <<EOF
   api     http://localhost:${ERP_API_PORT:-8010}/healthz
   session curl -H 'X-Session-Token: ${TOKEN}' \\
           'http://localhost:${ERP_API_PORT:-8010}/v1/auth/session'
+  u8 桩   http://127.0.0.1:8021/stub/receipts   （模拟外部系统，不是真 U8）
+          写入是否真落在桩上：curl -s http://127.0.0.1:8021/stub/requests
 EOF

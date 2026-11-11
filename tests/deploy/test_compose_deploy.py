@@ -2,8 +2,9 @@
 """部署面静态校验（离线可跑，不依赖网络、不需要起栈）。
 
 覆盖 docs/product/tech/02-并发开发路线.md §2.9 S8 可独立验收里的四条静态判据：
-  ① demo 档 compose 的服务清单固定为 5 个，且不含 pg / redis / doc / minio；
-  ② 显式 memory limit 合计 ≤ 1200MiB（§1A.3 预算）；
+  ① demo 档 compose 的服务清单固定为 6 个（5 业务 + u8-stub 模拟桩），
+     且不含 pg / redis / doc / minio；
+  ② 显式 memory limit 合计：demo 业务 1200MiB + 桩 64MiB（§1A.3 预算）；
   ③ compose 引用的每个 ERP_* 变量都在 deploy/smart-erp/.env.example 登记；
   ④ 每个服务的 healthcheck 指向契约路径（/healthz、/readyz）或 tools.health。
 
@@ -46,7 +47,9 @@ DOCKER_DIR = REPO_ROOT / "projects" / "smart-ERP" / "docker"
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 TEST_ENV_FILE = Path(__file__).resolve().parent / "compose.env"
 
-DEMO_SERVICES = {"api", "worker", "scheduler", "connector-gw", "web"}
+DEMO_SERVICES = {"api", "worker", "scheduler", "connector-gw", "web", "u8-stub"}
+#: 只属于 demo 的服务：worker 在 full 档拆成 agent/io；u8-stub 是演示专用的模拟外部系统
+DEMO_ONLY_SERVICES = {"worker", "u8-stub"}
 FULL_ONLY_SERVICES = {
     "doc",
     "worker-agent",
@@ -61,9 +64,15 @@ EXPECTED_SERVICES = DEMO_SERVICES | FULL_ONLY_SERVICES
 MONITORING_SERVICES = {"prometheus", "alertmanager"}
 # 任何档位都不许出现的容器（共用 PG15，队列在 PG，对象存储走本地卷/MinIO 外部）
 FORBIDDEN_SERVICES = {"pg", "postgres", "redis", "cache", "minio"}
-MEMORY_BUDGET_MIB = 1200
+#: §1A.3 的 demo 业务容器预算
+DEMO_APP_MEMORY_BUDGET_MIB = 1200
+#: demo 专属的 u8-stub（模拟外部系统）单独计量，不占业务预算
+DEMO_STUB_MEMORY_MIB = 64
+MEMORY_BUDGET_MIB = DEMO_APP_MEMORY_BUDGET_MIB + DEMO_STUB_MEMORY_MIB
 FULL_MEMORY_CEILING_MIB = 8 * 1024
 HEALTHCONTRACT_PATHS = {"/healthz", "/readyz"}
+#: 模拟外部系统自带的探针路径（不属 C13 业务契约）
+STUB_HEALTH_PATH = "/stub/healthz"
 
 TAG_PATTERN = r"^\s*ERP_IMAGE_TAG=(.*)$"
 
@@ -178,17 +187,24 @@ class ComposeStaticTest(unittest.TestCase):
         )
 
     def test_profiles_partition(self):
-        """demo 档 5 个服务，full 档额外 7 个；两档都覆盖的常驻服务列 demo+full。"""
+        """demo 档 6 个服务，full 档额外 7 个；两档都覆盖的常驻服务列 demo+full。"""
         for name in DEMO_SERVICES:
             with self.subTest(service=name):
                 profiles = self.services[name]["profiles"]
                 self.assertIn("demo", profiles)
-                if name != "worker":  # full 档把 worker 拆成 worker-agent/worker-io
+                # full 档把 worker 拆成 worker-agent/worker-io；u8-stub 是演示专用
+                if name not in DEMO_ONLY_SERVICES:
                     self.assertIn("full", profiles, f"{name} 在 full 档也要常驻")
         for name in FULL_ONLY_SERVICES:
             with self.subTest(service=name):
                 self.assertEqual(self.services[name]["profiles"], ["full"])
-        self.assertEqual(self.services["worker"]["profiles"], ["demo"])
+        for name in DEMO_ONLY_SERVICES:
+            with self.subTest(service=name):
+                self.assertEqual(
+                    self.services[name]["profiles"],
+                    ["demo"],
+                    f"{name} 只属于 demo 档（full/生产不能起桩）",
+                )
 
     def test_profiles_are_exactly_demo_and_full(self):
         """T802 档位口径：只有 demo / full 两档；`--profile` 不接受其它取值（不存在 ops 档）。"""
@@ -202,21 +218,37 @@ class ComposeStaticTest(unittest.TestCase):
         )
 
     def test_demo_memory_budget(self):
-        """§1A.3：demo 档常驻合计恰好 1200MiB；full 档另算（≤8G 整机）。"""
-        total = 0.0
+        """§1A.3：demo 业务容器合计恰好 1200MiB；u8-stub 另计 64MiB；full 档另算（≤8G 整机）。"""
         demo_total = 0.0
+        full_total = 0.0
+        app_total = 0.0
         for name, svc in self.services.items():
             with self.subTest(service=name):
                 self.assertIn("mem_limit", svc, f"{name} 必须显式声明 mem_limit")
                 # 不放水：不用 memswap_limit（§1A.3）
                 self.assertNotIn("memswap_limit", svc)
                 size = _parse_mib(svc["mem_limit"])
-                total += size
                 if "demo" in svc["profiles"]:
                     demo_total += size
-        self.assertEqual(demo_total, MEMORY_BUDGET_MIB, "demo 档内存预算应与 §1A.3 的 1200MiB 对齐")
+                    if name != "u8-stub":
+                        app_total += size
+                if "full" in svc["profiles"]:
+                    full_total += size
+        self.assertEqual(
+            app_total, DEMO_APP_MEMORY_BUDGET_MIB, "demo 业务容器预算应与 §1A.3 的 1200MiB 对齐"
+        )
+        self.assertEqual(
+            _parse_mib(self.services["u8-stub"]["mem_limit"]),
+            DEMO_STUB_MEMORY_MIB,
+            "u8-stub 的限额必须保持 64MiB（演示桩，不占业务预算）",
+        )
+        self.assertEqual(demo_total, MEMORY_BUDGET_MIB, "demo 档内存预算 = 1200 业务 + 64 桩")
+        # 档位互斥（RUNBOOK：禁止 demo/full 混跑），因此按单档计量上限；
+        # 两档相加会把 worker 与 worker-agent/worker-io 这组互斥实现重复计入。
         self.assertLessEqual(
-            total, FULL_MEMORY_CEILING_MIB, f"两档服务合计 {total:.0f}MiB 超过 8G 整机预算"
+            max(demo_total, full_total),
+            FULL_MEMORY_CEILING_MIB,
+            f"单档明细最大 {max(demo_total, full_total):.0f}MiB 超过 8G 整机预算",
         )
 
     def test_full_profile_topology(self):
@@ -418,6 +450,40 @@ class ComposeStaticTest(unittest.TestCase):
         self.assertNotIn("ports", self.services["scheduler"], "8011 不得发布到宿主")
         self.assertIn("8012", [str(p) for p in gw.get("expose", [])])
 
+        # 演示桩只绑宿主回环：它没有任何鉴权，不能对公网开放
+        stub_ports = self.services["u8-stub"].get("ports", [])
+        self.assertTrue(stub_ports, "u8-stub 需发布回环端口，演示时才能 curl /stub/requests 取证")
+        self.assertTrue(
+            all("127.0.0.1" in p for p in stub_ports), "u8-stub 的端口必须只绑 127.0.0.1"
+        )
+
+    def test_u8_stub_wiring(self):
+        """演示写路径一条命令：u8-stub 只在 demo 档，api 的 ERP_U8_BASE_URL 默认指向它。
+
+        关键约束：桩没起来时写入必须**显式失败**，所以 api **不得** depends_on u8-stub
+        ——否则「不起桩」场景下 api 根本起不来，演示不出失败路径。
+        """
+
+        stub = self.services["u8-stub"]
+        self.assertEqual(stub["profiles"], ["demo"], "桩只挂 demo，不能进 full 档")
+        command = " ".join(str(part) for part in stub["command"])
+        self.assertIn("apps.connectors.u8.stub_server", command, "必须复用仓库内的桩入口")
+        self.assertIn("--port=8021", command)
+        # 端口不得与已用端口撞车
+        for used in ("8010", "8011", "8012", "8013", "8020", "8088", "9093"):
+            self.assertNotIn(f"--port={used}", command, f"桩不能占用已用端口 {used}")
+
+        env = self.services["api"]["environment"]
+        self.assertEqual(
+            env["ERP_U8_BASE_URL"],
+            "${ERP_U8_BASE_URL:-http://u8-stub:8021}",
+            "api 必须注入 ERP_U8_BASE_URL 且默认指向栈内桩（容器网络内地址）",
+        )
+        depends = self.services["api"].get("depends_on") or {}
+        self.assertNotIn(
+            "u8-stub", depends, "api 不得依赖 u8-stub：桩没起来时 api 仍要能启动并显式失败"
+        )
+
     def test_networks(self):
         networks = self.compose["networks"]
         self.assertEqual(networks["smart-erp-net"]["name"], "smart-erp_net")
@@ -429,7 +495,7 @@ class ComposeStaticTest(unittest.TestCase):
         for name in ("api", "worker", "scheduler", "worker-agent", "worker-io", "migrate"):
             with self.subTest(service=name):
                 self.assertIn("erp-db-net", self.services[name].get("networks", []))
-        for name in ("connector-gw", "web", "doc", "prometheus", "alertmanager"):
+        for name in ("connector-gw", "web", "doc", "prometheus", "alertmanager", "u8-stub"):
             with self.subTest(service=name):
                 self.assertNotIn("erp-db-net", self.services[name].get("networks", []))
 
@@ -470,6 +536,18 @@ class ComposeStaticTest(unittest.TestCase):
                 if name in ("worker", "worker-agent", "worker-io", "scheduler"):
                     # 心跳探针：不依赖 HTTP，也不触发业务写
                     self.assertIn("tools.health", command)
+                    continue
+
+                if name == "u8-stub":
+                    # 模拟外部系统：只探它自己的 /stub/healthz，不受 C13 业务契约约束
+                    urls = re.findall(r"https?://[^\s'\"]+", command)
+                    self.assertTrue(urls, "u8-stub 的 healthcheck 未指向 HTTP 路径")
+                    for url in urls:
+                        self.assertEqual(
+                            urlparse(url).path,
+                            STUB_HEALTH_PATH,
+                            "u8-stub 只能探 /stub/healthz（探 /healthz 会永远超时）",
+                        )
                     continue
 
                 urls = re.findall(r"https?://[^\s'\"]+", command)

@@ -864,13 +864,18 @@
       "type": "string",
       "scope": "compose",
       "services": [
+        "api",
         "connector-gw"
       ],
       "required": false,
       "secret": false,
       "phase": "startup",
       "default": "http://u8.invalid",
-      "description": "U8 连接器基地址；占位域名不可解析，生产必须覆盖"
+      "defaultsByService": {
+        "api": "http://u8-stub:8021",
+        "connector-gw": "http://u8.invalid"
+      },
+      "description": "U8 连接器基地址。api 缺省指向栈内 u8-stub（模拟外部系统，不是真 U8；桩没起来时写入显式失败，不会伪造成功），full/生产必须显式覆盖为真实地址；connector-gw 缺省为不可解析占位域名"
     },
     "ERP_WEB_BASE": {
       "type": "string",

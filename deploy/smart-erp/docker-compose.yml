@@ -6,6 +6,8 @@
 #
 # 档位差异（与 §1A.3 差异表一致）：
 #   demo：api / worker（agent+io 合一）/ scheduler / connector-gw / web，合计 1200MiB；
+#         + u8-stub（64MiB，**模拟外部系统**，演示跨系统写入/回滚用；不是真 U8），
+#           故 demo 档显式限额合计 1264MiB（1200 业务 + 64 桩）；
 #   full：demo 全部 + doc（3G）/ worker-agent（2G）/ worker-io（1G）/ migrate（一次性）
 #         / compensation（256m，补偿执行器）/ prometheus（320m，规则评估）
 #         / alertmanager（96m，告警接收）。
@@ -90,6 +92,10 @@ services:
       ERP_API_PORT: ${ERP_API_PORT:-8010}
       ERP_API_ROOT_PATH: ${ERP_API_ROOT_PATH:-/erp/api}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
+      # U8 基地址：缺省指向栈内 u8-stub（**模拟外部系统，不是真 U8**，见该服务注释）。
+      # 桩没起来时写入会显式失败（连接错误 → 5xx E-CONN-UNAVAILABLE），不会静默成功。
+      # full/生产必须显式覆盖为真实地址；本键是唯一的写出口连接点。
+      ERP_U8_BASE_URL: ${ERP_U8_BASE_URL:-http://u8-stub:8021}
       ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
       ERP_OBJECT_STORE_PATH: ${ERP_OBJECT_STORE_PATH:-/data/objects}
       ERP_S3_ENDPOINT: ${ERP_S3_ENDPOINT:-}
@@ -344,6 +350,51 @@ services:
     logging: *default-logging
 
   # ---------------------------------------------------------------------------
+  # u8-stub：**模拟外部系统**，只用于演示「跨系统写入 + 可审计回滚」
+  # **不是 U8、也不是任何真实 ERP**：启动横幅、响应体 simulated 字段、
+  # X-Simulated-System 响应头都标注模拟；端口 8021 只 expose 内网，不发布宿主。
+  # 只挂 demo：full/生产档的 ERP_U8_BASE_URL 指向真实系统，在那里起桩等于伪造写入。
+  # 不设 api 对它的 depends_on —— 演示「桩没起来时写入显式失败」需要它们彼此独立。
+  # 预算 64m / 0.1 核（纯标准库 http.server，无外部依赖）
+  # ---------------------------------------------------------------------------
+  u8-stub:
+    profiles: ["demo"]
+    image: *app-image
+    container_name: erp_u8_stub
+    restart: unless-stopped
+    stop_grace_period: 10s
+    # 与 apps/connectors/u8/stub_server.py 的 argparse 对齐（--host/--port）；
+    # 不用默认 8013：8013 已被 full 档 compensation 占用。
+    command:
+      - python
+      - -m
+      - apps.connectors.u8.stub_server
+      - --host=0.0.0.0
+      - --port=8021
+    # 桩不读写库、不连队列，因此**不继承 x-app-env**：它只需要无缓冲输出，
+    # 少注入一个 ERP_ 键就少一处需要登记的配置面。
+    environment:
+      PYTHONUNBUFFERED: "1"
+    networks:
+      - smart-erp-net
+    # 只绑宿主回环，供演示时直接 curl /stub/requests、/stub/receipts 取证
+    # （容器网络内的 api 走 http://u8-stub:8021，不经过这里）。
+    # 不要改成 0.0.0.0：桩没有任何鉴权，一旦上公网就是一个可写的外部系统。
+    ports:
+      - "127.0.0.1:8021:8021"
+    mem_limit: 64m
+    cpus: 0.1
+    healthcheck:
+      # 桩自己的探针路径（/stub/healthz 返回 simulated=true）；它不是本仓库的
+      # 业务服务，因此不走 C13 的 /healthz 契约。
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8021/stub/healthz', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
   # web：自带 nginx 的静态产物，子路径部署 base=/demo/smart-erp/
   # 预算 48m / 0.1 核；8088:8080 仅香港反代访问
   # ---------------------------------------------------------------------------
@@ -548,7 +599,7 @@ services:
     logging: *default-logging
 
   # ---------------------------------------------------------------------------
-  # prometheus：规则评估器（full 档专属；demo 档不装监控，保持 1200MiB 预算）
+  # prometheus：规则评估器（full 档专属；demo 档不装监控，预算里没有评估器的分量）
   # 「规则不评估 = 规则不存在」：没有本进程时 alerts.rules.yaml 只是文本。
   # 规则文件直接挂仓库内的 observability/alerts.rules.yaml，不复制副本（单一事实源）。
   # 只挂 smart-erp-net：不需要 DB 网络。
