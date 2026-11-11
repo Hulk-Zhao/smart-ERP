@@ -623,11 +623,24 @@ jobs:
           tag="ci-${GITHUB_SHA}"
           image="smart-erp/${{ matrix.image }}:${tag}"
           case "${{ matrix.image }}" in
-            app)          docker run --rm "$image" python -c "import apps.main" ;;
-            connector-gw) docker run --rm "$image" python -c "import apps.connectors.gateway" ;;
-            doc)          docker run --rm --entrypoint python "$image" \
-                            -c "import apps.docparse, pypdfium2" ;;
-            web)          docker run --rm --entrypoint nginx "$image" -t ;;
+            app)
+              # 同一镜像被 api / worker / scheduler / migrate 四个 command 使用；
+              # 只 import apps.main 等于只守了 api，漏包换个入口照样复发。
+              docker run --rm "$image" python -c \
+                "import apps.main, core.runtime.worker, core.runtime.scheduler"
+              docker run --rm --entrypoint alembic "$image" --version
+              ;;
+            connector-gw)
+              docker run --rm "$image" python -c "import apps.connectors.gateway"
+              ;;
+            doc)
+              # CMD 跑的是脚本而不是模块：以非 __main__ 执行，等价导入该入口的全部依赖
+              docker run --rm --entrypoint python "$image" -c \
+                "import runpy, pypdfium2; runpy.run_path('/app/docparse_service.py', run_name='__smoke__')"
+              ;;
+            web)
+              docker run --rm --entrypoint nginx "$image" -t
+              ;;
           esac
 
   # ---------------------------------------------------------------------------
