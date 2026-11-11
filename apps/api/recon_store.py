@@ -27,7 +27,10 @@ from uuid import UUID, uuid4
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
+from apps.api.pagination import decode_cursor, encode_cursor
 from apps.api.recon_snapshot import BatchSnapshot, SnapshotLine, UnitPriceSource
+from apps.platform.api.errors import ProblemError
+from apps.platform.contracts.errors import ErrorCode
 
 EVENT_WINDOW_SECONDS = 600
 
@@ -61,12 +64,39 @@ class ReconEvent:
     created_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class BatchSummary:
+    """批次列表项：计数与详情同源（同一份 ``result_view``），不另算一遍。
+
+    ``line_count`` / ``diff_count`` / ``diff_amount`` 为 ``None`` 表示该批次没有
+    可读投影（0007 之前写入的旧批次）——不伪造 0，也不从 ``recon_line`` 反推。
+    """
+
+    batch_id: UUID
+    status: str
+    line_count: int | None
+    diff_count: int | None
+    diff_amount: str | None
+    created_at: datetime
+
+
 class ReconStore(Protocol):
     async def save(self, snapshot: BatchSnapshot) -> None: ...
 
     async def load(self, batch_id: UUID, tenant_id: UUID) -> BatchSnapshot | None: ...
 
     async def append_event(self, event: NewEvent, *, now: datetime | None = None) -> ReconEvent: ...
+
+    async def list_batches(
+        self,
+        *,
+        tenant_id: UUID,
+        org_id: str,
+        period: str,
+        system_ids: frozenset[str],
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[BatchSummary], str | None]: ...
 
 
 # --------------------------------------------------------------------------- 序列化
@@ -181,6 +211,101 @@ def event_dedupe_key(
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def summary_from_parts(
+    *,
+    batch_id: UUID,
+    status: str,
+    created_at: datetime,
+    view: Mapping[str, Any] | None,
+    metrics: Mapping[str, Any] | None,
+) -> BatchSummary:
+    """列表计数只读详情同一份投影（``view.batch``），读不到就留 ``None``。
+
+    不从 ``recon_line`` 反推、不拿列上另一份 ``metrics`` 兜底成 0——「列表算一遍、
+    详情算一遍」正是要避免的第二真源。仅当投影缺失时退回写入时的 ``metrics``
+    列（同一时刻、同一对象序列化的同一份数据）。
+    """
+
+    batch = view.get("batch") if isinstance(view, Mapping) else None
+    batch = batch if isinstance(batch, Mapping) else None
+    projected_metrics = batch.get("metrics") if batch is not None else None
+    chosen = projected_metrics if isinstance(projected_metrics, Mapping) else metrics
+    chosen = chosen if isinstance(chosen, Mapping) else None
+    raw_diff_count = batch.get("diff_count") if batch is not None else None
+    raw_lines = chosen.get("supplier_lines") if chosen is not None else None
+    raw_amount = chosen.get("diff_amount") if chosen is not None else None
+    return BatchSummary(
+        batch_id=batch_id,
+        status=str(batch.get("status") if batch is not None else status),
+        line_count=None if raw_lines is None else int(raw_lines),
+        diff_count=None if raw_diff_count is None else int(raw_diff_count),
+        diff_amount=None if raw_amount is None else str(raw_amount),
+        created_at=created_at,
+    )
+
+
+def summary_from_stored(payload: Mapping[str, Any]) -> BatchSummary:
+    return summary_from_parts(
+        batch_id=UUID(str(payload["batch_id"])),
+        status=str(payload["status"]),
+        created_at=datetime.fromisoformat(str(payload["created_at"])),
+        view=payload.get("view"),
+        metrics=payload.get("metrics"),
+    )
+
+
+def summary_from_snapshot(snapshot: BatchSnapshot) -> BatchSummary:
+    return summary_from_parts(
+        batch_id=snapshot.batch_id,
+        status=snapshot.status,
+        created_at=snapshot.created_at,
+        view=snapshot.view,
+        metrics=snapshot.metrics,
+    )
+
+
+def _matches_scope(
+    *,
+    org_id: str,
+    period: str,
+    system_ids: tuple[str, ...],
+    want_org: str,
+    want_period: str,
+    want_systems: frozenset[str],
+) -> bool:
+    return (
+        org_id == want_org
+        and period == want_period
+        and set(system_ids) <= set(want_systems)
+    )
+
+
+def _keyset_page(
+    rows: list[BatchSummary], cursor: str | None, limit: int
+) -> tuple[list[BatchSummary], str | None]:
+    """``(created_at, batch_id)`` 降序键集分页；与 SQL 实现同一排序键。"""
+
+    rows.sort(key=lambda row: (row.created_at, row.batch_id), reverse=True)
+    if cursor is not None:
+        payload = decode_cursor(cursor)
+        after_t, after_i = payload.get("t"), payload.get("i")
+        if not isinstance(after_t, str) or not isinstance(after_i, str):
+            raise ProblemError(ErrorCode.PARSE_FAILED, "cursor 非法：缺少 t/i")
+        try:
+            after = (datetime.fromisoformat(after_t), UUID(after_i))
+        except ValueError as exc:
+            raise ProblemError(ErrorCode.PARSE_FAILED, f"cursor 非法: {exc}") from exc
+        rows = [row for row in rows if (row.created_at, row.batch_id) < after]
+    window = rows[:limit]
+    next_cursor = None
+    if len(rows) > limit:
+        last = window[-1]
+        next_cursor = encode_cursor(
+            {"t": last.created_at.isoformat(), "i": str(last.batch_id)}
+        )
+    return window, next_cursor
+
+
 # --------------------------------------------------------------------------- 文件/内存实现
 
 
@@ -216,6 +341,26 @@ class FileReconStore:
         if row is None or row["tenant_id"] != str(tenant_id):
             return None
         return snapshot_from_dict(row)
+
+    async def list_batches(
+        self,
+        *,
+        tenant_id: UUID,
+        org_id: str,
+        period: str,
+        system_ids: frozenset[str],
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[BatchSummary], str | None]:
+        rows = [
+            summary_from_stored(row)
+            for row in self._read()["batches"].values()
+            if row["tenant_id"] == str(tenant_id)
+            and row["org_id"] == org_id
+            and row["period"] == period
+            and set(row["system_ids"]) <= set(system_ids)
+        ]
+        return _keyset_page(rows, cursor, limit)
 
     async def append_event(
         self, event: NewEvent, *, now: datetime | None = None
@@ -277,6 +422,26 @@ class InMemoryReconStore:
         if snapshot is None or snapshot.tenant_id != tenant_id:
             return None
         return snapshot
+
+    async def list_batches(
+        self,
+        *,
+        tenant_id: UUID,
+        org_id: str,
+        period: str,
+        system_ids: frozenset[str],
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[BatchSummary], str | None]:
+        rows = [
+            summary_from_snapshot(snapshot)
+            for snapshot in self._batches.values()
+            if snapshot.tenant_id == tenant_id
+            and snapshot.in_scope(
+                org_id=org_id, period=period, system_ids=tuple(system_ids)
+            )
+        ]
+        return _keyset_page(rows, cursor, limit)
 
     async def append_event(
         self, event: NewEvent, *, now: datetime | None = None
@@ -506,6 +671,99 @@ class SqlReconStore:
             if batch["unit_price_source"] is None
             else UnitPriceSource.parse(str(batch["unit_price_source"])),
             price_book_id=batch["price_book_id"],
+        )
+
+    async def list_batches(
+        self,
+        *,
+        tenant_id: UUID,
+        org_id: str,
+        period: str,
+        system_ids: frozenset[str],
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[BatchSummary], str | None]:
+        """租户/组织/期间/系统全部进 WHERE；计数取自详情同一份 ``result_view``。
+
+        键集分页按 ``(created_at, id)`` 降序，与工单列表同一约定；cursor 里的
+        时间与 UUID 都显式 CAST，避免退化成文本比较导致丢行。
+        """
+
+        params: dict[str, Any] = {
+            "tenant_id": tenant_id,
+            "org_id": org_id,
+            "period": period,
+            "system_ids": list(system_ids),
+            "limit": limit + 1,
+        }
+        keyset = ""
+        if cursor is not None:
+            payload = decode_cursor(cursor)
+            after_t, after_i = payload.get("t"), payload.get("i")
+            if not isinstance(after_t, str) or not isinstance(after_i, str):
+                raise ProblemError(ErrorCode.PARSE_FAILED, "cursor 非法：缺少 t/i")
+            try:
+                params["after_t"] = datetime.fromisoformat(after_t)
+                params["after_i"] = UUID(after_i)
+            except ValueError as exc:
+                raise ProblemError(ErrorCode.PARSE_FAILED, f"cursor 非法: {exc}") from exc
+            keyset = """
+              AND (created_at, id) <
+                  (CAST(:after_t AS timestamptz), CAST(:after_i AS uuid))
+            """
+        factory = self._factory()
+        async with factory() as session:
+            rows = (
+                await session.execute(
+                    sa.text(
+                        f"""
+                        SELECT id, status, created_at,
+                               result_view -> 'batch' ->> 'diff_count' AS diff_count,
+                               result_view -> 'batch' -> 'metrics' ->> 'supplier_lines'
+                                 AS line_count,
+                               result_view -> 'batch' -> 'metrics' ->> 'diff_amount'
+                                 AS diff_amount
+                        FROM erp.recon_batch
+                        WHERE tenant_id = :tenant_id
+                          AND org_id = :org_id
+                          AND period = :period
+                          AND system_ids IS NOT NULL
+                          AND system_ids <@ CAST(:system_ids AS text[])
+                        {keyset}
+                        ORDER BY created_at DESC, id DESC
+                        LIMIT :limit
+                        """
+                    ),
+                    params,
+                )
+            ).mappings().all()
+
+        window = rows[:limit]
+        next_cursor = None
+        if len(rows) > limit:
+            last = window[-1]
+            next_cursor = encode_cursor(
+                {"t": last["created_at"].isoformat(), "i": str(last["id"])}
+            )
+        return (
+            [
+                BatchSummary(
+                    batch_id=row["id"],
+                    status=str(row["status"]),
+                    line_count=None
+                    if row["line_count"] is None
+                    else int(row["line_count"]),
+                    diff_count=None
+                    if row["diff_count"] is None
+                    else int(row["diff_count"]),
+                    diff_amount=None
+                    if row["diff_amount"] is None
+                    else str(row["diff_amount"]),
+                    created_at=row["created_at"],
+                )
+                for row in window
+            ],
+            next_cursor,
         )
 
     async def append_event(

@@ -1,15 +1,15 @@
 /**
  * 本文件由 `node scripts/gen-api-types.mjs` 从 C16 冻结契约生成，请勿手改。
  * 源文件：contracts/api/product_api.openapi.v1.json
- * 契约 sha256：6e47f28a034e175f8214691afa6780086fc68f5bdedeb8e1276fb101511d3e67
+ * 契约 sha256：3d27c6cd05d38d538266880242fbbc3a2ae3c3cd677441d88f32075cf9a0905f
  * 契约版本：1.0.0 · C16
  *
  * 契约变更流程：后端重新生成契约 → 执行 `npm run gen:api` → 评审类型差异。
  */
 
-export const CONTRACT_SHA256 = "6e47f28a034e175f8214691afa6780086fc68f5bdedeb8e1276fb101511d3e67";
+export const CONTRACT_SHA256 = "3d27c6cd05d38d538266880242fbbc3a2ae3c3cd677441d88f32075cf9a0905f";
 export const CONTRACT_VERSION = "1.0.0";
-export const CONTRACT_PATH_COUNT = 18;
+export const CONTRACT_PATH_COUNT = 19;
 
 /** 写接口（POST）路径；前端统一补 Idempotency-Key。 */
 export const WRITE_PATHS = ["/v1/approvals/{ticket_id}/approve","/v1/approvals/{ticket_id}/reject","/v1/recon/runs","/v1/tickets/{ticket_id}/actions/approve","/v1/tickets/{ticket_id}/actions/cancel","/v1/tickets/{ticket_id}/actions/compensate","/v1/tickets/{ticket_id}/actions/reject"] as const;
@@ -253,6 +253,11 @@ export interface PageAuditImageOut {
   next_cursor?: string | null;
 }
 
+export interface PageReconBatchSummaryOut {
+  items: ReconBatchSummaryOut[];
+  next_cursor?: string | null;
+}
+
 export interface PageReconDiffOut {
   items: ReconDiffOut[];
   next_cursor?: string | null;
@@ -277,6 +282,18 @@ export interface ReconBatchOut {
   status_reason: string;
   suppliers: string[];
   system_ids: string[];
+}
+
+/**
+ * 批次列表项。计数与详情同源；``None`` = 旧批次无可读投影，不伪造 0。
+ */
+export interface ReconBatchSummaryOut {
+  batch_id: string;
+  created_at: string;
+  diff_amount?: string | null;
+  diff_count?: number | null;
+  line_count?: number | null;
+  status: string;
 }
 
 /**
@@ -574,6 +591,17 @@ export interface ApiOperations {
   };
     body: never;
     response: MeteringStatementOut;
+  };
+  "GET /v1/recon/batches": {
+    query: {
+    cursor?: string | null;
+    limit?: number | null;
+    org_id: string;
+    period: string;
+    system_ids: string[];
+  };
+    body: never;
+    response: PageReconBatchSummaryOut;
   };
   "POST /v1/recon/runs": {
     query: never;

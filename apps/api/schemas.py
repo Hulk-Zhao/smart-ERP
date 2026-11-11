@@ -348,6 +348,17 @@ class ReconBatchOut(BaseModel):
     created_at: datetime
 
 
+class ReconBatchSummaryOut(BaseModel):
+    """批次列表项。计数与详情同源；``None`` = 旧批次无可读投影，不伪造 0。"""
+
+    batch_id: UUID
+    status: str
+    line_count: int | None = None
+    diff_count: int | None = None
+    diff_amount: str | None = None
+    created_at: datetime
+
+
 class ReconLineResultOut(BaseModel):
     item: str | None = None
     qty_mine: str | None = None

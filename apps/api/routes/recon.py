@@ -21,6 +21,7 @@ from apps.api.schemas import (
     BillingBucket,
     Page,
     ReconBatchOut,
+    ReconBatchSummaryOut,
     ReconDiffDetailOut,
     ReconDiffOut,
     ReconRunIn,
@@ -64,6 +65,36 @@ async def create_run(
             action=action,
         )
     return JSONResponse(status_code=status_code, content=payload)
+
+
+@router.get(
+    "/batches",
+    response_model=Page[ReconBatchSummaryOut],
+    summary="批次列表",
+    description=(
+        "按 `(created_at, id)` 键集分页（倒序），租户/组织/期间/系统全部下推到查询条件。"
+        "行数、差异数、差异金额取自与 `GET /recon/runs/{batch_id}` 同一份持久化投影，"
+        "不另算一遍；旧批次没有投影时相应字段为 `null`，不伪造 0。\n\n"
+        "**空态语义**：`items: []` 只表示该 scope 下确实没有批次；scope 越权返回 "
+        "403 `E-AUTHZ-001`，绝不用空数组冒充「没有权限」。"
+    ),
+)
+async def list_batches(
+    container: ContainerDep,
+    session: SessionDep,
+    scope: ScopeDep,
+    cursor: Annotated[str | None, Query(description="上一页返回的 next_cursor")] = None,
+    limit: PageLimit = None,
+):
+    with translated():
+        items, next_cursor = await service.list_recon_batches(
+            container,
+            session,
+            scope_in=scope.payload,
+            cursor=cursor,
+            limit=limit,
+        )
+    return Page[ReconBatchSummaryOut](items=items, next_cursor=next_cursor)
 
 
 @router.get(
