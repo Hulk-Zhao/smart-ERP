@@ -2210,6 +2210,81 @@
         "title": "SessionScopeOut",
         "type": "object"
       },
+      "SuggestIn": {
+        "additionalProperties": false,
+        "description": "助手建议入参；本期只支持 ``next_action`` 一类。",
+        "properties": {
+          "kind": {
+            "const": "next_action",
+            "default": "next_action",
+            "title": "Kind",
+            "type": "string"
+          },
+          "ticket_id": {
+            "format": "uuid",
+            "title": "Ticket Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket_id"
+        ],
+        "title": "SuggestIn",
+        "type": "object"
+      },
+      "SuggestOut": {
+        "description": "助手建议出参；降级时 ``source=\"rule\"`` 且带 ``fallback_reason``。",
+        "properties": {
+          "fallback_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Reason"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "source": {
+            "enum": [
+              "llm",
+              "rule"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "suggestion": {
+            "title": "Suggestion",
+            "type": "string"
+          }
+        },
+        "required": [
+          "suggestion",
+          "reasons",
+          "source",
+          "model",
+          "generated_at"
+        ],
+        "title": "SuggestOut",
+        "type": "object"
+      },
       "SupplierMasterIn": {
         "additionalProperties": false,
         "properties": {
@@ -3006,6 +3081,48 @@
         "summary": "审批驳回",
         "tags": [
           "审批"
+        ]
+      }
+    },
+    "/v1/assistant/suggest": {
+      "post": {
+        "description": "只读建议：不写库、不执行外部动作；LLM 不可用时降级为规则建议。",
+        "operationId": "suggest_v1_assistant_suggest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuggestIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuggestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Suggest",
+        "tags": [
+          "助手"
         ]
       }
     },

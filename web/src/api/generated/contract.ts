@@ -1,18 +1,18 @@
 /**
  * 本文件由 `node scripts/gen-api-types.mjs` 从 C16 冻结契约生成，请勿手改。
  * 源文件：contracts/api/product_api.openapi.v1.json
- * 契约 sha256：2167554becf596c0545e7243a66fcdb63f0c6157b6a64f3da521f536b37992c9
+ * 契约 sha256：94f9914154a275dbbc81120cdf5fd7baa9c3f2a3091f788e26bae72dd78a96bf
  * 契约版本：1.0.0 · C16
  *
  * 契约变更流程：后端重新生成契约 → 执行 `npm run gen:api` → 评审类型差异。
  */
 
-export const CONTRACT_SHA256 = "2167554becf596c0545e7243a66fcdb63f0c6157b6a64f3da521f536b37992c9";
+export const CONTRACT_SHA256 = "94f9914154a275dbbc81120cdf5fd7baa9c3f2a3091f788e26bae72dd78a96bf";
 export const CONTRACT_VERSION = "1.0.0";
-export const CONTRACT_PATH_COUNT = 19;
+export const CONTRACT_PATH_COUNT = 20;
 
 /** 写接口（POST）路径；前端统一补 Idempotency-Key。 */
-export const WRITE_PATHS = ["/v1/approvals/{ticket_id}/approve","/v1/approvals/{ticket_id}/reject","/v1/recon/runs","/v1/tickets/{ticket_id}/actions/approve","/v1/tickets/{ticket_id}/actions/cancel","/v1/tickets/{ticket_id}/actions/compensate","/v1/tickets/{ticket_id}/actions/reject"] as const;
+export const WRITE_PATHS = ["/v1/approvals/{ticket_id}/approve","/v1/approvals/{ticket_id}/reject","/v1/assistant/suggest","/v1/recon/runs","/v1/tickets/{ticket_id}/actions/approve","/v1/tickets/{ticket_id}/actions/cancel","/v1/tickets/{ticket_id}/actions/compensate","/v1/tickets/{ticket_id}/actions/reject"] as const;
 
 /**
  * 工单动作入参；``comment`` 同时承担审批意见 / 终止原因（FR-107）。
@@ -438,6 +438,26 @@ export interface SessionScopeOut {
   system_ids: string[];
 }
 
+/**
+ * 助手建议入参；本期只支持 ``next_action`` 一类。
+ */
+export interface SuggestIn {
+  kind?: string;
+  ticket_id: string;
+}
+
+/**
+ * 助手建议出参；降级时 ``source="rule"`` 且带 ``fallback_reason``。
+ */
+export interface SuggestOut {
+  fallback_reason?: string | null;
+  generated_at: string;
+  model: string;
+  reasons: string[];
+  source: "llm" | "rule";
+  suggestion: string;
+}
+
 export interface SupplierMasterIn {
   aliases?: string[];
   code: string;
@@ -556,6 +576,11 @@ export interface ApiOperations {
     query: never;
     body: ApprovalDecisionIn;
     response: ApprovalDecisionOut;
+  };
+  "POST /v1/assistant/suggest": {
+    query: never;
+    body: SuggestIn;
+    response: SuggestOut;
   };
   "GET /v1/audit/export": {
     query: {

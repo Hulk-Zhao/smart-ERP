@@ -23,11 +23,14 @@ from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
+from starlette.concurrency import run_in_threadpool
+
 from apps.agents.state_machine import (
     COMPENSATE_FAIL_CODES,
     TransitionContext,
     resolve_transition,
 )
+from apps.api.assistant import AssistantService, Suggestion
 from apps.api.container import ApiContainer
 from apps.api.metering import (
     MONEY_EXP,
@@ -255,6 +258,44 @@ def _require_ticket_in_scope(ticket: TicketRecord, scope: Scope) -> None:
             ErrorCode.AUTHZ_SCOPE,
             f"工单 {ticket.ticket_no} 涉及系统 {list(ticket.systems)} 超出请求 scope",
         )
+
+
+def _require_ticket_in_grant(ticket: TicketRecord, session: SessionToken) -> None:
+    """同租户内的授权范围校验：默认 scope 来自令牌授权，不来自请求参数。
+
+    跨租户在 ``_require_ticket`` 已经 404；这里只处理「同租户但令牌授权不覆盖」，
+    与其它读接口的 403 ``E-AUTHZ-001`` 分档一致。
+    """
+
+    grant = session.grant
+    if ticket.org_id not in grant.org_ids or ticket.period not in grant.periods:
+        raise ProblemError(
+            ErrorCode.AUTHZ_SCOPE,
+            f"工单 {ticket.ticket_no} 不在当前令牌授权的组织/期间内",
+        )
+    if ticket.systems is None or not set(ticket.systems) <= set(grant.system_ids):
+        raise ProblemError(
+            ErrorCode.AUTHZ_SCOPE,
+            f"工单 {ticket.ticket_no} 涉及系统超出当前令牌授权范围",
+        )
+
+
+async def suggest_next_action(
+    container: ApiContainer, session: SessionToken, ticket_id: UUID
+) -> Suggestion:
+    """「这张工单下一步怎么处理」建议：租户隔离 → 授权范围 → 限流 → LLM/规则。"""
+
+    ticket = await _require_ticket(container, session, ticket_id)
+    _require_ticket_in_grant(ticket, session)
+
+    service = container.assistant
+    if service is None:
+        service = AssistantService.from_env()
+        container.assistant = service
+
+    return await run_in_threadpool(
+        service.suggest, ticket=ticket, tenant_id=session.tenant_id
+    )
 
 
 def _require_initiator(ticket: TicketRecord, session: SessionToken) -> None:

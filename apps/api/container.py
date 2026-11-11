@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from apps.api.approval_sql import ApprovalStorePort
+from apps.api.assistant import AssistantService
 from apps.api.audit_integrity import AuditIntegrityScanner
 from apps.api.errors import IdemConflict
 from apps.api.metering import MeteringPolicy
@@ -126,6 +127,8 @@ class ApiContainer:
     metrics: MetricsRegistry = field(default_factory=MetricsRegistry)
     #: 合同价目取价端口；None 时使用 PostgreSQL 实现（测试注入假实现，不连库）。
     price_book: PriceBookLookup | None = None
+    #: 助手建议（LLM + 规则降级）；None 时首次使用时按环境装配，测试可注入 stub。
+    assistant: AssistantService | None = None
     clock: Callable[[], datetime] = field(
         default=lambda: datetime.now(UTC)
     )

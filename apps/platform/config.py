@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from uuid import UUID
 
@@ -73,6 +73,11 @@ class Settings:
     demo_session_org_ids: tuple[str, ...] = ()
     demo_session_periods: tuple[str, ...] = ()
     demo_session_system_ids: tuple[str, ...] = ()
+    #: 助手建议（OpenAI 兼容）：密钥不参与 repr，日志只打主机名与模型名。
+    llm_base_url: str = ""
+    llm_api_key: str = field(default="", repr=False)
+    llm_model: str = ""
+    assistant_rate_limit_per_minute: int = 10
 
     def __post_init__(self) -> None:
         if not self.database_url.startswith("postgresql+asyncpg://"):
@@ -86,6 +91,8 @@ class Settings:
             raise ConfigError("连接池预算必须为正（api 4+4 / worker 4 / scheduler 1）")
         if self.statement_timeout_ms <= 0 or self.lock_timeout_ms <= 0:
             raise ConfigError("statement_timeout / lock_timeout 必须为正整数毫秒")
+        if self.assistant_rate_limit_per_minute < 1:
+            raise ConfigError("ERP_ASSISTANT_RATE_LIMIT_PER_MINUTE 必须 >= 1")
         self._validate_demo_session()
 
     def _validate_demo_session(self) -> None:
@@ -148,6 +155,12 @@ class Settings:
             demo_session_org_ids=_list_env("DEMO_SESSION_ORGS"),
             demo_session_periods=_list_env("DEMO_SESSION_PERIODS"),
             demo_session_system_ids=_list_env("DEMO_SESSION_SYSTEMS"),
+            llm_base_url=(_env("LLM_BASE_URL") or "").strip(),
+            llm_api_key=(_env("LLM_API_KEY") or "").strip(),
+            llm_model=(_env("LLM_MODEL") or "").strip(),
+            assistant_rate_limit_per_minute=_int_env(
+                "ASSISTANT_RATE_LIMIT_PER_MINUTE", 10
+            ),
         )
 
 

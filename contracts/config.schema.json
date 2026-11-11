@@ -72,6 +72,19 @@
       "phase": "startup",
       "default": "demo"
     },
+    "ERP_ASSISTANT_RATE_LIMIT_PER_MINUTE": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 10,
+      "minimum": 1,
+      "description": "助手建议每租户每分钟上限（单实例内存令牌桶），超限 429"
+    },
     "ERP_BUILD_PLATFORM": {
       "type": "string",
       "scope": "build",
