@@ -303,7 +303,12 @@ def test_compensation_gateway_gets_inverse_action_whitelist(
 def test_wrong_whitelist_is_rejected_before_any_external_write(
     write_env: WriteEnv,
 ) -> None:
-    """取错白名单必须当场红：正向动作的字段集在补偿动作上会命中 FieldScopeViolation。"""
+    """网关契约描述：``narrowed_fields`` 与动作字段不相交时必须零外部调用。
+
+    这条**不承担补偿路径的防回归职责**——补偿实际传的是反向动作的 ``{cCode}``
+    由 ``test_compensation_gateway_gets_inverse_action_whitelist`` 守。这里只证明
+    「把正向 5 字段误传给 delete 动作」在网关层就会红，且发生在任何外部请求之前。
+    """
 
     delete_action = write_env.container.actions.get("u8.po.delete_draft")
     forward_fields = frozenset(
@@ -330,8 +335,23 @@ def test_wrong_whitelist_is_rejected_before_any_external_write(
 
 
 def test_compensation_only_action_cannot_be_forward_write(write_env: WriteEnv) -> None:
+    """目标草稿真实存在：去掉 compensation_only 后这里会真的把它删掉。"""
+
+    c_code = "PO-STUB-DEMO-W2-001"
+    write_env.stub.state.add_receipt(
+        {
+            "cCode": c_code,
+            "source_doc_no": c_code,
+            "received_at": "2026-11-11T10:00:00+08:00",
+            "simulated": True,
+        }
+    )
+
     executed = write_env.execute("delete_forward")
 
     assert executed.status_code == 403, executed.text
     assert executed.json()["code"] == "E-POLICY-LEVEL"
-    assert write_env.stub.state.requests == []
+    # 零写入：草稿还在、没有冲销记录、桩上没有任何 DELETE。
+    assert [r["cCode"] for r in write_env.stub.state.receipts] == [c_code]
+    assert write_env.stub.state.reversals == []
+    assert [r for r in write_env.stub.state.requests if r["method"] == "DELETE"] == []
