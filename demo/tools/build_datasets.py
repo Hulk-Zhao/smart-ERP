@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""确定性生成 smart-ERP 三套演示数据集（仅标准库）。
+"""确定性生成 smart-ERP 三套演示数据集（标准库 + 生产审计契约）。
+
+审计影像的 ``hash`` 由生产函数 ``apps.platform.contracts.audit.compute_image_hash``
+计算，禁止在本文件内另写一份算法：种子造的链必须与系统验的链同源。
 
 产出（全部入库，云服务器直接取仓库）：
     demo/scenarios/<scenario>/*.csv        业务数据（主数据/交易/对账/工单案例）
@@ -25,6 +28,7 @@ import csv
 import hashlib
 import json
 import random
+import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -33,6 +37,17 @@ from pathlib import Path
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = ROOT.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+# 生产哈希口径唯一来源（与 apps/audit/ledger.py 追加时同一套函数）。
+from apps.audit.ledger import compute_field_diff  # noqa: E402
+from apps.platform.contracts.audit import (  # noqa: E402
+    AuditImage,
+    compute_image_hash,
+)
+
 SCEN_DIR = ROOT / "scenarios"
 TODAY = date(2026, 11, 11)
 WINDOW_START = TODAY - timedelta(days=364)
@@ -1428,11 +1443,6 @@ def _event_hash(prev_hash: str, seq: int, event_type: str, from_state: str | Non
     return hashlib.sha256(f"{prev_hash}\n{body}".encode()).hexdigest()
 
 
-def _image_hash(prev_hash: str, payload: dict) -> str:
-    body = {key: value for key, value in payload.items() if key != "hash"}
-    return hashlib.sha256((prev_hash + _canonical(body)).encode("utf-8")).hexdigest()
-
-
 def _money_json(value: object) -> dict:
     return {"amount": str(money(value)), "currency": "CNY", "tax_included": True}
 
@@ -1828,11 +1838,20 @@ def build_erp_seed(cfg: Scenario, data: dict[str, list[dict]], rng: random.Rando
             if step_state in ("succeeded", "compensated", "compensating"):
                 chain_seq += 1
                 image_id = uid("image", cfg.code, case["ticket_no"], str(step_idx))
-                image_created = executed + timedelta(seconds=rng.randint(20, 240))
-                field_diff = [
-                    {"field": "amount", "before": str(money(Decimal(case["amount"]) * Decimal("1.035"))), "after": case["amount"]},
-                    {"field": "tax_amount", "before": str(money(Decimal(case["amount"]) * Decimal("0.09"))), "after": str(money(Decimal(case["amount"]) * Decimal("0.13")))},
-                ]
+                # 生产链在 PG 里按 UTC 往返（asyncpg 返回 UTC-aware datetime），
+                # 种子必须用同一时区形态参与哈希，否则同一时刻会哈希出两个值。
+                image_created = (executed + timedelta(seconds=rng.randint(20, 240))).astimezone(
+                    timezone.utc
+                )
+                before = {
+                    "amount": str(money(Decimal(case["amount"]) * Decimal("1.035"))),
+                    "tax_amount": str(money(Decimal(case["amount"]) * Decimal("0.09"))),
+                }
+                after = {
+                    "amount": case["amount"],
+                    "tax_amount": str(money(Decimal(case["amount"]) * Decimal("0.13"))),
+                }
+                prev = seed["audit_images"][-1]["hash"] if seed["audit_images"] else ""
                 payload = {
                     "id": image_id,
                     "tenant_id": tenant,
@@ -1843,32 +1862,22 @@ def build_erp_seed(cfg: Scenario, data: dict[str, list[dict]], rng: random.Rando
                     "object_id": f"{object_type}-{created.strftime('%Y%m')}-{idx + 1:04d}",
                     "before_ref": f"u8:{object_type}:before:{idx + 1}",
                     "after_ref": f"u8:{object_type}:after:{idx + 1}",
-                    "field_diff": field_diff,
+                    # 与生产 append_image 一致：diff 由生产函数生成（含 delta 键）
+                    "field_diff": [
+                        entry.model_dump(mode="python")
+                        for entry in compute_field_diff(before, after)
+                    ],
                     "diff_missing": False,
-                    "prev_hash": "",
+                    "prev_hash": prev,
+                    "hash": "0" * 64,
                     "created_at": image_created,
                 }
-                prev = seed["audit_images"][-1]["hash"] if seed["audit_images"] else ""
-                payload["prev_hash"] = prev
-                image_hash = _image_hash(prev, payload)
-                seed["audit_images"].append(
-                    {
-                        "id": image_id,
-                        "tenant_id": tenant,
-                        "ticket_id": ticket_id,
-                        "step_id": step_id,
-                        "system": system,
-                        "object_type": object_type,
-                        "object_id": payload["object_id"],
-                        "before_ref": payload["before_ref"],
-                        "after_ref": payload["after_ref"],
-                        "field_diff": field_diff,
-                        "diff_missing": False,
-                        "prev_hash": prev,
-                        "hash": image_hash,
-                        "created_at": image_created.isoformat(),
-                    }
-                )
+                image = AuditImage.model_validate(payload)
+                digest = compute_image_hash(prev, image.model_dump(mode="python"))
+                image = image.model_copy(update={"hash": digest})
+                row = image.model_dump(mode="json")
+                row["created_at"] = image.created_at.isoformat()
+                seed["audit_images"].append(row)
                 for step in seed["ticket_steps"]:
                     if step["id"] == step_id:
                         step["audit_image_id"] = image_id

@@ -57280,18 +57280,20 @@
         {
           "field": "amount",
           "before": "322920.00",
-          "after": "312000.00"
+          "after": "312000.00",
+          "delta": "-10920.00"
         },
         {
           "field": "tax_amount",
           "before": "28080.00",
-          "after": "40560.00"
+          "after": "40560.00",
+          "delta": "12480.00"
         }
       ],
       "diff_missing": false,
       "prev_hash": "",
-      "hash": "4608ba03d2b0b2385ccce3f2a1644fbd41d5a1c91736292aaf87c5cd37c68058",
-      "created_at": "2026-08-16T15:23:46+08:00"
+      "hash": "60b85822923fdc34f2da4322056d8fbf433fb0168f3d121bf0e2d55c44382f21",
+      "created_at": "2026-08-16T07:23:46+00:00"
     },
     {
       "id": "54a5bd59-4517-59a2-a253-16691d07c545",
@@ -57307,18 +57309,20 @@
         {
           "field": "amount",
           "before": "322920.00",
-          "after": "312000.00"
+          "after": "312000.00",
+          "delta": "-10920.00"
         },
         {
           "field": "tax_amount",
           "before": "28080.00",
-          "after": "40560.00"
+          "after": "40560.00",
+          "delta": "12480.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "4608ba03d2b0b2385ccce3f2a1644fbd41d5a1c91736292aaf87c5cd37c68058",
-      "hash": "eede5217700e09e0b4f76f938b8273859962c7b6a5f4060058a6dde0853d2d77",
-      "created_at": "2026-08-16T19:22:47+08:00"
+      "prev_hash": "60b85822923fdc34f2da4322056d8fbf433fb0168f3d121bf0e2d55c44382f21",
+      "hash": "11c6c5e789eeb60904cf4fa7b562ccef97c93ae56bb8f0335acf6a5539e12ce3",
+      "created_at": "2026-08-16T11:22:47+00:00"
     },
     {
       "id": "9882fc71-c595-5820-a045-2715c80d4c69",
@@ -57334,18 +57338,20 @@
         {
           "field": "amount",
           "before": "202860.00",
-          "after": "196000.00"
+          "after": "196000.00",
+          "delta": "-6860.00"
         },
         {
           "field": "tax_amount",
           "before": "17640.00",
-          "after": "25480.00"
+          "after": "25480.00",
+          "delta": "7840.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "eede5217700e09e0b4f76f938b8273859962c7b6a5f4060058a6dde0853d2d77",
-      "hash": "b85d303b395c6b110fe7e2688721e1dc64be1b44b895d473b98e1cc6119e5ccf",
-      "created_at": "2026-08-17T15:23:48+08:00"
+      "prev_hash": "11c6c5e789eeb60904cf4fa7b562ccef97c93ae56bb8f0335acf6a5539e12ce3",
+      "hash": "a8dfde3206352365e0be3e00cd05c80d53981a6b2546d662fad72b9dbf0ae280",
+      "created_at": "2026-08-17T07:23:48+00:00"
     },
     {
       "id": "a9ef6907-b04e-5165-b986-56e842848f77",
@@ -57361,18 +57367,20 @@
         {
           "field": "amount",
           "before": "202860.00",
-          "after": "196000.00"
+          "after": "196000.00",
+          "delta": "-6860.00"
         },
         {
           "field": "tax_amount",
           "before": "17640.00",
-          "after": "25480.00"
+          "after": "25480.00",
+          "delta": "7840.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "b85d303b395c6b110fe7e2688721e1dc64be1b44b895d473b98e1cc6119e5ccf",
-      "hash": "54953fb3cd8715fabd8320193735cc302234b9bc5370355f2a3c8fceefbd861f",
-      "created_at": "2026-08-17T19:20:28+08:00"
+      "prev_hash": "a8dfde3206352365e0be3e00cd05c80d53981a6b2546d662fad72b9dbf0ae280",
+      "hash": "b3c79d9cc234049da6bf4dd136f3296c3cd4bbed82f77bbb35d4432d5f182137",
+      "created_at": "2026-08-17T11:20:28+00:00"
     },
     {
       "id": "a20ac5a7-64c9-5abc-9269-8c4d96dd91f8",
@@ -57388,18 +57396,20 @@
         {
           "field": "amount",
           "before": "99360.00",
-          "after": "96000.00"
+          "after": "96000.00",
+          "delta": "-3360.00"
         },
         {
           "field": "tax_amount",
           "before": "8640.00",
-          "after": "12480.00"
+          "after": "12480.00",
+          "delta": "3840.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "54953fb3cd8715fabd8320193735cc302234b9bc5370355f2a3c8fceefbd861f",
-      "hash": "25a85ca1b0952e3b8a26acf57b980e2d7da75557f5bdce1503566ef1c694d828",
-      "created_at": "2026-08-11T15:22:06+08:00"
+      "prev_hash": "b3c79d9cc234049da6bf4dd136f3296c3cd4bbed82f77bbb35d4432d5f182137",
+      "hash": "1875f49037bf1850cf58ea805ac75d8e4f660a6039c150d74acbfa6fe467d0c7",
+      "created_at": "2026-08-11T07:22:06+00:00"
     },
     {
       "id": "c00a26f5-9a19-5bdc-8801-7944181cca34",
@@ -57415,18 +57425,20 @@
         {
           "field": "amount",
           "before": "99360.00",
-          "after": "96000.00"
+          "after": "96000.00",
+          "delta": "-3360.00"
         },
         {
           "field": "tax_amount",
           "before": "8640.00",
-          "after": "12480.00"
+          "after": "12480.00",
+          "delta": "3840.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "25a85ca1b0952e3b8a26acf57b980e2d7da75557f5bdce1503566ef1c694d828",
-      "hash": "601222323b6fcd6d3887273f04e09ce144bf11387acb8870d80f27bc75ac9160",
-      "created_at": "2026-08-11T19:21:05+08:00"
+      "prev_hash": "1875f49037bf1850cf58ea805ac75d8e4f660a6039c150d74acbfa6fe467d0c7",
+      "hash": "95182f0d6854ae681d245cac7e0e1bf6abbd93f7e6532b268d0538ef7509297c",
+      "created_at": "2026-08-11T11:21:05+00:00"
     },
     {
       "id": "9014b9ca-ac71-5b96-b00f-2a9e646ecf5e",
@@ -57442,18 +57454,20 @@
         {
           "field": "amount",
           "before": "442980.00",
-          "after": "428000.00"
+          "after": "428000.00",
+          "delta": "-14980.00"
         },
         {
           "field": "tax_amount",
           "before": "38520.00",
-          "after": "55640.00"
+          "after": "55640.00",
+          "delta": "17120.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "601222323b6fcd6d3887273f04e09ce144bf11387acb8870d80f27bc75ac9160",
-      "hash": "37882ba9dbf884d8bb617aa51c7dc8e6b451c54d388ec6d05ef82279ec71dfb6",
-      "created_at": "2026-09-12T15:20:53+08:00"
+      "prev_hash": "95182f0d6854ae681d245cac7e0e1bf6abbd93f7e6532b268d0538ef7509297c",
+      "hash": "11307ddc9183ff455dbd5b3bd38a94d6f0e8d637376685477c3c5af0a71b3d21",
+      "created_at": "2026-09-12T07:20:53+00:00"
     },
     {
       "id": "cfcd105a-0701-5d4c-bd49-4a41a766f62c",
@@ -57469,18 +57483,20 @@
         {
           "field": "amount",
           "before": "442980.00",
-          "after": "428000.00"
+          "after": "428000.00",
+          "delta": "-14980.00"
         },
         {
           "field": "tax_amount",
           "before": "38520.00",
-          "after": "55640.00"
+          "after": "55640.00",
+          "delta": "17120.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "37882ba9dbf884d8bb617aa51c7dc8e6b451c54d388ec6d05ef82279ec71dfb6",
-      "hash": "62ad2b3140056f68fccdee15cb47e076b8bb89fb3799eb49253a62efdef5819e",
-      "created_at": "2026-09-12T19:22:08+08:00"
+      "prev_hash": "11307ddc9183ff455dbd5b3bd38a94d6f0e8d637376685477c3c5af0a71b3d21",
+      "hash": "a47948b3a73051dcbe46317e108fd55bcf737a39940e68ac4d38edb3d0fab4e0",
+      "created_at": "2026-09-12T11:22:08+00:00"
     },
     {
       "id": "c8956ef1-d52b-534d-a4e4-d0a5f8803a60",
@@ -57496,18 +57512,20 @@
         {
           "field": "amount",
           "before": "131445.00",
-          "after": "127000.00"
+          "after": "127000.00",
+          "delta": "-4445.00"
         },
         {
           "field": "tax_amount",
           "before": "11430.00",
-          "after": "16510.00"
+          "after": "16510.00",
+          "delta": "5080.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "62ad2b3140056f68fccdee15cb47e076b8bb89fb3799eb49253a62efdef5819e",
-      "hash": "63d857ee344d87c7920e45f2d57fb7f4734f22b07db83bc47a3cafbe9eb86a0d",
-      "created_at": "2026-09-13T15:22:45+08:00"
+      "prev_hash": "a47948b3a73051dcbe46317e108fd55bcf737a39940e68ac4d38edb3d0fab4e0",
+      "hash": "708c620e07353580e2cb1a4bc4de37d4d029ab06f8f1056c9cef15c672b1f61b",
+      "created_at": "2026-09-13T07:22:45+00:00"
     },
     {
       "id": "cf9c27f2-c597-5eb5-a14e-61062120a3bf",
@@ -57523,18 +57541,20 @@
         {
           "field": "amount",
           "before": "131445.00",
-          "after": "127000.00"
+          "after": "127000.00",
+          "delta": "-4445.00"
         },
         {
           "field": "tax_amount",
           "before": "11430.00",
-          "after": "16510.00"
+          "after": "16510.00",
+          "delta": "5080.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "63d857ee344d87c7920e45f2d57fb7f4734f22b07db83bc47a3cafbe9eb86a0d",
-      "hash": "3f4826fa2a78ecbcaa068ff0447a2cc0343bd5037ee54558e095978ca084a9fc",
-      "created_at": "2026-09-13T19:22:31+08:00"
+      "prev_hash": "708c620e07353580e2cb1a4bc4de37d4d029ab06f8f1056c9cef15c672b1f61b",
+      "hash": "cd76f17d774b0ff8b232319b57db94c5d9ecec9945069d2ae9d88021d9fcfa63",
+      "created_at": "2026-09-13T11:22:31+00:00"
     },
     {
       "id": "7a6f80da-30e9-5a58-92ae-a78817891608",
@@ -57550,18 +57570,20 @@
         {
           "field": "amount",
           "before": "367425.00",
-          "after": "355000.00"
+          "after": "355000.00",
+          "delta": "-12425.00"
         },
         {
           "field": "tax_amount",
           "before": "31950.00",
-          "after": "46150.00"
+          "after": "46150.00",
+          "delta": "14200.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "3f4826fa2a78ecbcaa068ff0447a2cc0343bd5037ee54558e095978ca084a9fc",
-      "hash": "db5690e5d12cd58e614a3a19cc966c612d7e58884a480b828f1199ec7a99886d",
-      "created_at": "2026-09-14T15:21:12+08:00"
+      "prev_hash": "cd76f17d774b0ff8b232319b57db94c5d9ecec9945069d2ae9d88021d9fcfa63",
+      "hash": "55b54178b40bfefbb354d892ddd8f12834f340a92e5948fb2e484f2b18bb4167",
+      "created_at": "2026-09-14T07:21:12+00:00"
     },
     {
       "id": "6e52a96f-6199-57e3-bf3e-c36f1ef5e2ec",
@@ -57577,18 +57599,20 @@
         {
           "field": "amount",
           "before": "367425.00",
-          "after": "355000.00"
+          "after": "355000.00",
+          "delta": "-12425.00"
         },
         {
           "field": "tax_amount",
           "before": "31950.00",
-          "after": "46150.00"
+          "after": "46150.00",
+          "delta": "14200.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "db5690e5d12cd58e614a3a19cc966c612d7e58884a480b828f1199ec7a99886d",
-      "hash": "6c1c95ccc4446e006c8ed63c935a20645cf24313cb3d97956b2430d30df20929",
-      "created_at": "2026-09-14T19:23:53+08:00"
+      "prev_hash": "55b54178b40bfefbb354d892ddd8f12834f340a92e5948fb2e484f2b18bb4167",
+      "hash": "1cb4fca7227cee36d025af7eadfe800b30a3e931ab5bef7e7247cb8f25128a86",
+      "created_at": "2026-09-14T11:23:53+00:00"
     },
     {
       "id": "4c433264-8713-5398-8b3c-57cea5ab23c7",
@@ -57604,18 +57628,20 @@
         {
           "field": "amount",
           "before": "529920.00",
-          "after": "512000.00"
+          "after": "512000.00",
+          "delta": "-17920.00"
         },
         {
           "field": "tax_amount",
           "before": "46080.00",
-          "after": "66560.00"
+          "after": "66560.00",
+          "delta": "20480.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "6c1c95ccc4446e006c8ed63c935a20645cf24313cb3d97956b2430d30df20929",
-      "hash": "0f7bb65ddf702594f64eb4e3b22ae126dc53c5e176709351330c080dedf393f7",
-      "created_at": "2026-09-15T15:22:16+08:00"
+      "prev_hash": "1cb4fca7227cee36d025af7eadfe800b30a3e931ab5bef7e7247cb8f25128a86",
+      "hash": "df77fbd468c0296bd6cbb8ef805db35ee60057ca02635d3daaf5a96f1704b727",
+      "created_at": "2026-09-15T07:22:16+00:00"
     },
     {
       "id": "03d0543b-3c06-57f0-bea0-a400be5d0c7b",
@@ -57631,18 +57657,20 @@
         {
           "field": "amount",
           "before": "529920.00",
-          "after": "512000.00"
+          "after": "512000.00",
+          "delta": "-17920.00"
         },
         {
           "field": "tax_amount",
           "before": "46080.00",
-          "after": "66560.00"
+          "after": "66560.00",
+          "delta": "20480.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "0f7bb65ddf702594f64eb4e3b22ae126dc53c5e176709351330c080dedf393f7",
-      "hash": "d386d06537f8caf8cec3946e8470c0480d2fdd6b1351f61c01db40635b87d0cf",
-      "created_at": "2026-09-15T19:21:29+08:00"
+      "prev_hash": "df77fbd468c0296bd6cbb8ef805db35ee60057ca02635d3daaf5a96f1704b727",
+      "hash": "159a1d894bf1cba186c266c6aaf8d7170ec9275062e8c7bec2aa3f69fa710017",
+      "created_at": "2026-09-15T11:21:29+00:00"
     },
     {
       "id": "6dc8bc09-9dcc-5ea2-9983-654ac7a87b45",
@@ -57658,18 +57686,20 @@
         {
           "field": "amount",
           "before": "91080.00",
-          "after": "88000.00"
+          "after": "88000.00",
+          "delta": "-3080.00"
         },
         {
           "field": "tax_amount",
           "before": "7920.00",
-          "after": "11440.00"
+          "after": "11440.00",
+          "delta": "3520.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "d386d06537f8caf8cec3946e8470c0480d2fdd6b1351f61c01db40635b87d0cf",
-      "hash": "a64b9b59db1070773f27d285f417a4a8905521ae3266eee75dcc6304a3da7fe0",
-      "created_at": "2026-09-16T15:22:32+08:00"
+      "prev_hash": "159a1d894bf1cba186c266c6aaf8d7170ec9275062e8c7bec2aa3f69fa710017",
+      "hash": "8011270196c474332f33f774857f60245a0863defb1b7936ed3cc79708a82e99",
+      "created_at": "2026-09-16T07:22:32+00:00"
     },
     {
       "id": "e669d44f-c7ee-555b-993d-cdd4220b73e4",
@@ -57685,18 +57715,20 @@
         {
           "field": "amount",
           "before": "91080.00",
-          "after": "88000.00"
+          "after": "88000.00",
+          "delta": "-3080.00"
         },
         {
           "field": "tax_amount",
           "before": "7920.00",
-          "after": "11440.00"
+          "after": "11440.00",
+          "delta": "3520.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "a64b9b59db1070773f27d285f417a4a8905521ae3266eee75dcc6304a3da7fe0",
-      "hash": "130ca8b042a20982d1b6f67f1923b9db24eb27d8d539242dfad9af81e26536b3",
-      "created_at": "2026-09-16T19:21:41+08:00"
+      "prev_hash": "8011270196c474332f33f774857f60245a0863defb1b7936ed3cc79708a82e99",
+      "hash": "b27685f1efb8d7ee98f48c6e4918bdbb2820eb98e0bcaa90caa4cf8c64fc242b",
+      "created_at": "2026-09-16T11:21:41+00:00"
     },
     {
       "id": "7a01e2d1-67c3-5b76-8ce0-c1a541f49180",
@@ -57712,18 +57744,20 @@
         {
           "field": "amount",
           "before": "662400.00",
-          "after": "640000.00"
+          "after": "640000.00",
+          "delta": "-22400.00"
         },
         {
           "field": "tax_amount",
           "before": "57600.00",
-          "after": "83200.00"
+          "after": "83200.00",
+          "delta": "25600.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "130ca8b042a20982d1b6f67f1923b9db24eb27d8d539242dfad9af81e26536b3",
-      "hash": "513b10f41dc225cf47e34efab13d7dae2e611cdb20cfbb0b213f0c691f58871a",
-      "created_at": "2026-09-17T15:20:20+08:00"
+      "prev_hash": "b27685f1efb8d7ee98f48c6e4918bdbb2820eb98e0bcaa90caa4cf8c64fc242b",
+      "hash": "2e52535de739b4a97f4bfe58dc7de180eba7951d9333a56bbae10cb586ab6da7",
+      "created_at": "2026-09-17T07:20:20+00:00"
     },
     {
       "id": "68d8a1d0-f3ce-5a69-82a2-ab5bbd5876cf",
@@ -57739,18 +57773,20 @@
         {
           "field": "amount",
           "before": "1242000.00",
-          "after": "1200000.00"
+          "after": "1200000.00",
+          "delta": "-42000.00"
         },
         {
           "field": "tax_amount",
           "before": "108000.00",
-          "after": "156000.00"
+          "after": "156000.00",
+          "delta": "48000.00"
         }
       ],
       "diff_missing": false,
-      "prev_hash": "513b10f41dc225cf47e34efab13d7dae2e611cdb20cfbb0b213f0c691f58871a",
-      "hash": "d73e24981bf6a8372a1912547500768ab1305a8fbc4baad8322516df0b798a9e",
-      "created_at": "2026-09-11T15:23:20+08:00"
+      "prev_hash": "2e52535de739b4a97f4bfe58dc7de180eba7951d9333a56bbae10cb586ab6da7",
+      "hash": "04409a4ca93d8407371b7f36332fad6ef2ba9e1eed466accae2d0437433b4b7a",
+      "created_at": "2026-09-11T07:23:20+00:00"
     }
   ],
   "approval_records": [
