@@ -134,7 +134,10 @@ jobs:
         # -rs 把 skip 原因逐条打进日志（unittest 的 -v 虽也打印 skip 原因，但 -rs 是
         # pytest 专有；这里与 python-checks 统一用 pytest，保证「这条到底跑没跑」
         # 能直接翻日志回答，而不是靠人回忆）。
-        run: python -m pytest tests/deploy -q -o addopts="" -rs
+        # -v 而不是 -q：聚合的「63 passed」看不出哪条绿、哪条被跳过——2026-11-11 已
+        # 因此反复误判。必须能从日志读出 `...::test_xxx PASSED` 这种带用例名的一行，
+        # 才算证明「某条具体用例在 main 基线上是绿的」。
+        run: python -m pytest tests/deploy -v -o addopts="" -rs
 
       - name: compose 正向解析（demo 档）
         run: |
