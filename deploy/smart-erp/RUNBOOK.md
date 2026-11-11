@@ -436,6 +436,12 @@ curl -m 3 -sS http://<公网IP>:8010/metrics   # 期望：连接失败
 | `erp-scheduler` | `scheduler:8011/metrics` | 审计链 P0 指标；端点由 `core/runtime/metrics_server.py` 提供 |
 | `erp-compensation` | `compensation:8013/metrics` | 补偿积压 / 到期 / 未来重试 / 时钟偏移 / unresolved |
 
+> **抓取一律直连容器端口，不经过任何 nginx。** `api:8010` / `scheduler:8011` / `compensation:8013`
+> 都是 compose 内网的服务名 + 端口，Prometheus 直接连；`web-nginx.conf` 里对
+> `/erp/api/metrics` 的 404 只作用于**本机预览入口（web:8080）**，hk-web 的 `deny all`
+> 只作用于公网路径，两者都不影响采集。**不要**为了「统一入口」把抓取改成经 nginx 取
+> `/erp/api/metrics`——那样会拿到 404，且该 404 不是指标关闭的证据。
+
 规则文件是**直接挂载**的 `observability/alerts.rules.yaml`（不复制），改完规则 `docker compose restart prometheus` 即生效。
 
 ### 7.1 本期不接外部通知渠道（明确取舍，不是遗漏）
