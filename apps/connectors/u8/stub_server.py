@@ -15,7 +15,8 @@
 - ``GET  /u8/api/purchase-order-drafts?source_doc_no=...`` 供 verify 回查；
 - ``DELETE /u8/api/purchase-order-drafts/{单号}`` 供补偿冲销；
 - ``GET /stub/receipts`` / ``GET /stub/reversals`` 是对外核对入口（钱/单据到没到）；
-- ``GET /stub/requests`` 是全部请求留痕（W3 被拒绝时为空 = 零外部写入）。
+- ``GET /stub/requests`` 是全部请求留痕（判零外部写入：只数 ``POST``/``DELETE`` 且路径不以
+  ``/stub/`` 开头的条目；GET 探测与健康检查不计入）。
 
 故障注入（用于演示失败与补偿，不是正常业务接口）::
 
@@ -181,7 +182,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"simulated": True, "items": list(self.state.reversals)})
             return
         if path == "/stub/requests":
-            # W3 被拒绝时应为空：这是「零外部写入」的直接证据。
+            # 判零外部写入：只数 POST/DELETE 且路径不以 /stub/ 开头的条目（GET 探测不计入）。
             self._send(200, {"simulated": True, "items": list(self.state.requests)})
             return
 

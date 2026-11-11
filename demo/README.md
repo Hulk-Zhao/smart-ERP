@@ -172,7 +172,7 @@ export ERP_U8_BASE_URL=http://127.0.0.1:8013          # PowerShell: $env:ERP_U8_
 | 工单号 | 写入等级 | 预期结果 |
 | --- | --- | --- |
 | `DEMO-W2-WRITE-9001` | W2 | U8 是 B 级连接器，强制双人复核（`reviewer` + `approver`）；两票齐后由发起人触发执行，真实 `POST` 到桩，回执含 U8 单号/时间戳/关键字段，审计影像有 `field_diff` |
-| `DEMO-W3-FUND-9002` | W3 | 在 AccessGate 被 `E-POLICY-W3FORBIDDEN` 拒绝，桩的 `/stub/requests` 保持为空（**零外部写入**） |
+| `DEMO-W3-FUND-9002` | W3 | 在 AccessGate 被 `E-POLICY-W3FORBIDDEN` 拒绝，`/stub/requests` 中无任何业务写入（判据见下方验收口径，**零外部写入**） |
 
 > 演示口径（重要）：`DEMO-W2-WRITE-9001` 的 `reviewer` 票由种子预置在
 > `erp.approval_record`（操作人 `bbbbbbbb…`、时间 `12:15`、理由见 comment），
@@ -186,9 +186,14 @@ export ERP_U8_BASE_URL=http://127.0.0.1:8013          # PowerShell: $env:ERP_U8_
 
 ```bash
 curl http://127.0.0.1:8013/stub/receipts    # 已落草稿回执（cCode、received_at、关键字段回显）
-curl http://127.0.0.1:8013/stub/requests    # 桩收到的全部请求；W3 被拒时应为空
+curl http://127.0.0.1:8013/stub/requests    # 桩收到的全部请求；W3 被拒时按下方机械判据检查，不是「整体为空」
 curl http://127.0.0.1:8013/stub/reversals   # 已冲销记录；补偿后出现该 U8 单号
 ```
+
+> 零外部写入判据（机械可执行）：`/stub/requests` 中，**方法为 `POST` 或 `DELETE`
+> 且路径不以 `/stub/` 开头的条目必须为空**；健康检查与查询探测只是 `GET`，不计入。
+> 理由：业务写入只可能走 `POST`/`DELETE`，而 `/stub/*` 是桩自己的查询面；用「方法 +
+> 路径前缀」双重限定，比列白名单更难被放宽。
 
 失败与补偿演练：
 
