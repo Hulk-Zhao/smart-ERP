@@ -324,67 +324,7 @@
       "default": "",
       "description": "1/true/yes/on 才绑定部署期注入的 demo 静态会话；默认关闭，且 ERP_APP_ENV 必须为 demo，否则启动失败（apps/api/demo_session.py）。只读当前会话，不签发令牌"
     },
-    "ERP_DEMO_SESSION_ORGS": {
-      "type": "string",
-      "scope": "compose",
-      "services": [
-        "api"
-      ],
-      "required": false,
-      "secret": false,
-      "phase": "startup",
-      "default": "",
-      "description": "demo 会话授权组织，逗号分隔（对应 G-05 org_id）"
-    },
-    "ERP_DEMO_SESSION_PERIODS": {
-      "type": "string",
-      "scope": "compose",
-      "services": [
-        "api"
-      ],
-      "required": false,
-      "secret": false,
-      "phase": "startup",
-      "default": "",
-      "description": "demo 会话授权期间，逗号分隔（对应 G-05 period）"
-    },
-    "ERP_DEMO_SESSION_ROLES": {
-      "type": "string",
-      "scope": "compose",
-      "services": [
-        "api"
-      ],
-      "required": false,
-      "secret": false,
-      "phase": "startup",
-      "default": "",
-      "description": "demo 会话角色，逗号分隔（如 reviewer,approver,cfo）；审批待办按它与发起人过滤"
-    },
-    "ERP_DEMO_SESSION_SYSTEMS": {
-      "type": "string",
-      "scope": "compose",
-      "services": [
-        "api"
-      ],
-      "required": false,
-      "secret": false,
-      "phase": "startup",
-      "default": "",
-      "description": "demo 会话授权系统，逗号分隔（对应 G-05 system_ids）"
-    },
-    "ERP_DEMO_SESSION_TENANT_ID": {
-      "type": "string",
-      "scope": "compose",
-      "services": [
-        "api"
-      ],
-      "required": false,
-      "secret": false,
-      "phase": "startup",
-      "default": "",
-      "description": "demo 会话租户 UUID；开启开关时必填"
-    },
-    "ERP_DEMO_SESSION_TOKEN": {
+    "ERP_DEMO_SESSION_IDENTITIES": {
       "type": "string",
       "scope": "compose",
       "services": [
@@ -394,19 +334,7 @@
       "secret": true,
       "phase": "startup",
       "default": "",
-      "description": "部署期注入的静态会话令牌（至少 16 字符）；只从请求头 X-Session-Token 或 Authorization: Bearer 读取，不接受 query 参数"
-    },
-    "ERP_DEMO_SESSION_USER_ID": {
-      "type": "string",
-      "scope": "compose",
-      "services": [
-        "api"
-      ],
-      "required": false,
-      "secret": false,
-      "phase": "startup",
-      "default": "",
-      "description": "demo 会话用户 UUID；开启开关时必填"
+      "description": "demo 档静态身份 JSON 数组，每条 {token,user_id,tenant_id,roles,org_ids,periods,system_ids}；token 至少 16 字符且唯一，user_id 为 UUID 且唯一，各数组非空。多身份用于演示「发起人 ≠ 审批人」的双人复核：两枚令牌分别对应两人，审计可见不同操作人；身份不全/坏 UUID/重复/空映射一律启动失败。开启开关时必填"
     },
     "ERP_DEPLOY_DIR": {
       "type": "string",
