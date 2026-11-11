@@ -2135,7 +2135,7 @@ def write_scenario(cfg: Scenario) -> dict:
             continue
         fields = [key for key in rows[0] if not key.startswith("_")]
         with path.open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=fields)
+            writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
             writer.writeheader()
             for row in rows:
                 writer.writerow({key: ("" if row.get(key) is None else row[key]) for key in fields})
@@ -2145,6 +2145,7 @@ def write_scenario(cfg: Scenario) -> dict:
     erp_path.write_text(
         json.dumps({"scenario": cfg.code, "tenant_id": str(uid("tenant", cfg.code)), **erp}, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
+        newline="\n",
     )
     file_hashes[erp_path.name] = hashlib.sha256(erp_path.read_bytes()).hexdigest()
 
@@ -2167,7 +2168,9 @@ def write_scenario(cfg: Scenario) -> dict:
         "checks": checks,
         "files": file_hashes,
     }
-    (out_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    (out_dir / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n"
+    )
     return manifest
 
 
@@ -2197,6 +2200,7 @@ def main() -> int:
     (SCEN_DIR / "index.json").write_text(
         json.dumps({"generated_at": ts(datetime(2026, 11, 11, 9, 0, tzinfo=TZ)), "scenarios": manifests}, ensure_ascii=False, indent=2),
         encoding="utf-8",
+        newline="\n",
     )
     return 1 if failed else 0
 
