@@ -77,15 +77,16 @@ _DISCOVER_SQL = text(
 )
 
 #: 队列口径：backlog / 到期未领取 / 未来重试。
-#: 主分支尚无 updated_at（0009 未合），到期判定用 coalesce(next_retry_at, created_at)，
-#: 对 reclaim 后立刻再次到期的行会偏保守（偏大），作为告警阈值可接受。
+#: 0009 已补 ``updated_at``（每次状态变化与 reclaim 都刷新，且有
+#: ``(state, updated_at) WHERE state='queued'`` 局部索引），到期判定必须用它：
+#: 用 ``created_at`` 会把「刚被重新入队、created_at 很旧」的行立刻算成 overdue。
 _METRIC_SQL = text(
     """
     SELECT count(*) FILTER (WHERE state = 'queued') AS backlog,
            count(*) FILTER (
                WHERE state = 'queued'
                  AND (next_retry_at IS NULL OR next_retry_at <= now())
-                 AND coalesce(next_retry_at, created_at)
+                 AND coalesce(next_retry_at, updated_at)
                      <= now() - make_interval(secs => :overdue)
            ) AS overdue,
            count(*) FILTER (

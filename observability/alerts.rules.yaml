@@ -4,37 +4,52 @@
 #   - /etc/prometheus/rules/smart-erp.rules.yaml
 # 语法校验：python -c "import yaml; yaml.safe_load(open('observability/alerts.rules.yaml'))"
 #
-# ⚠ 部署内没有评估器（2026-11-11 核实，基准 origin/main 0f597b3）
-#   本文件是「规则定义」，不是「正在生效的告警」。deploy/ 全目录没有 Prometheus /
-#   Alertmanager，也没有任何 scrape_configs 或 rule_files 配置；compose 的 10 个服务里
-#   没有任何进程读取或评估本文件。下面标「生效」的 2 条，真实状态是：语法通过、有采集点，
-#   但没有任何进程会评估它们——故障发生时，与注释掉的规则没有区别。
-#   在评估器（含抓取配置）接入前，不得在任何地方声称「线上有告警」。
+# 部署状态（2026-11-11，分支 feat/alerting-live）
+#   评估器：deploy/smart-erp 的 prometheus（**仅 full 档**）加载本文件并评估；
+#     Alertmanager 接收告警（demo 档刻意不装监控，保持 1200MiB 预算）。
+#   抓取目标（三项都是「写指标的进程自己 serve /metrics」）：
+#     api:8010（对账、写阶段） / scheduler:8011（审计链） / compensation:8013（补偿队列、时钟）
+#   生效 11 条：2 条对账 + unresolved + overdue×3 + future_retry + clock×2 + 审计链 P0
+#     + 1 条抓取掉线（目标消失时上面的规则全部安静，必须单独把「抓不到」变成告警）
+#   注释 1 条：写失败率（采集点已具备，阻塞点只剩阈值无真实基线）
+#   建议 1 条：对账请求失败率（等一个结账周期的基线）
 #
 # 标签约定：severity = P0（立即叫醒，安全/审计）| P1（15 分钟内响应）| P2（工作时间处理）。
 # 每条规则都写 why_paged：说明为什么值得半夜叫醒人，而不是“指标看起来不对”。
-# ---------------------------------------------------------------------------
-# 当前状态（2026-11-11，基准 origin/main 0f597b3）
-#   生效 2 条：SmartErpReconBatchFailureRateHigh、SmartErpReconBatchP95Slow
-#     依赖的 recon_batches_total / recon_batch_duration_seconds 已有生产采集点；
-#     但部署内无评估器（见上），它们目前不会产生任何告警。
-#   注释 9 条：3 条 T702 历史规则（write 失败率 / unresolved 增长 / 审计链 P0）
-#     + 6 条补偿与时钟新规则。原因：依赖指标零生产采集点，启用即永不触发；
-#     假的安全感比没有安全感更危险。归属流：apps/write、apps/tickets、
-#     apps/audit、apps/agents、apps/runtime。
-#     取消注释条件：见每条规则上方「采集点待接线（归属流：…；解锁条件：…）」
-#     以及 README §6.1.3 的「取消注释的前置条件」列。
-#   建议 1 条：SmartErpReconRunFailureRateHigh 已有采集点，等真实基线后再启用。
+# 采集点与判据：README §6.1.2（写入点存在 ≠ 可观测；规则不评估 = 规则不存在）。
 # ---------------------------------------------------------------------------
 
 groups:
   - name: smart-erp-s7-alerts
     rules:
       # ------------------------------------------------------------------
-      # P1：写入失败率
-      # 指标：smart_erp_write_stage_failures_total / smart_erp_write_stage_total
+      # P1：抓取健康（先于一切指标规则——目标掉线时所有依赖规则都会「安静」）
       # ------------------------------------------------------------------
-      # 采集点待接线（归属流：apps/write；解锁条件：WriteGateway.execute() 内按阶段埋 record_stage()，且 /metrics 上存在 stage="write" 的非零序列）
+      - alert: SmartErpScrapeTargetDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: P1
+          service: smart-erp
+        annotations:
+          summary: "采集目标 {{ $labels.job }}/{{ $labels.instance }} 连续 5 分钟不可抓取"
+          description: >-
+            up=0。该目标承载的指标在这段时间里全部 absent，依赖它们的规则
+            不会触发——这不是「一切正常」，而是「看不见」。
+          why_paged: >-
+            规则里的 max()/rate() 对 absent 一律不触发，掉线在告警世界与健康同形。
+            5 分钟足够区分一次滚动重启与真正挂掉；不处理会让整套告警变成装饰。
+          runbook: "docker compose ps 看该容器；查容器日志与 /metrics 返回码；确认 ERP_METRICS_ENABLED 未被关掉"
+
+      # ------------------------------------------------------------------
+      # P1：写入失败率（采集点已具备，仍注释）
+      # 指标：smart_erp_write_stage_failures_total / smart_erp_write_stage_total
+      # 采集点：apps/platform/policy/gateway.py:226（WriteGateway.execute 按阶段埋点），
+      #         写入进程是 api，/metrics 在 api:8010 上可见。
+      # ------------------------------------------------------------------
+      # 待真实基线后再启用：失败率是真实可采集的信号，但 5% / 10m 只是分析值，
+      # 尚未跑满一个真实写入周期；凭猜启用会制造假阳性，与「假规则」同罪。
+      # 待真实基线（跑满一个结账周期后按真实 P95 重定阈值）
       # - alert: SmartErpWriteFailureRateHigh
       #   expr: >-
       #     sum(rate(smart_erp_write_stage_failures_total{stage="write"}[5m]))
@@ -58,178 +73,165 @@ groups:
       # ------------------------------------------------------------------
       # P1：unresolved 持续增长
       # 指标：smart_erp_unresolved_tickets
+      # 采集点：apps/agents/compensation_worker.py:287（每轮刷新全局快照）；
+      #         口径 = erp.ticket 中 state 不在终态集合（已完成/已回滚/已终止/已驳回）的工单数；
+      #         同一进程 :303 挂载 /metrics → 抓取目标 compensation:8013。
       # ------------------------------------------------------------------
-      # 采集点待接线（归属流：apps/tickets；解锁条件：unresolved 增减处调用 set_unresolved()，并积累 30 分钟真实基线（规则用 offset 30m））
-      # - alert: SmartErpUnresolvedTicketsGrowing
+      - alert: SmartErpUnresolvedTicketsGrowing
         # max()：各副本若都上报全局 unresolved，取最大值避免重复计数。
-      #   expr: >-
-      #     (max(smart_erp_unresolved_tickets)
-      #      - max(smart_erp_unresolved_tickets offset 30m) > 5)
-      #     and max(smart_erp_unresolved_tickets) > 10
-      #   for: 10m
-      #   labels:
-      #     severity: P1
-      #     service: smart-erp
-      #   annotations:
-      #     summary: "unresolved 工单 30 分钟增量 > 5 且总量 > 10（持续 10 分钟）"
-      #     description: >-
-      #       当前 unresolved={{ $value }}。持续增长说明自动处置链路（重试/补偿/人工队列回填）
-      #       没有消化新增失败，而不是一次性的流量抖动。
-      #     why_paged: >-
-      #       unresolved 只增不减代表“没人接住的失败”在堆积；这些工单通常已经触达客户或供应商，
-      #       越晚处理越可能变成对账差异与付款错误，属于业务闭环中断而非单纯技术告警。
-      #     runbook: "按失败分类 F1-F8 拆分 smart_erp_ticket_failures_total，先处理 F5/F6"
+        expr: >-
+          (max(smart_erp_unresolved_tickets)
+           - max(smart_erp_unresolved_tickets offset 30m) > 5)
+          and max(smart_erp_unresolved_tickets) > 10
+        for: 10m
+        labels:
+          severity: P1
+          service: smart-erp
+        annotations:
+          summary: "unresolved 工单 30 分钟增量 > 5 且总量 > 10（持续 10 分钟）"
+          description: >-
+            当前 unresolved={{ $value }}。持续增长说明自动处置链路（重试/补偿/人工队列回填）
+            没有消化新增失败，而不是一次性的流量抖动。
+          why_paged: >-
+            unresolved 只增不减代表“没人接住的失败”在堆积；这些工单通常已经触达客户或供应商，
+            越晚处理越可能变成对账差异与付款错误，属于业务闭环中断而非单纯技术告警。
+          runbook: "按失败分类 F1-F8 拆分 smart_erp_ticket_failures_total，先处理 F5/F6"
 
-      # ================================================================
-      # 待接线规则（已注释，未启用）——采集点待接线（归属流：apps/agents）
-      #
-      # 口径（README §6.1.2）：规则引用的指标必须在同一次 PR 里有采集点；
-      # 做不到就显式标注「采集点待接线」并把规则注释掉，不许留一条永不触发的告警。
-      # 下列 6 条依赖的 compensation_overdue / compensation_future_retry /
-      # db_clock_skew_seconds 目前零生产调用。接线后取消注释、重跑 promtool，
-      # 并把 README §6.1 的采集点列改成真实「文件:行」。
-      #
-      # 原 SmartErpCompensationBacklogHigh(P1) 已物理删除：它依赖
-      # smart_erp_compensation_backlog，而 set_compensation_backlog 在
-      # apps/、core/、db/、scripts/ 零调用——永不触发的 P1 是假安全感。
-      # ================================================================
       # ------------------------------------------------------------------
       # P2 / P1：补偿任务到期未领取（claim 停摆）
       # 指标：smart_erp_compensation_overdue
-      # 采集点：无（待 apps/agents 接线；未接线前这些规则不会触发）
-      # SQL 口径：state='queued' AND (
-      #   (next_retry_at IS NOT NULL AND next_retry_at < now() - interval '60 seconds')
-      #   OR (next_retry_at IS NULL
-      #       AND coalesce(updated_at, created_at) < now() - interval '60 seconds'))
+      # 采集点：apps/agents/compensation_worker.py:289（同进程 :303 serve /metrics → 8013）
+      # SQL 口径（以实现 apps/agents/compensation_worker.py::_METRIC_SQL 为准）：
+      #   state='queued'
+      #   AND (next_retry_at IS NULL OR next_retry_at <= now())
+      #   AND coalesce(next_retry_at, updated_at) <= now() - interval '60 seconds'
+      #   updated_at 由 0009 补齐，claim / fail / done / heartbeat 都会刷新，
+      #   并有 (state, updated_at) WHERE state='queued' 局部索引；用 created_at 会把
+      #   「刚重新入队、created_at 很旧」的行立刻算成 overdue（假阳性），已修正。
       # NULL 分支不可省：零重试修复后，没有闸门的行 next_retry_at 就是 NULL，
       # 漏掉它等于给「立即应领取却没人领」造了一个新的静默面。
       # max()：各副本读同一张表，取最大值避免重复计数。
       # ------------------------------------------------------------------
-      # 采集点待接线（归属流：apps/agents；解锁条件：补偿扫描周期内按 A 的 SQL（含 NULL 分支）调用 set_compensation_overdue()，且有 ≥1 个队列周期的基线）
-      # - alert: SmartErpCompensationOverdueP2
-      #   expr: max(smart_erp_compensation_overdue) > 0
-      #   for: 5m
-      #   labels:
-      #     severity: P2
-      #     service: smart-erp
-      #   annotations:
-      #     summary: "补偿任务到期 60s 未被领取（持续 5 分钟）"
-      #     description: >-
-      #       当前过期未领取={{ $value }}。worker 仍在跑但 claim 拿不到任务，
-      #       通常是 next_retry_at 的比较依赖了服务器时钟，或队列扫描条件写错。
-      #     why_paged: >-
-      #       这条不叫醒人：5 分钟内可能只是 worker 重启或短时锁竞争；
-      #       但它一旦持续就是任务永久停在 queued（重试闸门永远不过期），
-      #       所以必须在工作时间先看一眼，避免拖到 P1。
-      #     runbook: "查 compensation.claim_next 的返回与 next_retry_at/updated_at 分布，见 RUNBOOK 补偿队列段"
+      - alert: SmartErpCompensationOverdueP2
+        expr: max(smart_erp_compensation_overdue) > 0
+        for: 5m
+        labels:
+          severity: P2
+          service: smart-erp
+        annotations:
+          summary: "补偿任务到期 60s 未被领取（持续 5 分钟）"
+          description: >-
+            当前过期未领取={{ $value }}。worker 仍在跑但 claim 拿不到任务，
+            通常是 next_retry_at 的比较依赖了服务器时钟，或队列扫描条件写错。
+          why_paged: >-
+            这条不叫醒人：5 分钟内可能只是 worker 重启或短时锁竞争；
+            但它一旦持续就是任务永久停在 queued（重试闸门永远不过期），
+            所以必须在工作时间先看一眼，避免拖到 P1。
+          runbook: "查 compensation.claim_next 的返回与 next_retry_at 分布，见 RUNBOOK 补偿队列段"
 
-      # 采集点待接线（归属流：apps/agents；解锁条件：同 overdue：set_compensation_overdue() 接线并积累量级基线）
-      # - alert: SmartErpCompensationOverdueP1Volume
-      #   expr: max(smart_erp_compensation_overdue) > 5
-      #   for: 5m
-      #   labels:
-      #     severity: P1
-      #     service: smart-erp
-      #   annotations:
-      #     summary: "补偿任务过期未领取 > 5（持续 5 分钟）"
-      #     description: >-
-      #       过期未领取={{ $value }}，已不是单条卡住而是批量停摆。
-      #       这些任务本应「立即领取」，说明 claim 路径整体失效。
-      #     why_paged: >-
-      #       批量停摆意味着坏数据在外部系统里停留时间被拉长，且人工无法从队列看出来；
-      #       5 分钟内处理可以把影响限制在单批，拖到早上会变成对账差异。
-      #     runbook: "立即核对 DB 与应用时钟偏差；若同批出现 future_retry，按时钟回拨处理"
+      - alert: SmartErpCompensationOverdueP1Volume
+        expr: max(smart_erp_compensation_overdue) > 5
+        for: 5m
+        labels:
+          severity: P1
+          service: smart-erp
+        annotations:
+          summary: "补偿任务过期未领取 > 5（持续 5 分钟）"
+          description: >-
+            过期未领取={{ $value }}，已不是单条卡住而是批量停摆。
+            这些任务本应「立即领取」，说明 claim 路径整体失效。
+          why_paged: >-
+            批量停摆意味着坏数据在外部系统里停留时间被拉长，且人工无法从队列看出来；
+            5 分钟内处理可以把影响限制在单批，拖到早上会变成对账差异。
+          runbook: "立即核对 DB 与应用时钟偏差；若同批出现 future_retry，按时钟回拨处理"
 
-      # 采集点待接线（归属流：apps/agents；解锁条件：同 overdue：set_compensation_overdue() 接线并至少跨过一个 15 分钟窗口）
-      # - alert: SmartErpCompensationOverdueP1Duration
-      #   expr: max(smart_erp_compensation_overdue) > 0
-      #   for: 15m
-      #   labels:
-      #     severity: P1
-      #     service: smart-erp
-      #   annotations:
-      #     summary: "补偿任务过期未领取持续 15 分钟"
-      #     description: >-
-      #       即使只有 1 条，卡满 15 分钟也说明 claim 不会自愈。单条卡死同样会造成
-      #       该笔业务永远不补偿，且没有任何重试会把它捞起来。
-      #     why_paged: >-
-      #       15 分钟是「短暂抖动」与「逻辑失效」的分界；跨过这条线还等，
-      #       就等于承认队列里有一条永远不会执行的任务，必须人工介入。
-      #     runbook: "按 overdue 的 SQL 取样本行，确认 next_retry_at / updated_at / state"
+      - alert: SmartErpCompensationOverdueP1Duration
+        expr: max(smart_erp_compensation_overdue) > 0
+        for: 15m
+        labels:
+          severity: P1
+          service: smart-erp
+        annotations:
+          summary: "补偿任务过期未领取持续 15 分钟"
+          description: >-
+            即使只有 1 条，卡满 15 分钟也说明 claim 不会自愈。单条卡死同样会造成
+            该笔业务永远不补偿，且没有任何重试会把它捞起来。
+          why_paged: >-
+            15 分钟是「短暂抖动」与「逻辑失效」的分界；跨过这条线还等，
+            就等于承认队列里有一条永远不会执行的任务，必须人工介入。
+          runbook: "按 overdue 的 SQL 取样本行，确认 next_retry_at / state"
 
       # ------------------------------------------------------------------
       # P1：未来重试（唯一能直接抓到墙钟回拨的信号）
       # 指标：smart_erp_compensation_future_retry
-      # 采集点：无（待 apps/agents 接线）
+      # 采集点：apps/agents/compensation_worker.py:290（同进程 serve /metrics）
       # 口径：state='queued' AND next_retry_at > now() + 18s
       # 18s = 最大重试退避 8s + 10s 余量；超过即不可能由正常退避产生。
       # ------------------------------------------------------------------
-      # 采集点待接线（归属流：apps/agents；解锁条件：同一扫描按 B 的 SQL 调用 set_compensation_future_retry()，基线应为 0）
-      # - alert: SmartErpCompensationFutureRetry
-      #   expr: max(smart_erp_compensation_future_retry) > 0
-      #   for: 1m
-      #   labels:
-      #     severity: P1
-      #     service: smart-erp
-      #   annotations:
-      #     summary: "出现 next_retry_at 落在未来 18s 之外的补偿任务"
-      #     description: >-
-      #       计数={{ $value }}。正常退避最长 8s，写入的未来时间超过 now()+18s 只能是
-      #       墙钟被回拨（或应用/DB 时钟不一致）导致把过去的「立即」写成了未来。
-      #     why_paged: >-
-      #       这是根因信号：此时任务可能还没卡住，但 claim 已经不会再取到它们；
-      #       1 分钟内确认可以避免进入「静默 queued」，并为时钟问题留下证据。
-      #     runbook: "比对应用与 DB 的 now()；检查宿主 NTP/pmtx 与容器时钟，见下方的 clock_skew 指标"
+      - alert: SmartErpCompensationFutureRetry
+        expr: max(smart_erp_compensation_future_retry) > 0
+        for: 1m
+        labels:
+          severity: P1
+          service: smart-erp
+        annotations:
+          summary: "出现 next_retry_at 落在未来 18s 之外的补偿任务"
+          description: >-
+            计数={{ $value }}。正常退避最长 8s，写入的未来时间超过 now()+18s 只能是
+            墙钟被回拨（或应用/DB 时钟不一致）导致把过去的「立即」写成了未来。
+          why_paged: >-
+            这是根因信号：此时任务可能还没卡住，但 claim 已经不会再取到它们；
+            1 分钟内确认可以避免进入「静默 queued」，并为时钟问题留下证据。
+          runbook: "比对应用与 DB 的 now()；检查宿主 NTP/pmtx 与容器时钟，见下方的 clock_skew 指标"
 
       # ------------------------------------------------------------------
       # P1 / P2：应用侧时钟回拨（根因信号，任务卡住之前就能报）
       # 指标：smart_erp_db_clock_skew_seconds（Δtick 与 Δwall 成对采样，负值=回拨）
-      # 采集点：无（待 apps/agents 接线）
+      # 采集点：apps/agents/compensation_worker.py:183（ClockSampler.sample，每轮触发），
+      #         同进程 :303 serve /metrics → 抓取目标 compensation:8013。
       # ------------------------------------------------------------------
-      # 采集点待接线（归属流：apps/runtime；解锁条件：进程心跳每 ≤10s 成对采样 monotonic/time 并调用 observe_clock_skew()，基线 |skew| < 1s）
-      # - alert: SmartErpClockSkewP2
-      #   expr: max(abs(smart_erp_db_clock_skew_seconds)) >= 5
-      #   for: 1m
-      #   labels:
-      #     severity: P2
-      #     service: smart-erp
-      #   annotations:
-      #     summary: "应用单调时钟与墙钟偏差 ≥ 5s（持续 1 分钟）"
-      #     description: >-
-      #       最大偏差={{ $value }}s。时钟不一致会让所有「now() 比较」写入的闸门时间失真，
-      #       包括补偿的 next_retry_at；此时业务可能仍正常，但已有任务被写到了错误的时间。
-      #     why_paged: >-
-      #       5s 是 NTP 步进/容器迁移的典型量级，先在工作时间排查；
-      #       它本身不叫醒人，但如果同时出现 future_retry，则按 P1 处理。
-      #     runbook: "检查宿主机 NTP（chrony/pmtx）与容器时钟；确认是否有 VM 迁移/休眠"
+      - alert: SmartErpClockSkewP2
+        expr: max(abs(smart_erp_db_clock_skew_seconds)) >= 5
+        for: 1m
+        labels:
+          severity: P2
+          service: smart-erp
+        annotations:
+          summary: "应用单调时钟与墙钟偏差 ≥ 5s（持续 1 分钟）"
+          description: >-
+            最大偏差={{ $value }}s。时钟不一致会让所有「now() 比较」写入的闸门时间失真，
+            包括补偿的 next_retry_at；此时业务可能仍正常，但已有任务被写到了错误的时间。
+          why_paged: >-
+            5s 是 NTP 步进/容器迁移的典型量级，先在工作时间排查；
+            它本身不叫醒人，但如果同时出现 future_retry，则按 P1 处理。
+          runbook: "检查宿主机 NTP（chrony/pmtx）与容器时钟；确认是否有 VM 迁移/休眠"
 
-      # 采集点待接线（归属流：apps/runtime；解锁条件：同 clock skew：observe_clock_skew() 接线并确认无持续回拨）
-      # - alert: SmartErpClockSkewP1
-      #   expr: max(abs(smart_erp_db_clock_skew_seconds)) >= 30
-      #   for: 1m
-      #   labels:
-      #     severity: P1
-      #     service: smart-erp
-      #   annotations:
-      #     summary: "应用单调时钟与墙钟偏差 ≥ 30s（持续 1 分钟）"
-      #     description: >-
-      #       最大偏差={{ $value }}s。这个量级足以让依赖 now() 的重试闸门整批失效，
-      #       并可能重放/跳过整段调度窗口。
-      #     why_paged: >-
-      #       30s 不是抖动而是故障：要么时钟被大幅回拨，要么进程被挂起后墙钟跳变；
-      #       继续跑会让补偿与重试在错误时间线上执行，必须立即确认并决定是否停 worker。
-      #     runbook: "先停补偿 worker 防止继续写错 next_retry_at；再校正时钟并核对 overdue/future_retry"
+      - alert: SmartErpClockSkewP1
+        expr: max(abs(smart_erp_db_clock_skew_seconds)) >= 30
+        for: 1m
+        labels:
+          severity: P1
+          service: smart-erp
+        annotations:
+          summary: "应用单调时钟与墙钟偏差 ≥ 30s（持续 1 分钟）"
+          description: >-
+            最大偏差={{ $value }}s。这个量级足以让依赖 now() 的重试闸门整批失效，
+            并可能重放/跳过整段调度窗口。
+          why_paged: >-
+            30s 不是抖动而是故障：要么时钟被大幅回拨，要么进程被挂起后墙钟跳变；
+            继续跑会让补偿与重试在错误时间线上执行，必须立即确认并决定是否停 worker。
+          runbook: "先停补偿 worker 防止继续写错 next_retry_at；再校正时钟并核对 overdue/future_retry"
 
       # ------------------------------------------------------------------
       # 说明：原 SmartErpCompensationBacklogHigh(P1) 已删除。
-      # 它依赖 smart_erp_compensation_backlog，而 set_compensation_backlog 在
-      # apps/、core/、db/、scripts/ 零调用——永不触发的 P1 是假安全感。
-      # 待 apps/agents 落地采集点后，再连同 overdue/future_retry 一起恢复并验收。
+      # 它依赖 smart_erp_compensation_backlog；采集点（compensation_worker.py:288）
+      # 现已具备，但恢复规则同样要等一个重试周期的真实积压基线，暂不凭猜启用。
       # ------------------------------------------------------------------
 
       # ------------------------------------------------------------------
       # P1：对账批次失败率
       # 指标：smart_erp_recon_batches_total{result="pending_manual|unreconcilable"}
+      # 采集点：apps/api/service.py:1137（api 进程 /metrics）
       # ------------------------------------------------------------------
       - alert: SmartErpReconBatchFailureRateHigh
         expr: >-
@@ -254,28 +256,32 @@ groups:
       # ------------------------------------------------------------------
       # P0：审计链断链（最高优先级）
       # 指标：smart_erp_audit_chain_broken（0 正常 / 1 断链）
+      # 采集点：apps/audit/monitor.py:123、:144，经 core/runtime/scheduler.py::tick 调用；
+      #         scheduler 自己 serve /metrics（core/runtime/scheduler.py::_amain → scheduler:8011）。
+      #         首次写入前序列 absent：max() 在 absent 时不触发，等价「未知」而非「完好」；
+      #         目标整体掉线由 SmartErpScrapeTargetDown 兜住。
       # ------------------------------------------------------------------
-      # 采集点待接线（归属流：apps/audit；解锁条件：scheduler 进程自己 serve /metrics + 人为断链 0→1 演练；首次写入前序列 absent，必须当未知而非 0。写入点见分支 feat/audit-chain-metric-wiring）
-      # - alert: SmartErpAuditChainBroken
-      #   expr: max(smart_erp_audit_chain_broken) > 0
-      #   for: 1m
-      #   labels:
-      #     severity: P0
-      #     service: smart-erp
-      #     compliance: audit-chain
-      #   annotations:
-      #     summary: "P0：审计链断链，审计记录不可信"
-      #     description: >-
-      #       smart_erp_audit_chain_broken=1。前像/后像哈希链校验失败或链上记录缺失，
-      #       此时“谁在什么时候改了什么”无法自证，所有对外审计承诺失效。
-      #     why_paged: >-
-      #       审计链是合规与追责的唯一证据；断链意味着后续任何回滚与赔偿都无法证明边界。
-      #       必须立即停止相关写入并保全现场，不能等到工作时间——每小时都可能产生新的不可信记录。
-      #     runbook: "立即冻结相关连接器写入；导出最近审计链片段与校验结果；按安全事件流程上报"
+      - alert: SmartErpAuditChainBroken
+        expr: max(smart_erp_audit_chain_broken) > 0
+        for: 1m
+        labels:
+          severity: P0
+          service: smart-erp
+          compliance: audit-chain
+        annotations:
+          summary: "P0：审计链断链，审计记录不可信"
+          description: >-
+            smart_erp_audit_chain_broken=1。前像/后像哈希链校验失败或链上记录缺失，
+            此时“谁在什么时候改了什么”无法自证，所有对外审计承诺失效。
+          why_paged: >-
+            审计链是合规与追责的唯一证据；断链意味着后续任何回滚与赔偿都无法证明边界。
+            必须立即停止相关写入并保全现场，不能等到工作时间——每小时都可能产生新的不可信记录。
+          runbook: "立即冻结相关连接器写入；导出最近审计链片段与校验结果；按安全事件流程上报"
 
       # ------------------------------------------------------------------
       # P2：对账批次 95 分位耗时（SLO 预警，不直接叫醒）
       # 指标：smart_erp_recon_batch_duration_seconds
+      # 采集点：apps/api/service.py:1137（api 进程 /metrics）
       # ------------------------------------------------------------------
       - alert: SmartErpReconBatchP95Slow
         expr: >-
@@ -300,14 +306,14 @@ groups:
       # ------------------------------------------------------------------
       # 建议（不启用）：对账请求失败率
       # 指标：smart_erp_recon_runs_failed_total / smart_erp_recon_batches_total
-      # 采集点：已有（apps/api/service.py:983、:986 / :975）
+      # 采集点：已有（apps/api/service.py:1145、:1148 / :1137）
       # 建议规则 · 待真实基线后再启用（有采集点不等于可以凭猜定阈值）
       # 依据：失败是硬错误（stage=input/engine/persist），比 pending_manual 这类
       #   业务分流更严重，所以阈值可比「批次未自动完成率 2%」宽一些；先以 5% / 15m
       #   作为候选，跑满一个结账周期后按真实 P95 重定。分母用已处理批次数，
       #   避免夜间空窗把 1 次失败放大成高失败率。
       # ------------------------------------------------------------------
-      # 建议规则 · 待真实基线后再启用（已有采集点：apps/api/service.py:983、:986）
+      # 待真实基线后再启用（跑满一个结账周期后按真实失败率重定阈值）
       # - alert: SmartErpReconRunFailureRateHigh
       #   expr: >-
       #     sum(rate(smart_erp_recon_runs_failed_total[15m]))

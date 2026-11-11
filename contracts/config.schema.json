@@ -923,23 +923,33 @@
     "ERP_METRICS_ENABLED": {
       "type": "string",
       "scope": "compose",
-      "services": ["api"],
+      "services": ["api", "scheduler"],
       "required": false,
       "secret": false,
       "phase": "startup",
-      "default": "",
-      "description": "1/true/yes/on 才挂载 /metrics；缺省不挂载（observability/metrics.py）"
+      "default": "true",
+      "description": "1/true/yes/on 才挂载 /metrics；compose 默认开启（端点只在内网，nginx 对 /erp/api/metrics 返回 404）。关掉等于让依赖该进程的规则永远 absent（observability/metrics.py）"
     },
     "ERP_METRICS_PATH": {
       "type": "string",
       "scope": "compose",
-      "services": ["api"],
+      "services": ["api", "scheduler"],
       "required": false,
       "secret": false,
       "phase": "startup",
       "default": "/metrics",
       "pattern": "^/.*",
-      "description": "指标端点路径；开启后必须先由反向代理限定内网（RUNBOOK 5.2）"
+      "description": "指标端点路径；改值必须同步 deploy/smart-erp/monitoring/prometheus.yml 的 metrics_path，否则抓取 404"
+    },
+    "ERP_METRICS_PORT": {
+      "type": "integer",
+      "scope": "compose",
+      "services": ["scheduler"],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 8011,
+      "description": "scheduler 独立 /metrics 监听端口；只内网 expose（Prometheus → scheduler:8011），绑定失败进程直接退出"
     }
   }
 }

@@ -1,8 +1,11 @@
 """告警规则文件校验：结构、指标存在性、采集点同批合入、触发演示。
 
 ``promtool`` 未安装（不属于本项目依赖），因此这里用 PyYAML 做语法校验，
-并对规则做结构断言；补偿/时钟 6 条规则只允许以注释形态存在（零采集点），
-它们的表达式用最小求值器在真实 ``/metrics`` 文本上各跑一遍。
+并对规则做结构断言；补偿/时钟/unresolved/审计链 8 条规则在 2026-11-11 接线后
+进入生效集合，它们依赖的指标都有生产写入点，表达式在真实 ``/metrics`` 文本上各跑一遍。
+
+口径（README §6.1.2）：写入点存在 ≠ 可观测；规则不评估 = 规则不存在。
+因此本文件同时锁三件事：规则生效、指标有写入点、写指标的进程真的 serve /metrics。
 """
 
 from __future__ import annotations
@@ -43,8 +46,9 @@ def test_rule_file_parses_and_has_required_groups(rules_doc: dict) -> None:
 
 
 def test_every_active_rule_has_wake_up_rationale(rules: list[dict]) -> None:
-    # 当前生效的只有 2 条对账规则；新增规则必须先有采集点才能进生效集合。
-    assert len(rules) == 2
+    # 11 条：2 条对账 + 1 条抓取掉线 + unresolved + overdue×3 + future_retry
+    #        + clock×2 + 审计链 P0。新增规则必须先有采集点才能进生效集合。
+    assert len(rules) == 11, [rule["alert"] for rule in rules]
     for rule in rules:
         assert rule["alert"]
         assert rule["expr"].strip()
@@ -56,17 +60,22 @@ def test_every_active_rule_has_wake_up_rationale(rules: list[dict]) -> None:
         assert annotations.get("runbook", "").strip()
 
 
-def test_audit_chain_rule_is_commented_as_p0_pending_wiring() -> None:
-    """P0 仍在文件里，但采集点为零，只能以注释形态存在并标归属流。"""
+def test_audit_chain_rule_is_active_p0_wired_to_scheduler() -> None:
+    """审计链断链是最高优先级：gauge 由 scheduler 写入，由同一进程 serve。"""
 
     text = RULE_FILE.read_text(encoding="utf-8")
-    assert "# - alert: SmartErpAuditChainBroken" in text
-    assert "#   expr: max(smart_erp_audit_chain_broken) > 0" in text
+    assert "\n      - alert: SmartErpAuditChainBroken" in text
+    assert "expr: max(smart_erp_audit_chain_broken) > 0" in text
     # P0 不允许拖长等待时间；1 分钟足够排除采集抖动。
-    assert "#   for: 1m" in text
-    assert "#     severity: P0" in text
-    assert "#     compliance: audit-chain" in text
-    assert "归属流：apps/audit" in _marker_for("SmartErpAuditChainBroken")
+    assert "for: 1m" in text
+    assert "severity: P0" in text
+    assert "compliance: audit-chain" in text
+    # 写指标的进程必须自己暴露 /metrics，否则该序列永远 absent。
+    scheduler_src = (
+        Path(__file__).resolve().parents[2] / "core" / "runtime" / "scheduler.py"
+    ).read_text(encoding="utf-8")
+    assert "MetricsServer" in scheduler_src
+    assert "ERP_METRICS_PORT" in scheduler_src
 
 
 def test_every_referenced_metric_exists_in_registry(rules: list[dict]) -> None:
@@ -86,11 +95,20 @@ def test_required_alerts_are_covered(rules: list[dict]) -> None:
     assert names == {
         "SmartErpReconBatchFailureRateHigh",
         "SmartErpReconBatchP95Slow",
+        "SmartErpScrapeTargetDown",
+        "SmartErpUnresolvedTicketsGrowing",
+        "SmartErpCompensationOverdueP2",
+        "SmartErpCompensationOverdueP1Volume",
+        "SmartErpCompensationOverdueP1Duration",
+        "SmartErpCompensationFutureRetry",
+        "SmartErpClockSkewP2",
+        "SmartErpClockSkewP1",
+        "SmartErpAuditChainBroken",
     }, names
-    # 其余 9 条依赖零采集点指标，按 README §6.1.2 必须注释掉，不得出现在生效规则里。
-    assert "SmartErpCompensationOverdueP2" not in names
-    assert "SmartErpWriteFailureRateHigh" not in names
-    assert "SmartErpAuditChainBroken" not in names
+    # 仍然无真实阈值的两条只能注释：写失败率、对账请求失败率。
+    text = RULE_FILE.read_text(encoding="utf-8")
+    assert "# - alert: SmartErpWriteFailureRateHigh" in text
+    assert "# - alert: SmartErpReconRunFailureRateHigh" in text
 
 
 # ---------------------------------------------------------------- P0 触发演示
@@ -154,8 +172,8 @@ def test_audit_chain_p0_alert_fires_on_real_metrics_output(capsys: pytest.Captur
 # ------------------------------------------------- 补偿 / 时钟规则（A、B、C）
 
 
-#: 指标名 → (severity, for, 归一化后的 expr)。口径与 README §6.1.3 一一对应。
-_COMPENSATION_RULES = {
+#: 已接线规则的语义锁定：(severity, for, 归一化后的 expr)。口径与 README §6.1.3 一致。
+_ACTIVE_WIRED_RULES = {
     "SmartErpCompensationOverdueP2": ("P2", "5m", "max(smart_erp_compensation_overdue) > 0"),
     "SmartErpCompensationOverdueP1Volume": (
         "P1",
@@ -182,18 +200,38 @@ _COMPENSATION_RULES = {
         "1m",
         "max(abs(smart_erp_db_clock_skew_seconds)) >= 30",
     ),
+    "SmartErpAuditChainBroken": ("P0", "1m", "max(smart_erp_audit_chain_broken) > 0"),
 }
 
-
-#: 截至 2026-11-11 审计，唯一有生产采集点的指标族（见 README §6.1.3）。
-WIRED_METRICS = {
-    "smart_erp_recon_batches_total",
-    "smart_erp_recon_batch_duration_seconds",
-    "smart_erp_recon_supplier_lines_total",
-    "smart_erp_recon_batch_auto_match_ratio",
-    "smart_erp_recon_degraded_batches_total",
-    "smart_erp_recon_runs_failed_total",
+#: 指标名 → (生产写入点相对路径, 必须出现的调用片段)。
+#: 这条锁住「规则引用的指标真的有进程在写」；写入点消失时规则会静默，必须红。
+WRITER_LOCATIONS = {
+    "smart_erp_recon_batches_total": ("apps/api/service.py", "observe_recon_result("),
+    "smart_erp_recon_batch_duration_seconds": (
+        "apps/api/service.py",
+        "observe_recon_result(",
+    ),
+    "smart_erp_unresolved_tickets": (
+        "apps/agents/compensation_worker.py",
+        "set_unresolved(",
+    ),
+    "smart_erp_compensation_overdue": (
+        "apps/agents/compensation_worker.py",
+        "set_compensation_overdue(",
+    ),
+    "smart_erp_compensation_future_retry": (
+        "apps/agents/compensation_worker.py",
+        "set_compensation_future_retry(",
+    ),
+    "smart_erp_db_clock_skew_seconds": (
+        "apps/agents/compensation_worker.py",
+        "observe_clock_skew(",
+    ),
+    "smart_erp_audit_chain_broken": ("apps/audit/monitor.py", "set_audit_chain_broken("),
 }
+
+#: 有生产写入点的指标族。``up`` 是 Prometheus 内置序列，不在此表。
+WIRED_METRICS = set(WRITER_LOCATIONS)
 
 #: 注释态规则的锚点与归属流标记。任何一条被注释的规则都必须二选一：
 #: 「采集点待接线（归属流：…）」或「待真实基线」——不允许无理由地静默停用。
@@ -230,15 +268,27 @@ def test_dead_backlog_alert_is_removed(rules: list[dict]) -> None:
             assert line.lstrip().startswith("#"), line
 
 
-def test_pending_wiring_rules_are_commented_out() -> None:
-    """同批合入口径：零采集点的规则只能以注释形态存在（README §6.1.2）。"""
+def test_wired_rules_are_active_with_locked_semantics(rules: list[dict]) -> None:
+    """接线后的规则必须真的在生效集合里，且 severity / for / 表达式没被悄悄改掉。"""
 
-    text = RULE_FILE.read_text(encoding="utf-8")
-    for name, (severity, wait, expr) in _COMPENSATION_RULES.items():
-        assert f"# - alert: {name}" in text, name
-        assert f"#   expr: {expr}" in text, name
-        assert f"#   for: {wait}" in text, name
-        assert f"#     severity: {severity}" in text, name
+    by_name = {rule["alert"]: rule for rule in rules}
+    for name, (severity, wait, expr) in _ACTIVE_WIRED_RULES.items():
+        rule = by_name[name]
+        assert rule["labels"]["severity"] == severity, name
+        assert rule["for"] == wait, name
+        assert " ".join(rule["expr"].split()) == expr, name
+
+
+def test_every_wired_metric_has_a_production_writer() -> None:
+    """每个被生效规则引用的指标，都必须能在生产代码里找到写入调用。
+
+    写入点被删/被搬走时，规则会变成永远 inactive——这正是「规则不评估 = 规则不存在」。
+    """
+
+    repo = Path(__file__).resolve().parents[2]
+    for metric, (relative, snippet) in WRITER_LOCATIONS.items():
+        source = (repo / relative).read_text(encoding="utf-8")
+        assert snippet in source, f"{metric} 的生产写入点 {relative}::{snippet} 已不存在"
 
 
 def test_every_commented_rule_states_owner_or_baseline() -> None:
@@ -246,10 +296,8 @@ def test_every_commented_rule_states_owner_or_baseline() -> None:
 
     names = _commented_alert_names()
     assert len(names) == len(set(names)), names
-    expected = set(_COMPENSATION_RULES) | {
+    expected = {
         "SmartErpWriteFailureRateHigh",
-        "SmartErpUnresolvedTicketsGrowing",
-        "SmartErpAuditChainBroken",
         "SmartErpReconRunFailureRateHigh",
     }
     assert set(names) == expected, set(names) ^ expected
