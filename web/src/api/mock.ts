@@ -53,6 +53,10 @@ const BATCH_MID = 'e0000000-0000-4000-8000-000000000003';
 /** 迁移前的旧批次：无计数投影，汇总字段为 null。 */
 const BATCH_OLD = 'e0000000-0000-4000-8000-000000000002';
 
+/** 上传演示：登记 CSV 后，下一次 createRun 用上传演示的 3 行批次回执。 */
+let uploadedStatement: string | null = null;
+let uploadedRunActive = false;
+
 function ticket(partial: Partial<TicketOut> & Pick<TicketOut, 'ticket_id' | 'ticket_no' | 'state'>): TicketOut {
   return {
     scene_code: 'ag1_reconcile',
@@ -846,6 +850,36 @@ function batchOut(batchId: string = BATCH): ReconBatchOut {
 }
 
 /**
+ * 上传演示批次：3 行全部匹配，其中 1 行存在单价差异。
+ * `matched` 是行级匹配，差异行仍计入 matched（3 = 行数，不是 2）。
+ */
+function uploadedBatch(): ReconBatchOut {
+  const batch = batchOut();
+  batch.status = '待人工复核';
+  batch.conclusive = false;
+  batch.status_reason = '3 行匹配，其中 1 行存在单价差异，待人工复核';
+  batch.suppliers = ['SUP-DEMO-01'];
+  batch.diff_count = 1;
+  if (batch.metrics) {
+    batch.metrics = {
+      ...batch.metrics,
+      supplier_lines: 3,
+      matched: 3,
+      matched_rate: '1.0000',
+      ambiguous: 0,
+      candidate_only: 0,
+      unmatched: 0,
+      diff_lines: 1,
+      diff_rate: '0.333333',
+      diff_amount: '125.0000',
+      suspected_anomaly: false,
+      auto_disposal_allowed: false,
+    };
+  }
+  return batch;
+}
+
+/**
  * 批次列表的离线样本：含一条没有投影的旧批次（三个汇总字段为 null），
  * 用来在 demo 里验证「null 不能渲染成 0」。
  */
@@ -1133,14 +1167,32 @@ export async function mockSend(
       return problem(422, 'E-DATA-MISSING', `工单 ${parts[1]} 不存在`);
     }
   }
+  if (method === 'POST' && path === '/v1/recon/statements') {
+    const payload = (body ?? {}) as { file_name?: string; dataset?: { our_lines?: unknown[] } };
+    uploadedStatement = payload.file_name || 'supplier_statement_2026-10.csv';
+    return {
+      status: 201,
+      body: {
+        statement_file: uploadedStatement,
+        supplier_lines: 3,
+        our_lines: payload.dataset?.our_lines?.length ?? 0,
+      },
+    };
+  }
   if (method === 'POST' && path === '/v1/recon/runs') {
     const payload = (body ?? {}) as Partial<ReconRunIn>;
+    if (uploadedStatement && payload.sources?.statement_files?.length) {
+      uploadedRunActive = true;
+      const batch = uploadedBatch();
+      batch.suppliers = payload.suppliers ?? batch.suppliers;
+      return { status: 201, body: batch };
+    }
     const batch = batchOut();
     batch.suppliers = payload.suppliers ?? batch.suppliers;
     return { status: 201, body: batch };
   }
   if (method === 'GET' && parts[0] === 'recon' && parts[1] === 'runs' && parts.length === 3) {
-    return { status: 200, body: batchOut(parts[2]) };
+    return { status: 200, body: uploadedRunActive && parts[2] === BATCH ? uploadedBatch() : batchOut(parts[2]) };
   }
   if (method === 'GET' && parts[0] === 'recon' && parts[1] === 'runs' && parts[3] === 'diffs' && parts.length === 4) {
     // 旧批次没有差异投影：返回空页，而不是借用当前批次的差异。

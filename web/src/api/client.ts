@@ -24,8 +24,10 @@ import type {
   PageTicketOut,
   MeteringStatementOut,
   ReconBatchOut,
+  ReconDatasetIn,
   ReconDiffDetailOut,
   ReconRunIn,
+  ReconStatementOut,
   SessionOut,
   SuggestIn,
   SuggestOut,
@@ -160,6 +162,85 @@ async function sendJson(method: string, path: string, options: SendOptions): Pro
   return { status: response.status, text: await response.text(), headers: response.headers };
 }
 
+/** jsdom 的 File 没有 text()，用 FileReader 兜底；浏览器走原生 text()。 */
+async function readFileText(file: File): Promise<string> {
+  if (typeof file.text === 'function') return file.text();
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(reader.error ?? new Error('读取对账单文件失败'));
+    reader.readAsText(file);
+  });
+}
+
+/**
+ * 对账单 CSV 的 multipart 上传。手写 body 而不是 FormData：jsdom 的 FormData
+ * 与 Node fetch 跨 realm 不互认，会退化成 "[object FormData]"；CSV 按 UTF-8
+ * 文本拼装既能跑真实链路，也不依赖浏览器实现细节。
+ */
+async function sendStatementMultipart(file: File, dataset: ReconDatasetIn): Promise<RawResult> {
+  const config = getApiConfig();
+
+  if (config.mock) {
+    const response = await mockSend(
+      'POST',
+      RECON_STATEMENTS_PATH,
+      {},
+      { file_name: file.name, dataset },
+      config,
+    );
+    return {
+      status: response.status,
+      text: response.text ?? JSON.stringify(response.body ?? null),
+      headers: new Headers(response.headers ?? {}),
+    };
+  }
+
+  const boundary = `----erp-recon-${Date.now().toString(16)}`;
+  const safeName = file.name.replace(/"/g, '');
+  const csv = await readFileText(file);
+  const payload = [
+    `--${boundary}`,
+    `Content-Disposition: form-data; name="file"; filename="${safeName}"`,
+    'Content-Type: text/csv; charset=utf-8',
+    '',
+    csv,
+    `--${boundary}`,
+    'Content-Disposition: form-data; name="dataset"',
+    '',
+    JSON.stringify(dataset),
+    `--${boundary}--`,
+    '',
+  ].join('\r\n');
+
+  const headers = new Headers({
+    Accept: 'application/json, application/problem+json',
+    'Content-Type': `multipart/form-data; boundary=${boundary}`,
+  });
+  if (config.token) headers.set('X-Session-Token', config.token);
+
+  let response: Response;
+  try {
+    response = await fetch(joinUrl(config.baseUrl, RECON_STATEMENTS_PATH, new URLSearchParams()), {
+      method: 'POST',
+      headers,
+      body: payload,
+    });
+  } catch (error) {
+    throw new ApiError(
+      {
+        status: 0,
+        code: 'NETWORK',
+        title: '无法连接 API',
+        detail: `上传对账单失败：${(error as Error)?.message ?? '网络错误'}。请检查 baseUrl、后端进程与跨域配置。`,
+        retriable: true,
+      },
+      0,
+    );
+  }
+  return { status: response.status, text: await response.text(), headers: response.headers };
+}
+
 function parseJson<T>(result: RawResult): T {
   if (result.status >= 400) throw toApiError(result.status, result.text);
   if (!result.text) return undefined as T;
@@ -194,6 +275,7 @@ export function ticketPath(ticketId: string, suffix = ''): string {
 export const SESSION_PATH = '/v1/auth/session';
 export const ASSISTANT_SUGGEST_PATH = '/v1/assistant/suggest';
 export const RECON_BATCHES_PATH = '/v1/recon/batches';
+export const RECON_STATEMENTS_PATH = '/v1/recon/statements';
 export const TICKETS_PATH = '/v1/tickets';
 export const PENDING_APPROVALS_PATH = '/v1/approvals/pending';
 
@@ -301,6 +383,14 @@ export const api = {
 
   createReconRun(payload: ReconRunPayload): Promise<ReconBatchOut> {
     return request<'POST /v1/recon/runs'>('POST', '/v1/recon/runs', { body: payload });
+  },
+
+  /**
+   * 上传供应商对账单 CSV，登记成对账数据集。`dataset` 是我方数据（来自 fixtures，
+   * 不由上传文件反填）；422 的 detail 会带真实文件行号，调用方原样展示。
+   */
+  async uploadReconStatement(file: File, dataset: ReconDatasetIn): Promise<ReconStatementOut> {
+    return parseJson<ReconStatementOut>(await sendStatementMultipart(file, dataset));
   },
 
   /**
