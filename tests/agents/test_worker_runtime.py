@@ -380,7 +380,8 @@ def test_complete_lease_taken_over_logs_warning_with_fate(db: str, caplog) -> No
             )
             with _worker_logging_enabled():
                 stats = await worker.run(max_jobs=1)
-            assert stats.done == 1
+            assert stats.done == 0
+            assert stats.discarded == 1
 
             async with env.sf() as session:
                 row = (
@@ -441,7 +442,8 @@ def test_heartbeat_lease_taken_over_logs_warning(db: str, caplog) -> None:
             )
             with _worker_logging_enabled():
                 stats = await worker.run(max_jobs=1)
-            assert stats.done == 1
+            assert stats.done == 0
+            assert stats.discarded == 1
             return job_id
 
     caplog.set_level(logging.WARNING)
@@ -459,6 +461,46 @@ def test_heartbeat_lease_taken_over_logs_warning(db: str, caplog) -> None:
     assert "预期 state=running lease_owner=w-steal-beat" in joined
     assert "实际 state=queued lease_owner=None" in joined
     assert "会被重新领取再跑一遍" in joined
+
+
+def test_discarded_result_is_not_counted_as_done(db: str, caplog) -> None:
+    """落账失败不能计成 done：stats.discarded +1，关停汇总行要写清「跑完 N、丢弃 M」。"""
+
+    async def _run() -> None:
+        async with db_env(db) as env:
+            queue = JobQueueStore(env.sf)
+            await queue.enqueue("agent", "steal-for-stats")
+
+            async def _steal(job: Job) -> None:
+                async with env.sf() as session, session.begin():
+                    await session.execute(text(_steal_sql()), {"id": job.id})
+
+            worker = Worker(
+                session_factory=env.sf,
+                queues=["agent"],
+                worker_id="w-discard",
+                concurrency=1,
+                lease_seconds=5.0,
+                heartbeat_seconds=0.05,
+                poll_seconds=0.01,
+                handlers={**HANDLERS, "steal-for-stats": _steal},
+            )
+            with _worker_logging_enabled():
+                stats = await worker.run(max_jobs=1)
+            assert stats.done == 0, "结果没落账，不能计成 done"
+            assert stats.discarded == 1
+            assert stats.failed == 0
+
+    caplog.set_level(logging.INFO)
+    asyncio.run(_run())
+
+    summary = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "erp.worker" and "退出" in record.getMessage()
+    ]
+    assert summary, "关停时必须打汇总行"
+    assert any("跑完 0、丢弃 1" in line for line in summary), summary
 
 
 def test_reclaim_stale_excludes_own_lease_but_reclaims_others(db: str) -> None:

@@ -113,6 +113,8 @@ async def _handle_sleep(job: Job) -> None:
 class WorkerStats:
     done: int = 0
     failed: int = 0
+    # 落账被拒（租约已被接管）：handler 跑完了，但结果没进账本，不能算 done。
+    discarded: int = 0
 
 
 @dataclass
@@ -310,7 +312,11 @@ class Worker:
             logger.warning("任务 %s 失败 attempts=%s -> %s", job.id, job.attempts, state)
         else:
             completed = await self.queue.complete(job.id, owner=self.worker_id)
-            if not completed:
+            if completed:
+                self.stats.done += 1
+            else:
+                # 结果没落账：计 discarded 而不是 done，否则汇总会「全绿但实际被重跑」。
+                self.stats.discarded += 1
                 detail = await self._describe_lease_loss(job.id)
                 logger.warning(
                     "任务 %s 完成落账失败：租约已被他人接管，本次结果被丢弃。"
@@ -319,7 +325,6 @@ class Worker:
                     self.worker_id,
                     detail,
                 )
-            self.stats.done += 1
 
     async def _consume(self, max_jobs: int | None, processed: list[int]) -> None:
         while not self._stop.is_set():
@@ -405,7 +410,11 @@ class Worker:
                 pass
             await self._beat("stopped")
         logger.info(
-            "worker %s 退出 done=%s failed=%s", self.worker_id, self.stats.done, self.stats.failed
+            "worker %s 退出：跑完 %s、丢弃 %s、失败 %s",
+            self.worker_id,
+            self.stats.done,
+            self.stats.discarded,
+            self.stats.failed,
         )
         return self.stats
 
