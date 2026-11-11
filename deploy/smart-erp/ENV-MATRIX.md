@@ -102,7 +102,7 @@
 
 ```bash
 python scripts/validate_config_schema.py --all
-# PASS: 63 个键 · compose 覆盖一致 · env=ok · matrix=demo.env,local.env,prod.env
+# PASS: 73 个键 · compose 覆盖一致 · env=ok · matrix=demo.env,local.env,prod.env
 ```
 
 `--all` 做四件事：
