@@ -142,8 +142,7 @@ services:
       ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
       ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-4}
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
-      ERP_WORKER_QUEUES: ${ERP_WORKER_QUEUES:-agent,io}
-      ERP_WORKER_CONCURRENCY: ${ERP_WORKER_CONCURRENCY:-4}
+      # 队列/并发只通过 command 的 ${...} 插值生效；环境副本没有读取点，已删（B-COMPOSE-METRICS）。
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
       ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
@@ -190,6 +189,8 @@ services:
       ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
       ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-1}
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
+      # 实际循环间隔 = min(tick, lease/2)；lease 默认 30 → 这里写 60 实际是每 15s 一跳。
+      # 启动日志会打 `tick_seconds=60 source=env lease=30 effective=15`，别只看这个数。
       ERP_SCHEDULER_TICK_SECONDS: ${ERP_SCHEDULER_TICK_SECONDS:-60}
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
@@ -411,8 +412,7 @@ services:
       ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
       ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-4}
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
-      ERP_WORKER_QUEUES: agent
-      ERP_WORKER_CONCURRENCY: ${ERP_AGENT_WORKER_CONCURRENCY:-4}
+      # 队列/并发只通过 command 的 ${...} 插值生效；环境副本没有读取点，已删（B-COMPOSE-METRICS）。
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
       ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
@@ -465,8 +465,7 @@ services:
       ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
       ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-2}
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
-      ERP_WORKER_QUEUES: io
-      ERP_WORKER_CONCURRENCY: ${ERP_IO_WORKER_CONCURRENCY:-2}
+      # 队列/并发只通过 command 的 ${...} 插值生效；环境副本没有读取点，已删（B-COMPOSE-METRICS）。
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
       ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}

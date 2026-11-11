@@ -1,0 +1,85 @@
+{
+  "$comment": "compose 里已下发、但代码尚无读取点的 ERP_* 变量。只收「将来会接」的键；「本来就不该有」的键应直接从 docker-compose.yml 删除。每条必须有 owner / reason / card。新增条目必须同时上调 tests/deploy/test_compose_env_consistency.py 里的 MAX_COMPOSE_ENV_EXCEPTIONS 并写明理由。",
+  "exceptions": {
+    "ERP_HEARTBEAT_INTERVAL_SECONDS": {
+      "owner": "S8/core.runtime",
+      "reason": "worker/scheduler 只认 --heartbeat-seconds（默认 10s），compose 写 30 未生效；与 tick 同型，下一轮按 tick 的方式接 env 默认值",
+      "card": "B-COMPOSE-METRICS"
+    },
+    "ERP_CONNECTOR_GW_URL": {
+      "owner": "S1/apps.connectors",
+      "reason": "worker 调用 connector-gw 的链路未落地，落地时由 worker 侧读取",
+      "card": "B-COMPOSE-METRICS"
+    },
+    "ERP_DOC_SERVICE_URL": {
+      "owner": "S8/core.runtime.worker(io)",
+      "reason": "worker-io 调用 docparse 服务的链路未落地",
+      "card": "B-COMPOSE-METRICS"
+    },
+    "ERP_LLM_BASE_URL": {
+      "owner": "S3/apps.agents",
+      "reason": "LLM 客户端未落地",
+      "card": "B-COMPOSE-METRICS"
+    },
+    "ERP_LLM_API_KEY": {
+      "owner": "S3/apps.agents",
+      "reason": "LLM 客户端未落地",
+      "card": "B-COMPOSE-METRICS"
+    },
+    "ERP_LLM_MODEL": {
+      "owner": "S3/apps.agents",
+      "reason": "LLM 客户端未落地",
+      "card": "B-COMPOSE-METRICS"
+    },
+    "ERP_LLM_TIMEOUT_SECONDS": {
+      "owner": "S3/apps.agents",
+      "reason": "LLM 客户端未落地",
+      "card": "B-COMPOSE-METRICS"
+    },
+    "ERP_OBJECT_STORE_DRIVER": {
+      "owner": "未认领/apps.platform",
+      "reason": "对象存储抽象未落地，落地方需先认领并接线",
+      "card": "B-COMPOSE-METRICS"
+    },
+    "ERP_OBJECT_STORE_PATH": {
+      "owner": "未认领/apps.platform",
+      "reason": "对象存储抽象未落地，落地方需先认领并接线",
+      "card": "B-COMPOSE-METRICS"
+    },
+    "ERP_S3_ENDPOINT": {
+      "owner": "未认领/apps.platform",
+      "reason": "S3 后端未落地，落地方需先认领并接线",
+      "card": "B-COMPOSE-METRICS"
+    },
+    "ERP_S3_BUCKET": {
+      "owner": "未认领/apps.platform",
+      "reason": "S3 后端未落地，落地方需先认领并接线",
+      "card": "B-COMPOSE-METRICS"
+    },
+    "ERP_S3_ACCESS_KEY": {
+      "owner": "未认领/apps.platform",
+      "reason": "S3 后端未落地，落地方需先认领并接线",
+      "card": "B-COMPOSE-METRICS"
+    },
+    "ERP_S3_SECRET_KEY": {
+      "owner": "未认领/apps.platform",
+      "reason": "S3 后端未落地，落地方需先认领并接线",
+      "card": "B-COMPOSE-METRICS"
+    },
+    "ERP_GW_TIMEOUT_SECONDS": {
+      "owner": "S1/apps.connectors.gateway",
+      "reason": "gateway 的出站超时配置未落地，当前用代码内默认值",
+      "card": "B-COMPOSE-METRICS"
+    },
+    "ERP_GW_EGRESS_ALLOWLIST_FILE": {
+      "owner": "S1/apps.connectors.gateway",
+      "reason": "gateway 出站白名单文件加载未落地",
+      "card": "B-COMPOSE-METRICS"
+    },
+    "ERP_CONFIG_DIR": {
+      "owner": "S1/apps.connectors.gateway",
+      "reason": "连接器配置目录读取未落地（compose 已把 ./config 挂到 /app/config，代码尚未读该键）",
+      "card": "B-COMPOSE-METRICS"
+    }
+  }
+}

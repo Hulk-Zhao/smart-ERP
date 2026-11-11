@@ -194,7 +194,11 @@ class ComposeStaticTest(unittest.TestCase):
             with self.subTest(service=name):
                 command = " ".join(str(part) for part in self.services[name]["command"])
                 self.assertIn(f"--queues={queue}", command)
-                self.assertIn(f"ERP_WORKER_QUEUES: {queue}", COMPOSE_FILE.read_text(encoding="utf-8"))
+                # 队列只经 command 生效；环境副本没有任何读取点，2026-11-11 已删除
+                # （B-COMPOSE-METRICS）。这里反过来锁住，避免又加回一份假配置。
+                self.assertNotIn(
+                    "ERP_WORKER_QUEUES", self.services[name].get("environment") or {}
+                )
 
         migrate = self.services["migrate"]
         self.assertEqual(migrate["restart"], "no", "migrate 必须是一次性服务")
