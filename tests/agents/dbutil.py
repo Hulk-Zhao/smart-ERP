@@ -62,7 +62,8 @@ async def truncate_all(url: str) -> None:
         async with engine.begin() as conn:
             await conn.execute(
                 text(
-                    "TRUNCATE erp.ticket_event, erp.ticket_step, erp.compensation_task, "
+                    "TRUNCATE erp.ticket_event, erp.ticket_step, erp.ticket_plan_step, "
+                    "erp.compensation_task, "
                     "erp.ticket_event_anchor, erp.audit_guard_state, erp.job_queue, "
                     "erp.worker_heartbeat, erp.scheduler_lease, erp.ticket CASCADE"
                 )

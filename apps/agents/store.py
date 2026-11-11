@@ -30,6 +30,7 @@ from apps.agents.events import (
     make_event,
     replay,
 )
+from apps.agents.models import TicketPlanStep
 from apps.agents.state_machine import TransitionContext, resolve_transition
 from apps.platform.contracts.ticket import TicketState
 from apps.platform.db.models import Ticket, TicketEvent, TicketStep
@@ -78,6 +79,42 @@ class ProjectionCheck:
             self.stored_state is self.replay_state
             and self.stored_version == self.replay_version
         )
+
+
+@dataclass(frozen=True, slots=True)
+class PlanStep:
+    """持久化后的单步计划（与执行记录的 ``ticket_step`` 不同：这是输入，不是结果）。"""
+
+    step_no: int
+    action_key: str
+    target_system: str
+    payload: Mapping[str, Any]
+    idem_key: str
+    verify_payload: Mapping[str, Any] | None = None
+
+
+def _plan_signature(step: PlanStep) -> tuple[Any, ...]:
+    return (
+        step.step_no,
+        step.action_key,
+        step.target_system,
+        step.idem_key,
+        dict(step.payload),
+        dict(step.verify_payload) if step.verify_payload is not None else None,
+    )
+
+
+def _plan_from_row(row: TicketPlanStep) -> PlanStep:
+    return PlanStep(
+        step_no=row.step_no,
+        action_key=row.action_key,
+        target_system=row.target_system,
+        payload=dict(row.payload),
+        idem_key=row.idem_key,
+        verify_payload=(
+            dict(row.verify_payload) if row.verify_payload is not None else None
+        ),
+    )
 
 
 def _record_from_row(row: TicketEvent) -> EventRecord:
@@ -575,6 +612,69 @@ class TicketStore:
                 )
             )
         return int(current or 0) + 1
+
+    # ------------------------------------------------------------------ 计划
+    async def save_plan(self, ticket_id: UUID, steps: Sequence[PlanStep]) -> None:
+        """执行前把整份计划落库；重复执行必须是同一份计划，否则拒绝覆盖。
+
+        计划是「一次定稿」的输入：允许同一份计划被重复执行（幂等），但不允许
+        中途换成另一份——否则执行记录与库里计划会背离，恢复入口续跑的就是假计划。
+        """
+        if not steps:
+            raise StoreError("执行计划不能为空")
+        wanted = sorted((_plan_signature(step) for step in steps), key=lambda item: item[0])
+
+        async with self._sf() as session, session.begin():
+            ticket = await session.scalar(
+                select(Ticket).where(Ticket.id == ticket_id).with_for_update()
+            )
+            if ticket is None:
+                raise TicketNotFound(str(ticket_id))
+            rows = (
+                await session.scalars(
+                    select(TicketPlanStep)
+                    .where(TicketPlanStep.ticket_id == ticket_id)
+                    .order_by(TicketPlanStep.step_no)
+                )
+            ).all()
+            if rows:
+                stored = [_plan_signature(_plan_from_row(row)) for row in rows]
+                if stored != wanted:
+                    raise StoreError(
+                        f"工单 {ticket_id} 已持久化另一份执行计划，拒绝覆盖："
+                        "计划的变更必须走新工单"
+                    )
+                return
+            session.add_all(
+                [
+                    TicketPlanStep(
+                        ticket_id=ticket_id,
+                        step_no=step.step_no,
+                        action_key=step.action_key,
+                        target_system=step.target_system,
+                        payload=dict(step.payload),
+                        idem_key=step.idem_key,
+                        verify_payload=(
+                            dict(step.verify_payload)
+                            if step.verify_payload is not None
+                            else None
+                        ),
+                    )
+                    for step in steps
+                ]
+            )
+
+    async def load_plan(self, ticket_id: UUID) -> list[PlanStep]:
+        """按 ``step_no`` 读回持久化计划；0013 之前执行的工单返回空列表。"""
+        async with self._sf() as session:
+            rows = (
+                await session.scalars(
+                    select(TicketPlanStep)
+                    .where(TicketPlanStep.ticket_id == ticket_id)
+                    .order_by(TicketPlanStep.step_no)
+                )
+            ).all()
+        return [_plan_from_row(row) for row in rows]
 
     # ---------------------------------------------------------------- 内部
     async def _append_locked(
