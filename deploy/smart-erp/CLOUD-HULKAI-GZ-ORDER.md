@@ -19,7 +19,7 @@ export GZ_HOST=<广州云服务器 IP>
 export DB_NETWORK=hulkai-gz-api_default
 export DB_HOST=hulkai_aps_postgres
 export DB_NAME=smart_erp
-export DEMO_TOKEN=demo-session-token-2026-11-11
+export DEMO_TOKEN=<dddddddd-dddd-4ddd-8ddd-dddddddddddd 的令牌；唯一来源 deploy/smart-erp/.env.demo §7>
 ```
 
 硬前提：
@@ -215,13 +215,20 @@ web /                 200
 /v1/auth/session      200 + {"user_id":...,"default_scope":{"org_id":"ORG-SZ","period":"2026-09","system_ids":["sap","u8","wms"]}}
 ```
 
-`/v1/auth/session` 带令牌返回 200 的前提：服务端设置
+`/v1/auth/session` 带令牌返回 200 的前提：服务端设置 `ERP_APP_ENV=demo`，
+且 demo 会话两键齐备——`ERP_DEMO_SESSION_ENABLED=true` 与
+`ERP_DEMO_SESSION_IDENTITIES`（JSON 数组，4 条身份）。
 
-```
-ERP_APP_ENV=demo
-ERP_DEMO_SESSION_ENABLED=true
-ERP_DEMO_SESSION_IDENTITIES=[{"token":"demo-initiator-token-2026-11-11","user_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","tenant_id":"a927f664-796d-5a6c-bb43-c052cd4a0e2e","roles":["operator"],"org_ids":["ORG-SZ"],"periods":["2026-07","2026-08","2026-09"],"system_ids":["u8","wms","sap"]},{"token":"demo-reviewer-token-2026-11-11","user_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","tenant_id":"a927f664-796d-5a6c-bb43-c052cd4a0e2e","roles":["reviewer","finance"],"org_ids":["ORG-SZ"],"periods":["2026-07","2026-08","2026-09"],"system_ids":["u8","wms","sap"]},{"token":"demo-cfo-token-2026-11-11","user_id":"dddddddd-dddd-4ddd-8ddd-dddddddddddd","tenant_id":"a927f664-796d-5a6c-bb43-c052cd4a0e2e","roles":["reviewer","approver","cfo"],"org_ids":["ORG-SZ"],"periods":["2026-07","2026-08","2026-09"],"system_ids":["u8","wms","sap"]},{"token":"demo-approver-2-token-2026-11-11","user_id":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","tenant_id":"a927f664-796d-5a6c-bb43-c052cd4a0e2e","roles":["reviewer","approver","finance"],"org_ids":["ORG-SZ"],"periods":["2026-07","2026-08","2026-09"],"system_ids":["u8","wms","sap"]}]
-```
+**演示令牌值不在本单重复定义**：唯一来源是 `deploy/smart-erp/.env.demo` §7 的
+`ERP_DEMO_SESSION_IDENTITIES`（`scripts/demo-up.sh` 也是从生成的 `.env` 里按
+user_id 反查令牌）。本单只列身份与角色，不含令牌：
+
+| user_id | roles |
+| --- | --- |
+| `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa` | operator |
+| `bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb` | reviewer, finance |
+| `dddddddd-dddd-4ddd-8ddd-dddddddddddd` | reviewer, approver, cfo |
+| `eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee` | reviewer, approver, finance |
 
 IDENTITIES 是 JSON 数组，每条身份各自声明 roles / orgs / periods / systems。
 演示 W2 双人复核：`bbbb...` 的 reviewer 票由种子预置；现场先用 `dddd...`（CFO，
