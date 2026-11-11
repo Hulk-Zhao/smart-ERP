@@ -11,6 +11,7 @@ demo/
 ├── README.md                  # 本文件：场景、口径、快速开始
 ├── schema.sql                 # demo schema（33 张表，全部带 scenario 列）
 ├── load.py                    # 幂等加载：--scenario / --all / --dry-run / --no-erp
+├── verify_audit_chain.py      # 从库里读回审计影像，用生产 AuditLedger 复验哈希链
 ├── export.py                  # 一键导出：pg_dump -Fc + sha256 + --verify 回灌校验
 ├── tools/build_datasets.py    # 确定性生成器（同 seed 重跑结果一致）
 ├── scenarios/
@@ -103,7 +104,34 @@ python demo/load.py --scenario manufacturing-multi-plant --dsn "$DEMO_DSN"
 
 # 4) 一次全灌（三套场景各用独立 tenant_id，互不覆盖）
 python demo/load.py --all --dsn "$DEMO_DSN"
+
+# 5) 回归守卫（内存）：用生产函数重算种子里的全部审计影像 hash
+python -m pytest tests/demo/test_seed_audit_chain.py -q
+
+# 6) 回归守卫（读库）：灌库后从 erp.audit_image 读回，用生产 AuditLedger 验链
+python demo/verify_audit_chain.py --all --dsn "$DEMO_DSN"
 ```
+
+### 库内审计链复验（一条命令）
+
+```bash
+python demo/verify_audit_chain.py --all --dsn "$DEMO_DSN"
+```
+
+三套场景的 `tenant_id` 从各自的 `erp_seed.json` 读取，脚本按 `SqlAuditStore.chain`
+的顺序把行读回内存，再走生产 `AuditLedger.verify`（与演示栈打开工单详情同一条判定
+路径）。期望输出：
+
+```
+[ok] cross-border-multicurrency tenant=... checked=18/18
+[ok] fmcg-distribution tenant=... checked=18/18
+[ok] manufacturing-multi-plant tenant=... checked=18/18
+TOTAL images=54 tenants_failed=0
+```
+
+任一租户验链失败、或库里条数与种子不一致（漏灌/多灌），退出码为 1。
+**注意**：本脚本证明的是「种子落库、读回后与生产验证口径一致」；生产写入侧对带时区
+`datetime` 的归一由其自身的往返用例证明，不在本数据集范围内。
 
 `load.py` 的事务语义：任一场景失败整批回滚；`demo.*` 先按 scenario 删除再插入；
 `erp.*` 先按 tenant_id 删除再插入（append-only 表需临时关闭用户触发器，请用表属主/迁移
@@ -144,6 +172,10 @@ PGDATABASE=smart_erp PGHOST=<pg-host> PGPORT=5432 PGUSER=erp_migrator PGPASSWORD
 
 ## 依赖与许可
 
-- Python 3.12（`demo/` 下脚本仅标准库；加载器额外使用 asyncpg，Apache-2.0）。
+- Python 3.12（加载/导出脚本仅标准库 + asyncpg；复验脚本复用生产 SQLAlchemy + asyncpg
+  栈；生成器复用生产审计契约 `apps.platform.contracts.audit`，因此与 API 使用同一份
+  哈希实现，不另写算法）。
 - PostgreSQL 15（导出端 15.19），UTF-8，`Asia/Shanghai`，不使用 pgvector。
 - 生成器为确定性：`manifest.json` 里的 `seed` 固定，除 `generated_at` 外重跑结果一致。
+- 审计影像 `created_at` 以 UTC 存储并参与哈希：PG 往返后 asyncpg 按 UTC 返回 datetime，
+  种子若用 `+08:00` 参与哈希，同一时刻会算出另一个 digest（演示页会报「疑似篡改」）。
