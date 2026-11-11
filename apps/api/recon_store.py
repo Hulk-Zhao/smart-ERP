@@ -85,7 +85,9 @@ class ReconStore(Protocol):
 
     async def load(self, batch_id: UUID, tenant_id: UUID) -> BatchSnapshot | None: ...
 
-    async def append_event(self, event: NewEvent, *, now: datetime | None = None) -> ReconEvent: ...
+    async def append_event(
+        self, event: NewEvent, *, now: datetime | None = None
+    ) -> ReconEvent: ...
 
     async def list_batches(
         self,
@@ -325,9 +327,8 @@ class FileReconStore:
                 other["org_id"] == snapshot.org_id
                 and other["period"] == snapshot.period
                 and other["input_fingerprint"] == snapshot.input_fingerprint
-                and other.get("rerun_of") == (
-                    None if snapshot.rerun_of is None else str(snapshot.rerun_of)
-                )
+                and other.get("rerun_of")
+                == (None if snapshot.rerun_of is None else str(snapshot.rerun_of))
                 and other["tenant_id"] == str(snapshot.tenant_id)
             ):
                 raise ReconConflict(
@@ -470,7 +471,9 @@ class InMemoryReconStore:
             dedupe_key=dedupe,
             created_at=moment,
         )
-        self._events.append({"tenant_id": event.tenant_id, "dedupe_key": dedupe, "event": record})
+        self._events.append(
+            {"tenant_id": event.tenant_id, "dedupe_key": dedupe, "event": record}
+        )
         return record
 
 
@@ -566,7 +569,34 @@ class SqlReconStore:
                 if inserted is None:
                     await session.rollback()
                     return
-                for line in snapshot.lines:
+                rows = [
+                    {
+                        "id": uuid4(),
+                        "batch_id": snapshot.batch_id,
+                        "tenant_id": snapshot.tenant_id,
+                        "side": line.side,
+                        "line_no": line.line_no,
+                        "supplier_code": line.supplier_code,
+                        "supplier_ref": line.supplier_ref,
+                        "our_ref": line.our_ref,
+                        "status": line.status,
+                        "match_type": line.match_type,
+                        "confidence": line.confidence,
+                        "needs_manual": line.needs_manual,
+                        "diffs": json.dumps(
+                            [dict(fact) for fact in line.diff_facts],
+                            ensure_ascii=False,
+                        ),
+                        "evidence": json.dumps(
+                            [dict(item) for item in line.evidence],
+                            ensure_ascii=False,
+                        ),
+                    }
+                    for line in snapshot.lines
+                ]
+                if rows:
+                    # 一次 executemany 提交整批行：逐行 execute 会把 10 万行的
+                    # 往返次数放大到 10 万，是落库阶段的主要耗时。
                     await session.execute(
                         sa.text(
                             """
@@ -581,26 +611,7 @@ class SqlReconStore:
                                CAST(:diffs AS jsonb), CAST(:evidence AS jsonb))
                             """
                         ),
-                        {
-                            "id": uuid4(),
-                            "batch_id": snapshot.batch_id,
-                            "tenant_id": snapshot.tenant_id,
-                            "side": line.side,
-                            "line_no": line.line_no,
-                            "supplier_code": line.supplier_code,
-                            "supplier_ref": line.supplier_ref,
-                            "our_ref": line.our_ref,
-                            "status": line.status,
-                            "match_type": line.match_type,
-                            "confidence": line.confidence,
-                            "needs_manual": line.needs_manual,
-                            "diffs": json.dumps(
-                                [dict(fact) for fact in line.diff_facts], ensure_ascii=False
-                            ),
-                            "evidence": json.dumps(
-                                [dict(item) for item in line.evidence], ensure_ascii=False
-                            ),
-                        },
+                        rows,
                     )
                 await session.commit()
             except IntegrityError as exc:
@@ -613,9 +624,10 @@ class SqlReconStore:
         factory = self._factory()
         async with factory() as session:
             batch = (
-                await session.execute(
-                    sa.text(
-                        """
+                (
+                    await session.execute(
+                        sa.text(
+                            """
                         SELECT id, tenant_id, org_id, period, status, conclusive,
                                status_reason, suppliers, system_ids, metrics,
                                input_fingerprint, rerun_of, rerun_reason,
@@ -625,16 +637,20 @@ class SqlReconStore:
                         FROM erp.recon_batch
                         WHERE id = :id AND tenant_id = :tenant_id
                         """
-                    ),
-                    {"id": batch_id, "tenant_id": tenant_id},
+                        ),
+                        {"id": batch_id, "tenant_id": tenant_id},
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
             if batch is None:
                 return None
             rows = (
-                await session.execute(
-                    sa.text(
-                        """
+                (
+                    await session.execute(
+                        sa.text(
+                            """
                         SELECT side, line_no, supplier_code, supplier_ref, our_ref,
                                status, match_type, confidence, needs_manual,
                                diffs, evidence
@@ -642,10 +658,13 @@ class SqlReconStore:
                         WHERE batch_id = :batch_id AND tenant_id = :tenant_id
                         ORDER BY line_no, side
                         """
-                    ),
-                    {"batch_id": batch_id, "tenant_id": tenant_id},
+                        ),
+                        {"batch_id": batch_id, "tenant_id": tenant_id},
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
         lines = tuple(_line_from_row(row) for row in rows)
         return BatchSnapshot(
             batch_id=batch["id"],
@@ -706,7 +725,9 @@ class SqlReconStore:
                 params["after_t"] = datetime.fromisoformat(after_t)
                 params["after_i"] = UUID(after_i)
             except ValueError as exc:
-                raise ProblemError(ErrorCode.PARSE_FAILED, f"cursor 非法: {exc}") from exc
+                raise ProblemError(
+                    ErrorCode.PARSE_FAILED, f"cursor 非法: {exc}"
+                ) from exc
             keyset = """
               AND (created_at, id) <
                   (CAST(:after_t AS timestamptz), CAST(:after_i AS uuid))
@@ -714,9 +735,10 @@ class SqlReconStore:
         factory = self._factory()
         async with factory() as session:
             rows = (
-                await session.execute(
-                    sa.text(
-                        f"""
+                (
+                    await session.execute(
+                        sa.text(
+                            f"""
                         SELECT id, status, created_at,
                                result_view -> 'batch' ->> 'diff_count' AS diff_count,
                                result_view -> 'batch' -> 'metrics' ->> 'supplier_lines'
@@ -733,10 +755,13 @@ class SqlReconStore:
                         ORDER BY created_at DESC, id DESC
                         LIMIT :limit
                         """
-                    ),
-                    params,
+                        ),
+                        params,
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
 
         window = rows[:limit]
         next_cursor = None
@@ -781,9 +806,10 @@ class SqlReconStore:
         factory = self._factory()
         async with factory() as session:
             row = (
-                await session.execute(
-                    sa.text(
-                        """
+                (
+                    await session.execute(
+                        sa.text(
+                            """
                         INSERT INTO erp.recon_line_event
                           (tenant_id, batch_id, line_id, event, actor, reason,
                            evidence, dedupe_key)
@@ -793,33 +819,41 @@ class SqlReconStore:
                         ON CONFLICT (tenant_id, dedupe_key) DO NOTHING
                         RETURNING seq, id, created_at
                         """
-                    ),
-                    {
-                        "tenant_id": event.tenant_id,
-                        "batch_id": event.batch_id,
-                        "line_id": event.line_id,
-                        "event": event.event,
-                        "actor": event.actor,
-                        "reason": event.reason,
-                        "evidence": json.dumps(
-                            [dict(item) for item in event.evidence], ensure_ascii=False
                         ),
-                        "dedupe_key": dedupe,
-                    },
+                        {
+                            "tenant_id": event.tenant_id,
+                            "batch_id": event.batch_id,
+                            "line_id": event.line_id,
+                            "event": event.event,
+                            "actor": event.actor,
+                            "reason": event.reason,
+                            "evidence": json.dumps(
+                                [dict(item) for item in event.evidence],
+                                ensure_ascii=False,
+                            ),
+                            "dedupe_key": dedupe,
+                        },
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
             if row is None:
                 row = (
-                    await session.execute(
-                        sa.text(
-                            """
+                    (
+                        await session.execute(
+                            sa.text(
+                                """
                             SELECT seq, id, created_at FROM erp.recon_line_event
                             WHERE tenant_id = :tenant_id AND dedupe_key = :dedupe_key
                             """
-                        ),
-                        {"tenant_id": event.tenant_id, "dedupe_key": dedupe},
+                            ),
+                            {"tenant_id": event.tenant_id, "dedupe_key": dedupe},
+                        )
                     )
-                ).mappings().one()
+                    .mappings()
+                    .one()
+                )
             await session.commit()
         return ReconEvent(
             seq=int(row["seq"]),
@@ -851,9 +885,7 @@ def _line_from_row(row: Mapping[str, Any]) -> SnapshotLine:
         diff_facts=tuple(diffs),
         owner=_owner_of(diffs),
         evidence=tuple(row["evidence"] or []),
-        source_refs=tuple(
-            ref for ref in (row["our_ref"], row["supplier_ref"]) if ref
-        ),
+        source_refs=tuple(ref for ref in (row["our_ref"], row["supplier_ref"]) if ref),
     )
 
 
