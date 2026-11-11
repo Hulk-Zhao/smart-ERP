@@ -60,7 +60,8 @@ APP_IMAGE="smart-erp/app:${TAG}"
 # ---- 1. .env（从 .env.demo 生成，替换口令占位符） ---------------------------
 info "1/7 生成 ${DEMO_DIR}/.env"
 if [[ ! -f "${DEMO_DIR}/.env" ]]; then
-  sed -e "s|CHANGE_ME_PASSWORD|${APP_PW}|g" \
+  sed -e "s|CHANGE_ME_APP_PASSWORD|${APP_PW}|g" \
+      -e "s|CHANGE_ME_MIG_PASSWORD|${MIG_PW}|g" \
       -e "s|^ERP_IMAGE_TAG=.*|ERP_IMAGE_TAG=${TAG}|" \
       "${DEMO_DIR}/.env.demo" > "${DEMO_DIR}/.env"
   echo "已从 .env.demo 生成 .env（口令为脚本默认值，生产请自行替换）"
