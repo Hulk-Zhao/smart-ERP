@@ -3,7 +3,8 @@
 **当前状态**：TXT / CSV / XLSX / XML 四类格式已用**标准库**实现真抽取并可跑通；
 PDF 文本层已通过可选 `[pdf]` extra（pypdfium2）接入并输出字符级坐标；
 扫描件 OCR 仍是桩（结论与许可证评估见下文「PDF 依赖评估」）。
-所有能力通过 `Protocol` 暴露，替换实现不需要改后续阶段。
+主数据 Top3 匹配已作为纯库能力实现（T503），**运行期未接线**，边界见下文。
+所有解析能力通过 `Protocol` 暴露，替换实现不需要改后续阶段。
 
 ## 管线
 
@@ -118,9 +119,83 @@ detect_file_kind → TextExtractor → RuleBasedClassifier → RuleBasedFieldMap
 - 关键字段缺失或没有明细行 → `status=unrecognized`，`missing_fields` 列出字段路径与中文名。
 - 表格行错位时保留原值并降置信，不重排列、不猜列。
 
+## 主数据匹配 Top3（T503，纯库、未接线）
+
+`apps/docparse/master_match.py` 提供「解析结果 → 主数据候选」的纯函数能力：
+
+```python
+from apps.docparse import match_document
+
+result = match_document(
+    parse_result,          # T501/T502 的 ParseResult
+    master_snapshot,       # T901 的 MasterDataSnapshot（只读）
+    item_bindings={"平垫圈 M8": "I-005"},      # 人工已确认的「名称 → 编码」
+    supplier_bindings={"蓝票科技有限公司": "S-1"},
+)
+```
+
+输出：供应商头 + 每条明细的 `EntityMatch`（状态、Top3 候选、命中编码、问题清单），
+以及按名称归并后的 `pending_bindings`（同一名称在一份单据里出现多次只提示一次）。
+
+### 匹配口径（fail-closed）
+
+| 输入情况 | 状态 | 自动解析 | 说明 |
+|---|---|---|---|
+| 物料编码 / 供应商税号在主数据唯一命中 | `auto_matched` | 是 | 稳定标识，按值解析 |
+| 名称命中已确认绑定 | `bound` | 是 | 绑定来自调用方，本模块不持久化 |
+| 名称首次出现（无绑定） | `needs_binding` | 否 | 只给 Top3，必须人工绑定 |
+| Top1 与 Top2 分差 < 0.02，或主数据存在重复编码/税号 | `ambiguous` | 否 | 只给候选，交人工裁决 |
+| 无相似度 ≥ 0.60 的候选 | `unmatched` | 否 | 不硬凑候选，需建主数据 |
+| 名称与编码/税号都为空 | `missing_input` | 否 | 缺失≠零，空串也按缺失处理 |
+
+- **名称永远不自动绑定**：名称相等只给 0.95 分（归一后完全相等）或 ≤ 0.94（模糊），
+  稳定标识/已确认绑定才是 1.00。
+- **未知编码不猜**：编码查不到时报 `E_ITEM_CODE_UNKNOWN`，不会按名称静默改绑。
+- **冲突不吞**：编码与绑定指向不同主体报 `E_CODE_BINDING_CONFLICT`；
+  绑定配置自身同键不同值报 `E_BINDING_CONFLICT`；绑定目标不存在报
+  `E_BINDING_TARGET_UNKNOWN`——三种都停止解析，不按「更像的」选一个。
+- 低置信抽取字段（< 0.85）仍参与匹配，但记 `W_LOW_CONFIDENCE_INPUT`，候选仅作复核参考。
+
+主要错误码：`E_MISSING_INPUT`、`E_ITEM_CODE_UNKNOWN`、`E_CODE_AMBIGUOUS`、
+`E_SUPPLIER_TAX_NO_UNKNOWN`、`E_TAX_NO_AMBIGUOUS`、`E_NO_CANDIDATE`、`E_AMBIGUOUS`、
+`E_PENDING_BINDING`、`E_CODE_BINDING_CONFLICT`、`E_UNKNOWN_CODE_WITH_BINDING`、
+`E_BINDING_TARGET_UNKNOWN`、`E_BINDING_CONFLICT`、`E_MASTER_EMPTY`、
+`E_MASTER_SUPPLIERS_EMPTY`、`E_NO_LINES`；
+提示码：`W_CODE_NAME_CONFLICT`、`W_LOW_CONFIDENCE_INPUT`。
+
+`E_BINDING_TARGET_UNKNOWN` / `E_BINDING_CONFLICT` 表示**绑定配置本身不可用**，必须修；
+如果同一行另有唯一稳定标识，行仍按稳定标识解析（以 `status` 为准），
+不会因为坏绑定把有效编码拖下水。未知编码 + 名称绑定则相反：两者无法互相验证，
+记 `E_UNKNOWN_CODE_WITH_BINDING`，交人工。
+
+### 行定位说明
+
+每个问题带 `location`（`lines[i].item_name` / `header.supplier_name`）、`page` 与
+`line_no`。`line_no` 来自解析时的「序号列」或数据行序号（见 `mapping/fields.py`），
+**不保证等于物理文件行号**；拿不到时为 `None`，消息写「行号缺失」，不编造。
+
+### 未接线（重要，别把「函数能跑」当成「功能可用」）
+
+本模块当前**没有被任何运行期路径调用**：
+
+- 解析管线（`pipeline.py`）不会调用它，API 也没有候选/绑定端点；
+- 没有绑定持久化：`item_bindings` / `supplier_bindings` 由调用方传入，
+  每次调用都从零开始，不落库、不审计、无 UI；
+- 因此「首次出现人工绑定」目前只是**数据结构与判定能力**，
+  不是可操作的产品流程。
+- 契约缺口：`DocHeader` 没有 `supplier_code`，文件里的「供应商编码」
+  （如 `aligned_statement.txt` 的 `SUP-0003`）不会进入匹配；供应商只能按名称/税号，
+  要按编码自动解析需先扩解析契约（属 T501/T502 范围，本卡未改契约）。
+
+要接线至少需要三处（属集成/S8 范围，本卡未做）：① 解析完成后调用 `match_document`
+并把候选落成待办；② 提供候选查询与人工绑定提交的 API；③ 增加绑定关系存储
+（含确认人/时间）并在下次匹配时回传。卡路径写的是 `domain/docparse/master_match.py`，
+仓库实际布局是 `apps/docparse/`，本实现按仓库现布局落在 `apps/docparse/master_match.py`。
+本模块只读 `apps.masterdata` 快照，不写回主数据；未改 `compose` 与部署面。
+
 ## 不在本次范围
 
-病毒扫描、主数据 Top3 匹配（FR-403）、重复单据检测（FR-406）、单据草稿写入（FR-405）、
+病毒扫描、重复单据检测（FR-406）、单据草稿写入（FR-405）、
 异步任务队列与 `erp_doc` 容器入口。
 
 ## 离线夹具
