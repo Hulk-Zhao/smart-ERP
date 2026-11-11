@@ -1417,8 +1417,20 @@ def build_ticket_cases(cfg: Scenario, data: dict[str, list[dict]], rng: random.R
 # --------------------------------------------------------------------------- ERP 投影
 
 
+def _hash_default(value: object) -> str:
+    """与 ``apps/platform/contracts/audit.py`` 的冻结口径一致：UTC、6 位微秒、``+00:00``。"""
+
+    if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            value = value.replace(tzinfo=timezone.utc)
+        else:
+            value = value.astimezone(timezone.utc)
+        return value.isoformat(timespec="microseconds")
+    return str(value)
+
+
 def _canonical(payload: object) -> str:
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=_hash_default)
 
 
 def _event_hash(prev_hash: str, seq: int, event_type: str, from_state: str | None, to_state: str | None, payload: dict, trace_id: str) -> str:

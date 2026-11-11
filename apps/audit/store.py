@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from apps.audit.image_link import images_sql
 from apps.audit.models import AuditAnchorRow, AuditImageRow
-from apps.platform.contracts.audit import AuditImage
+from apps.platform.contracts.audit import AuditImage, format_hash_datetime
 
 
 class AuditStoreError(Exception):
@@ -349,7 +349,7 @@ def _check_page_args(cursor: int, limit: int) -> None:
 
 
 def _jsonable(value: Any) -> Any:
-    """把快照/diff 值归一成 JSONB 可存的形态（与哈希口径的 ``default=str`` 一致）。"""
+    """把快照/diff 值归一成 JSONB 可存的形态（时间与哈希口径用同一条规则）。"""
 
     from datetime import date as _date
     from decimal import Decimal
@@ -358,7 +358,9 @@ def _jsonable(value: Any) -> Any:
         return value
     if isinstance(value, Decimal):
         return str(value)
-    if isinstance(value, (datetime, _date)):
+    if isinstance(value, datetime):
+        return format_hash_datetime(value)
+    if isinstance(value, _date):
         return value.isoformat()
     if isinstance(value, UUID):
         return str(value)
