@@ -428,8 +428,8 @@ services:
   # ---------------------------------------------------------------------------
   # doc：文档解析（OCR/版面分析未来在此进程内做）
   # 预算 3072m / 1.5 核；解析器冷启动慢，start_period 给到 300s（§1A.3）
-  # 现状：S5 尚未交付 erp_doc 常驻进程，入口是镜像内的临时健康壳，
-  #       /readyz 会真跑一次解析管线（见 projects/smart-ERP/docker/docparse_service.py）
+  # 现状：队列消费与文档接入 API 尚未交付，入口是包内的健康/就绪进程
+  #       （`python -m apps.docparse`），/readyz 会真跑一次解析管线
   # ---------------------------------------------------------------------------
   doc:
     profiles: ["full"]
@@ -437,7 +437,7 @@ services:
     container_name: erp_doc
     restart: unless-stopped
     stop_grace_period: 120s
-    command: ["python", "/app/docparse_service.py", "--port=8020"]
+    command: ["python", "-m", "apps.docparse", "--port=8020"]
     environment:
       <<: *app-env
       ERP_APP_ENV: ${ERP_APP_ENV:-demo}
