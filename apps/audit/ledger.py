@@ -347,37 +347,57 @@ class AuditLedger:
         return result
 
     async def anchor_day(self, tenant_id: UUID, day: date) -> AuditAnchor:
-        """固化某日锚点（FR-1307）。已存在且不一致 → 安全事件。"""
+        """固化某日锚点（FR-1307）。已存在且与链不符 → 安全事件。
+
+        边界按**链位置**（chain_seq 前缀）划分，不由读取时刻的 ``now()`` 或
+        ``created_at`` 重新推导：首次写入时把当前链尾固化成
+        ``(record_count, last_hash)``，之后只拿这两个存储值与现链比较。
+
+        历史实现每次调用都用 ``created_at.date() <= day`` 重筛前缀，跨日时钟回拨
+        （NTP 校正 / 快照恢复 / 宿主休眠唤醒）会把晚写的行补进旧日前缀，次日重算
+        与已存锚点不一致并抛 :class:`AuditChainError`——安全告警被时钟噪声淹没
+        （看板 B-ANCHOR：换判据之前不得接调度/日切）。
+        """
+
+        existing = await self._store.get_anchor(tenant_id, day)
+        if existing is not None:
+            images = await self._store.chain(tenant_id)
+            if len(images) < existing.record_count:
+                raise AuditChainError(
+                    f"锚点 {day} 之后链被截断：锚点 {existing.record_count} 条 / 现值 "
+                    f"{len(images)} 条"
+                )
+            anchored_tail = (
+                images[existing.record_count - 1].hash if existing.record_count else ""
+            )
+            if anchored_tail != existing.last_hash:
+                raise AuditChainError(
+                    f"锚点 {day} 的链尾与现链不一致：锚点 {existing.last_hash[:12]} / 现值 "
+                    f"{anchored_tail[:12]}"
+                )
+            return existing
 
         images = await self._store.chain(tenant_id)
-        prefix = [
-            image
-            for image in images
-            if _as_utc(image.created_at).date() <= day
-        ]
         anchor = AuditAnchor(
             tenant_id=tenant_id,
             anchor_date=day,
-            last_hash=prefix[-1].hash if prefix else "",
-            record_count=len(prefix),
+            last_hash=images[-1].hash if images else "",
+            record_count=len(images),
         )
-        existing = await self._store.get_anchor(tenant_id, day)
-        if existing is not None:
-            if existing != anchor:
-                raise AuditChainError(
-                    f"锚点 {day} 与链不一致：已存 {existing.record_count} 条 / 现值 "
-                    f"{anchor.record_count} 条"
-                )
-            return existing
         await self._store.record_anchor(anchor)
         return anchor
 
     async def verify_against_anchor(self, anchor: AuditAnchor) -> ChainVerification:
-        """用锚点校验「任意时点完整性」，可发现截断与锚点之后的篡改。"""
+        """用锚点校验「任意时点完整性」，可发现截断与锚点之后的篡改。
+
+        锚点之后的追加行只要求自身自洽，不能把它们的链尾当成锚点链尾去比——
+        否则锚点之后每写一行，历史锚点都会误报 ``记录数/链尾与锚点不符``。
+        """
 
         images = await self._store.chain(anchor.tenant_id)
         seen = 0
         prev = ""
+        anchored_tail = ""
         for index, image in enumerate(images):
             if seen >= anchor.record_count:
                 if compute_image_hash(prev, image.model_dump(mode="python")) != image.hash:
@@ -395,14 +415,16 @@ class AuditLedger:
                     anchor.tenant_id, False, seen, index, "锚点范围内记录被篡改"
                 )
             prev = image.hash
+            anchored_tail = image.hash
             seen += 1
-        if seen != anchor.record_count or prev != anchor.last_hash:
+        if seen != anchor.record_count or anchored_tail != anchor.last_hash:
             return ChainVerification(
                 anchor.tenant_id,
                 False,
                 seen,
                 None,
-                f"记录数/链尾与锚点不符：{seen} vs {anchor.record_count}",
+                f"记录数/链尾与锚点不符：{seen} 条 / {anchored_tail[:12]} vs "
+                f"{anchor.record_count} 条 / {anchor.last_hash[:12]}",
             )
         return ChainVerification(anchor.tenant_id, True, seen)
 
