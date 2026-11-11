@@ -1,0 +1,4 @@
+doc_no,supplier_code,line_no,item_code,item_name,qty,unit,unit_price,amount,currency,tax_included,tax_rate,period
+PO-2026-0001,SUP-DEMO-01,1,IT-1001,示例外壳,100,PCS,12.5,1250,CNY,true,0.13,2026-09
+PO-2026-0001,SUP-DEMO-01,2,IT-1002,示例支架,50,PCS,8,400,CNY,true,0.13,2026-09
+PO-2026-0001,SUP-DEMO-01,3,IT-1003,示例线束,20,PCS,45.5,910,CNY,true,0.13,2026-09

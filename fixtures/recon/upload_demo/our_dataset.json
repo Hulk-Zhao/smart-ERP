@@ -12,7 +12,7 @@
       "unit_price": "12.5",
       "amount": "1250",
       "tax_rate": "0.13",
-      "period": "2026-10"
+      "period": "2026-09"
     },
     {
       "system": "ERP",
@@ -26,7 +26,7 @@
       "unit_price": "8",
       "amount": "400",
       "tax_rate": "0.13",
-      "period": "2026-10"
+      "period": "2026-09"
     },
     {
       "system": "ERP",
@@ -40,7 +40,7 @@
       "unit_price": "45",
       "amount": "900",
       "tax_rate": "0.13",
-      "period": "2026-10"
+      "period": "2026-09"
     }
   ],
   "master_data": {
@@ -48,16 +48,37 @@
       {
         "code": "SUP-DEMO-01",
         "name": "示例供应商一",
-        "aliases": ["供应商一"],
+        "aliases": [
+          "供应商一"
+        ],
         "tax_no": "91310000DEMO00001X"
       }
     ],
     "items": [
-      {"code": "IT-1001", "name": "示例外壳", "base_unit": "PCS", "spec": "A型"},
-      {"code": "IT-1002", "name": "示例支架", "base_unit": "PCS", "spec": "B型"},
-      {"code": "IT-1003", "name": "示例线束", "base_unit": "PCS", "spec": "C型"}
+      {
+        "code": "IT-1001",
+        "name": "示例外壳",
+        "base_unit": "PCS",
+        "spec": "A型"
+      },
+      {
+        "code": "IT-1002",
+        "name": "示例支架",
+        "base_unit": "PCS",
+        "spec": "B型"
+      },
+      {
+        "code": "IT-1003",
+        "name": "示例线束",
+        "base_unit": "PCS",
+        "spec": "C型"
+      }
     ],
     "unit_conversions": []
   },
-  "tolerance": {"amount": "0.01", "price": "0.0001", "qty": "0.0001"}
+  "tolerance": {
+    "amount": "0.01",
+    "price": "0.0001",
+    "qty": "0.0001"
+  }
 }
