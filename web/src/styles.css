@@ -2,6 +2,42 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * 设计 token（2026-11-11 交互改造）
+ * 中性 slate 底 + indigo 单一强调色；语义色只用于状态。
+ * 金额/数量统一 tabular-nums，保证右对齐时逐位对齐。
+ */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #fafbfc;
+  --surface-3: #f1f3f6;
+  --line: #e6e8ec;
+  --line-strong: #d3d8e0;
+  --text: #111827;
+  --text-2: #4b5563;
+  --muted: #6b7280;
+  --muted-2: #9aa2af;
+  --accent: #4f46e5;
+  --accent-strong: #4338ca;
+  --accent-weak: #eef2ff;
+  --accent-line: #c7d2fe;
+  --ok: #047857;
+  --ok-weak: #ecfdf5;
+  --warn: #b45309;
+  --warn-weak: #fffbeb;
+  --danger: #be123c;
+  --danger-weak: #fff1f2;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-pop: 0 18px 48px -18px rgba(16, 24, 40, 0.3);
+  --row-h: 42px;
+  --sidebar-w: 232px;
+  --assistant-w: 340px;
+}
+
 @layer base {
   html,
   body,
@@ -18,7 +54,9 @@
   }
 
   body {
-    @apply bg-slate-50 text-[13px] text-slate-800 antialiased;
+    @apply bg-[color:var(--bg)] text-[13px] antialiased;
+    color: var(--text);
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
 
   h1,
@@ -28,17 +66,80 @@
   }
 
   :focus-visible {
-    @apply outline-none ring-2 ring-slate-400 ring-offset-1;
+    @apply outline-none ring-2 ring-[color:var(--accent)] ring-offset-1;
+  }
+
+  ::selection {
+    background: var(--accent-weak);
+    color: var(--accent-strong);
   }
 }
 
 @layer components {
+  .app-shell {
+    @apply flex min-h-full w-full min-w-0;
+  }
+
+  .app-sidebar {
+    @apply sticky top-0 z-30 hidden h-screen w-[var(--sidebar-w)] shrink-0 flex-col border-r bg-white lg:flex;
+    border-color: var(--line);
+  }
+
+  .app-sidebar-collapsed {
+    width: 64px;
+  }
+
+  .app-main {
+    @apply flex min-h-full min-w-0 flex-1 flex-col;
+  }
+
+  .app-topbar {
+    @apply sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-white/95 px-3 backdrop-blur sm:px-5;
+    border-color: var(--line);
+  }
+
+  .app-content {
+    @apply mx-auto w-full min-w-0 flex-1 px-3 py-4 sm:px-5 sm:py-5;
+    max-width: 1440px;
+  }
+
+  .nav-section {
+    @apply px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400;
+  }
+
+  .nav-item {
+    @apply relative mx-2 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-slate-600 transition-colors;
+  }
+
+  .nav-item:hover {
+    background: var(--surface-3);
+    color: var(--text);
+  }
+
+  .nav-item-active {
+    background: var(--accent-weak);
+    color: var(--accent-strong);
+  }
+
+  .nav-item-active::before {
+    content: '';
+    @apply absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full;
+    background: var(--accent);
+  }
+
+  .breadcrumb {
+    @apply flex min-w-0 items-center gap-1.5 text-[12px] text-slate-500;
+  }
+
   .card {
-    @apply min-w-0 rounded-xl border border-slate-200 bg-white shadow-sm;
+    @apply min-w-0 rounded-xl border bg-white;
+    border-color: var(--line);
+    box-shadow: var(--shadow-sm);
   }
 
   .card-head {
-    @apply flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3;
+    @apply flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3;
+    border-color: var(--line);
   }
 
   .card-body {
@@ -47,6 +148,10 @@
 
   .section-title {
     @apply text-[13px] font-semibold text-slate-900;
+  }
+
+  .eyebrow {
+    @apply text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400;
   }
 
   .muted {
@@ -62,11 +167,17 @@
   }
 
   .btn-primary {
-    @apply bg-slate-900 text-white hover:bg-slate-800;
+    background: var(--accent);
+    @apply text-white;
+  }
+
+  .btn-primary:hover {
+    background: var(--accent-strong);
   }
 
   .btn-secondary {
-    @apply border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
+    @apply border bg-white text-slate-700 hover:bg-slate-50;
+    border-color: var(--line-strong);
   }
 
   .btn-ghost {
@@ -74,23 +185,44 @@
   }
 
   .btn-danger {
-    @apply border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100;
+    @apply border bg-white text-rose-700 hover:bg-rose-50;
+    border-color: #fecdd3;
   }
 
   .badge {
-    @apply inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset;
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset;
   }
 
   .chip {
-    @apply inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[12px] text-slate-600;
+    @apply inline-flex items-center gap-1 rounded-full border bg-white px-2.5 py-1 text-[12px] text-slate-600 transition-colors;
+    border-color: var(--line);
+  }
+
+  .chip:hover {
+    border-color: var(--line-strong);
+    color: var(--text);
   }
 
   .chip-active {
-    @apply border-slate-900 bg-slate-900 text-white;
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .chip-active:hover {
+    border-color: var(--accent-strong);
+    background: var(--accent-strong);
+    color: #fff;
   }
 
   .input {
-    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-[13px] outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200;
+    @apply w-full rounded-lg border bg-white px-3 py-2 text-[13px] outline-none;
+    border-color: var(--line-strong);
+  }
+
+  .input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
   }
 
   .table {
@@ -98,23 +230,69 @@
   }
 
   .table th {
-    @apply border-b border-slate-200 bg-slate-50 px-3 py-2 text-left text-[12px] font-medium text-slate-500;
+    @apply border-b bg-[color:var(--surface-2)] px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500;
+    border-color: var(--line);
   }
 
   .table td {
-    @apply border-b border-slate-100 px-3 py-2 align-top;
+    @apply border-b px-3 py-2 align-middle;
+    border-color: var(--line);
+  }
+
+  /* 高密度数据表：表头 36px、行高 42px，一屏可容纳 14 行以上 */
+  .data-table {
+    @apply w-full min-w-0 border-collapse text-[12.5px];
+  }
+
+  .data-table thead th {
+    @apply sticky top-0 z-10 border-b bg-[color:var(--surface-2)] px-3 text-left text-[10.5px] font-semibold uppercase tracking-[0.06em] text-slate-500;
+    height: 36px;
+    border-color: var(--line);
+  }
+
+  .data-table tbody td {
+    @apply border-b px-3 align-middle;
+    height: var(--row-h);
+    border-color: var(--line);
+  }
+
+  .data-table tbody tr {
+    @apply transition-colors;
+  }
+
+  .data-table tbody tr:hover {
+    background: var(--surface-2);
+  }
+
+  .data-table .num {
+    @apply text-right font-mono;
+    font-variant-numeric: tabular-nums;
+    font-size: 12.5px;
+  }
+
+  .table-dense {
+    --row-h: 36px;
+  }
+
+  .num {
+    font-variant-numeric: tabular-nums;
   }
 
   .label {
-    @apply text-[11px] uppercase tracking-wide text-slate-400;
+    @apply text-[10.5px] font-medium uppercase tracking-wide text-slate-400;
   }
 
   .skeleton {
-    @apply animate-pulse rounded bg-slate-200/80;
+    @apply animate-pulse rounded bg-slate-200/70;
+  }
+
+  .skeleton-row {
+    @apply skeleton h-[var(--row-h)] w-full rounded-md;
   }
 
   .link {
-    @apply text-sky-700 underline-offset-2 hover:underline;
+    color: var(--accent);
+    @apply underline-offset-2 hover:underline;
   }
 
   .nav-link {
@@ -127,5 +305,69 @@
 
   .scrollbar-thin {
     scrollbar-width: thin;
+  }
+
+  .surface-inset {
+    background: var(--surface-2);
+  }
+
+  .accent-text {
+    color: var(--accent);
+  }
+
+  .accent-bg {
+    background: var(--accent-weak);
+  }
+
+  .stat-card {
+    @apply min-w-0 rounded-xl border bg-white p-3;
+    border-color: var(--line);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .stat-value {
+    @apply mt-1 font-mono text-[22px] font-semibold leading-7 tracking-tight;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .status-dot {
+    @apply inline-block h-1.5 w-1.5 shrink-0 rounded-full;
+  }
+
+  .progress {
+    @apply h-1.5 w-full overflow-hidden rounded-full bg-slate-100;
+  }
+
+  .progress > span {
+    @apply block h-full rounded-full;
+    background: var(--accent);
+  }
+
+  .diff-cell-changed {
+    background: #fffbeb;
+    box-shadow: inset 0 0 0 1px #fde68a;
+  }
+
+  .diff-cell-ours {
+    background: #fff1f2;
+  }
+
+  .diff-cell-theirs {
+    background: #ecfdf5;
+  }
+
+  .drawer-overlay {
+    @apply fixed inset-0 z-40 bg-slate-900/30 backdrop-blur-[1px];
+  }
+
+  .drawer-panel {
+    @apply fixed inset-y-0 right-0 z-50 flex w-full max-w-[420px] flex-col border-l bg-white;
+    border-color: var(--line);
+    box-shadow: var(--shadow-pop);
+  }
+
+  .kbd {
+    @apply inline-flex h-5 min-w-[20px] items-center justify-center rounded border bg-white px-1 font-mono text-[10px] text-slate-500;
+    border-color: var(--line-strong);
   }
 }
