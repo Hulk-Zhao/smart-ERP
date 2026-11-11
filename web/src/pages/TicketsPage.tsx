@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
+import { useSession } from '../api/session';
 import { TICKET_STATES } from '../api/types';
 import { LevelBadge, StateBadge } from '../components/Badges';
 import { EmptyState } from '../components/EmptyState';
@@ -11,6 +12,7 @@ import { amount, dateTime, shortId } from '../lib/format';
 import { openSettingsPanel } from '../lib/settings';
 
 export function TicketsPage() {
+  const session = useSession();
   const [state, setState] = useState<string>('');
   const [ticketNo, setTicketNo] = useState('');
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -24,6 +26,8 @@ export function TicketsPage() {
         cursor: cursor ?? undefined,
         limit: 50,
       }),
+    // 与设置面板同一套规则：范围未由会话带出或用户确认前，不发业务请求。
+    enabled: session.canQuery,
   });
 
   const items = query.data?.items ?? [];
@@ -111,7 +115,7 @@ export function TicketsPage() {
         <ErrorPanel error={query.error} onRetry={() => void query.refetch()} onOpenSettings={openSettingsPanel} />
       ) : null}
 
-      {query.isLoading ? (
+      {query.isPending ? (
         <div className="card space-y-2 p-3">
           {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((key) => (
             <div key={key} className="skeleton h-9 w-full" />

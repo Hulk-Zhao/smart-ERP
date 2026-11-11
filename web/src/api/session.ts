@@ -15,6 +15,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from './client';
 import { applySessionIdentity, applySessionScope, useApiConfig } from './config';
 import { isApiError } from './errors';
+import { useBusinessQueriesPaused } from './query-pause';
 import type { SessionOut } from './types';
 
 export type SessionStatus = 'loading' | 'ready' | 'unavailable' | 'error';
@@ -87,10 +88,10 @@ export function useSession(): SessionState {
   }
 
   // 会话已返回但 scope 还没写进配置（同一轮渲染里 effect 尚未执行）时先别发请求，避免用占位 org 打后端。
+  // 设置面板打开期间也一律暂停：面板内只取会话，业务查询等面板关闭后再发。
+  const paused = useBusinessQueriesPaused();
   const canQuery =
-    status === 'ready'
-      ? scopeConfirmed && scopeReady
-      : status === 'error' && scopeReady;
+    !paused && (status === 'ready' ? scopeConfirmed && scopeReady : status === 'error' && scopeReady);
 
   return {
     status,

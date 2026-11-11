@@ -66,7 +66,7 @@ export function ApprovalsPage() {
   const detail = useQuery({
     queryKey: ['ticket', selectedId],
     queryFn: () => api.getTicket(selectedId),
-    enabled: Boolean(selectedId),
+    enabled: session.canQuery && Boolean(selectedId),
   });
 
   useEffect(() => {
@@ -247,7 +247,7 @@ export function ApprovalsPage() {
             <div className="p-3">
               <EmptyState variant="no-data" compact description="选择左侧工单开始审批。" />
             </div>
-          ) : detail.isLoading ? (
+          ) : detail.isPending ? (
             <div className="space-y-2 p-3">{[0, 1, 2].map((key) => <div key={key} className="skeleton h-20 w-full" />)}</div>
           ) : detail.error ? (
             <div className="p-3">

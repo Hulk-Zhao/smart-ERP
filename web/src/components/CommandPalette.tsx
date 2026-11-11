@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { useSession } from '../api/session';
 import { IconArrowRight, IconCheck, IconHome, IconScale, IconSearch, IconSettings, IconTicket } from './icons';
 
 interface CommandPaletteProps {
@@ -25,6 +26,7 @@ interface PaletteItem {
  */
 export function CommandPalette({ open, onClose, onOpenSettings }: CommandPaletteProps) {
   const navigate = useNavigate();
+  const session = useSession();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -32,7 +34,8 @@ export function CommandPalette({ open, onClose, onOpenSettings }: CommandPalette
   const tickets = useQuery({
     queryKey: ['command-palette', 'tickets'],
     queryFn: () => api.listTickets({ limit: 20 }),
-    enabled: open,
+    // 范围未确认前不查：命令面板不能成为绕过 canQuery 的入口。
+    enabled: open && session.canQuery,
     staleTime: 30_000,
   });
 

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api/client';
+import { useSession } from '../api/session';
 import { diffTypeMeta, type EvidenceOut } from '../api/types';
 import { DiffTypeBadge } from '../components/Badges';
 import { EmptyState } from '../components/EmptyState';
@@ -95,18 +96,19 @@ function EvidenceGroup({ evidences, empty }: { evidences: EvidenceOut[]; empty: 
 
 export function ReconDiffPage() {
   const { batchId = '', diffId = '' } = useParams();
+  const session = useSession();
 
   const query = useQuery({
     queryKey: ['recon', batchId, 'diff', diffId],
     queryFn: () => api.getReconDiff(batchId, diffId),
-    enabled: Boolean(batchId && diffId),
+    enabled: session.canQuery && Boolean(batchId && diffId),
   });
 
   if (!batchId || !diffId) {
     return <ErrorPanel error={{ status: 422, code: 'E-DATA-MISSING', detail: '缺少 batch_id 或 diff_id' }} />;
   }
 
-  if (query.isLoading) {
+  if (query.isPending) {
     return (
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
         <div className="space-y-3">
