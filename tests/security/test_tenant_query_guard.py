@@ -14,7 +14,7 @@ from apps.api.store import ReconBatchRepository, TicketRepository
 from apps.audit.store import AuditQuery
 
 #: 写入/登记不是「按租户读资源」，不要求 tenant_id。
-MUTATING_METHODS = frozenset({"add", "save", "register"})
+MUTATING_METHODS = frozenset({"add", "create", "save", "register"})
 
 
 def _read_methods(repository: type) -> list[tuple[str, object]]:
