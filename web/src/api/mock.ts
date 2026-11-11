@@ -1031,6 +1031,8 @@ export async function mockSend(
         user_id: REVIEWER,
         tenant_id: TENANT,
         roles: ['reviewer', 'approver'],
+        // 与契约一致：默认范围随会话返回，前端据此自动带出 org/period/system_ids。
+        default_scope: { org_id: 'ORG-1', period: '2026-10', system_ids: ['u8', 'statement'] },
       } satisfies SessionOut,
     };
   }

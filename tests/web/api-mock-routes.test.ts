@@ -10,6 +10,7 @@ import {
   TICKETS_PATH,
   ticketPath,
 } from '../../web/src/api/client';
+import type { SessionOut } from '../../web/src/api/types';
 import { mockSend } from '../../web/src/api/mock';
 
 /**
@@ -21,6 +22,7 @@ const config: ApiConfig = {
   baseUrl: '/erp/api',
   token: '',
   scope: { org_id: 'ORG-1', period: '2026-10', system_ids: ['u8', 'statement'] },
+  scopeSource: 'session',
   roles: ['reviewer'],
   viewerName: '测试用户',
   viewerId: '',
@@ -64,5 +66,18 @@ describe('mock 批次列表与真实契约的边界一致', () => {
 
     const projected = body.items.find((item) => item.status === 'reconciled');
     expect(typeof projected?.line_count).toBe('number');
+  });
+});
+
+describe('mock 会话与真实契约的 default_scope 一致', () => {
+  it('三条分支里的「齐全」：org_id / period / system_ids 都由会话带出', async () => {
+    const response = await mockSend('GET', SESSION_PATH, {}, undefined, config);
+    expect(response.status).toBe(200);
+    const body = response.body as SessionOut;
+    expect(body.default_scope).toEqual({
+      org_id: 'ORG-1',
+      period: '2026-10',
+      system_ids: ['u8', 'statement'],
+    });
   });
 });
