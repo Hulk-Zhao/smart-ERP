@@ -6,8 +6,9 @@
 导入本模块即把三张表注册进 S0 的 ``Base.metadata``（schema 固定 ``erp``），
 由平台层的中央模型注册表统一 import；本模块不依赖任何业务运行时状态。
 
-运行时装配仍是内存实现（``apps/connectors/{idempotency,ratelimit,breaker}.py``），
-换 PG 实现时只需按同名接口替换，不改调用方。
+运行时装配：幂等已落 ``PostgresIdempotencyStore``（``apps/connectors/idempotency_pg.py``，
+B-IDEM-INMEMORY-ONLY）；限流与熔断仍是内存实现
+（``apps/connectors/{ratelimit,breaker}.py``），换 PG 实现时只需按同名接口替换，不改调用方。
 """
 
 from __future__ import annotations

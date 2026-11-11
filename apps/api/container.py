@@ -11,7 +11,7 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from apps.api.approval_sql import ApprovalStorePort
 from apps.api.assistant import AssistantService
@@ -36,6 +36,9 @@ from apps.security.approvals import ApprovalGateAdapter, ApprovalService, Ticket
 from apps.security.gate import AccessGate, AccessGrant, AccessRequest
 from apps.security.identity import SessionToken, TokenBroker, UserPrincipal
 from observability.metrics import MetricsRegistry
+
+if TYPE_CHECKING:
+    from apps.connectors.idempotency import IdempotencyStore as ConnectorIdempotencyStore
 
 SESSION_HEADER = "X-Session-Token"
 
@@ -198,13 +201,19 @@ class ApiContainer:
 _CONTAINER: ApiContainer | None = None
 
 
-def register_u8_connector(container: ApiContainer, *, base_url: str | None = None) -> None:
+def register_u8_connector(
+    container: ApiContainer,
+    *,
+    base_url: str | None = None,
+    idem: ConnectorIdempotencyStore | None = None,
+) -> None:
     """把 U8 连接器与可写动作装进容器（生产在 ``get_container`` 里调用）。
 
     没有这一步，带 ``pending_write`` 的工单在审批通过后只会得到
     ``E-CONN-UNAVAILABLE`` 503——演示里永远不会发生一次真实外部写入。
     ``base_url`` 仅测试用；生产由 ``ERP_U8_BASE_URL`` 决定（未设置时是占位域名，
-    写入会显式失败，不会伪造成功）。
+    写入会显式失败，不会伪造成功）。``idem`` 生产传 PostgreSQL 实现：幂等判定必须
+    能跨进程重启，不能只靠进程内存（B-IDEM-INMEMORY-ONLY）。
     """
 
     from apps.connectors.u8.actions import ACTIONS
@@ -212,7 +221,7 @@ def register_u8_connector(container: ApiContainer, *, base_url: str | None = Non
 
     if "u8" in container.connectors:
         return
-    stack = build_u8_stack(base_url=base_url)
+    stack = build_u8_stack(base_url=base_url, idem=idem)
     container.connectors["u8"] = stack.connector
     for action in ACTIONS:
         container.actions.register(action)
@@ -234,13 +243,15 @@ def get_container() -> ApiContainer:
         from apps.api.demo_session import bind_demo_session
         from apps.audit.ledger import AuditLedger
         from apps.audit.store import SqlAuditStore
+        from apps.connectors.idempotency_pg import PostgresIdempotencyStore
         from apps.platform.config import get_settings
         from apps.platform.db.session import build_engine, build_session_factory
 
         settings = get_settings()
+        session_factory = build_session_factory(build_engine(settings))
         # 审计读路径与巡检同源：影像来自 erp.audit_image（见 apps/audit/image_link.py），
         # 生产不再使用进程内台账，否则重启后证据区为空、且与 B-AUDIT-ORPHAN 各数一套。
-        audit_store = SqlAuditStore(build_session_factory(build_engine(settings)))
+        audit_store = SqlAuditStore(session_factory)
         _CONTAINER = ApiContainer(
             approval_records=SqlApprovalStore(),
             ledger=AuditLedger(store=audit_store),
@@ -248,7 +259,11 @@ def get_container() -> ApiContainer:
         _CONTAINER.audit_integrity = AuditIntegrityScanner(metrics=_CONTAINER.metrics)
         # demo 档静态会话：部署期 env 注入，默认关闭；full/生产由 Settings 拒绝启动。
         bind_demo_session(_CONTAINER, get_settings())
-        register_u8_connector(_CONTAINER)
+        # 连接器幂等落库：同一 idem_key 的结果跨进程重启仍可判定（B-IDEM-INMEMORY-ONLY）。
+        register_u8_connector(
+            _CONTAINER,
+            idem=PostgresIdempotencyStore(session_factory, connector="u8"),
+        )
     return _CONTAINER
 
 

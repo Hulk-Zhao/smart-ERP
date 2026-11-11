@@ -38,6 +38,7 @@ def make_stack(
     experimental: bool = False,
     sleep: Callable[[float], Awaitable[None]] | None = None,
     timeout_s: float = 5.0,
+    idem: Any = None,
 ) -> tuple[MockU8Backend, U8Stack]:
     backend = backend or make_backend()
     stack = build_u8_stack(
@@ -47,6 +48,7 @@ def make_stack(
         sleep=sleep or asyncio.sleep,
         rng=random.Random(20261110),
         timeout_s=timeout_s,
+        idem=idem,
     )
     return backend, stack
 

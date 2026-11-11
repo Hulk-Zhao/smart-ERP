@@ -6,7 +6,8 @@
 - 同键不同参 → ``E-IDEM-CONFLICT``（F7 之外的自有码），报障，不返回旧结果；
 - 同键在途 → 拒绝并发重复执行。
 
-生产落 ``erp.idempotency_record``（key 主键 + request_hash），本文件是进程内实现，
+生产落 ``erp.connector_idempotency``（key 主键 + request_hash，见
+``apps.connectors.idempotency_pg.PostgresIdempotencyStore``）；本文件是进程内实现，
 接口 ``IdempotencyStore`` 保持一致，换实现不改调用方。
 """
 
@@ -55,7 +56,9 @@ class _Entry:
 
 
 class IdempotencyStore(Protocol):
-    async def begin(self, key: str, fingerprint: str) -> IdemDecision: ...
+    async def begin(
+        self, key: str, fingerprint: str, *, action_key: str = ""
+    ) -> IdemDecision: ...
 
     async def complete(self, key: str, response: Mapping[str, Any]) -> None: ...
 
@@ -68,7 +71,9 @@ class InMemoryIdempotencyStore:
 
     _entries: dict[str, _Entry] = field(default_factory=dict)
 
-    async def begin(self, key: str, fingerprint: str) -> IdemDecision:
+    async def begin(
+        self, key: str, fingerprint: str, *, action_key: str = ""
+    ) -> IdemDecision:
         entry = self._entries.get(key)
         if entry is None:
             self._entries[key] = _Entry(request_hash=fingerprint, status="in_flight")
