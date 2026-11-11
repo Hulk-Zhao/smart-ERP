@@ -261,7 +261,8 @@ export function meteringStatement(overrides: Partial<MeteringStatementOut> = {})
     expected_lines: 64,
     auto_released_lines: 59,
     billable_lines: 59,
-    billable_basis: '自动放行 − 已确认错放行 − 客户原因',
+    billable_basis:
+      'billable_lines = auto_released_lines − confirmed_misrelease_lines − customer_reason_lines；后两项当前无数据源，按 0 扣减，故为可计费上界',
     excluded_lines: {
       total: 5,
       dispute_hold: 3,
