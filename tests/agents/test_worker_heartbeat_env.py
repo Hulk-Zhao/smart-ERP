@@ -97,21 +97,10 @@ class WorkerHeartbeatEnvTest(unittest.TestCase):
         self.assertIn(ENV_KEY, message)
 
     def test_startup_log_reports_heartbeat_source_lease_and_renew(self) -> None:
-        """启动日志必须自证：配置值 / 来源 / lease / 续约 / 上限。
-
-        CI 的 tests/agents 会先跑 ``alembic upgrade head``（PG 夹具），Alembic 的
-        ``fileConfig`` 默认 ``disable_existing_loggers=True``，会把导入期已存在的
-        ``erp.worker`` logger 置为 disabled；``assertLogs`` 只改 level 不改
-        disabled，所以这里显式恢复，跑完还原。
-        """
+        """启动日志必须自证：配置值 / 来源 / lease / 续约 / 上限。"""
         worker = _worker()
-        was_disabled = worker_mod.logger.disabled
-        worker_mod.logger.disabled = False
-        try:
-            with self.assertLogs("erp.worker", level="INFO") as logs:
-                worker._log_startup()
-        finally:
-            worker_mod.logger.disabled = was_disabled
+        with self.assertLogs("erp.worker", level="INFO") as logs:
+            worker._log_startup()
         joined = "\n".join(logs.output)
         self.assertIn("heartbeat_seconds=30.0 source=env", joined)
         self.assertIn("lease=60.0s renew=20.0s heartbeat_limit=30.0s (lease/2)", joined)
