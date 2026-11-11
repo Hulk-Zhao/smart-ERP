@@ -4,7 +4,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, type ReconRunPayload } from '../api/client';
 import type { ReconDatasetIn, ReconBatchSummaryOut } from '../api/generated/contract';
 import type { ReconBatchOut } from '../api/generated/contract';
-import ourDatasetJson from '../../../fixtures/recon/upload_demo/our_dataset.json';
+// 演示用「我方数据集」：必须放在 web/ 内。Docker 构建上下文是 web/，
+// 引用仓库根 fixtures/ 会让镜像构建报 TS2307（本地 tsc 却通过）。
+import ourDatasetJson from '../fixtures/our_dataset.json';
 import { useApiConfig } from '../api/config';
 import { useSession } from '../api/session';
 import { EmptyState } from '../components/EmptyState';
