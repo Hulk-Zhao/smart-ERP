@@ -2,19 +2,47 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useApiConfig } from '../api/config';
-import { TICKET_STATES } from '../api/types';
+import { ROLE_LABELS, TICKET_STATES } from '../api/types';
 import { LevelBadge, StateBadge } from '../components/Badges';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel } from '../components/ErrorPanel';
+import { IconAlert, IconArrowRight, IconCheck, IconScale } from '../components/icons';
 import { amount, dateTime, shortId } from '../lib/format';
 import { openSettingsPanel } from '../lib/settings';
 
-function Metric({ label, value, hint, tone = '' }: { label: string; value: string | number; hint?: string; tone?: string }) {
+function waitingSince(value: string): string {
+  const started = new Date(value).getTime();
+  if (!Number.isFinite(started)) return '—';
+  const minutes = Math.max(0, Math.floor((Date.now() - started) / 60_000));
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时`;
+  return `${Math.floor(hours / 24)} 天`;
+}
+
+function Kpi({
+  label,
+  value,
+  hint,
+  tone = 'text-slate-900',
+  accent,
+}: {
+  label: string;
+  value: string | number;
+  hint: string;
+  tone?: string;
+  accent?: string;
+}) {
   return (
-    <div className="card min-w-0 p-3">
-      <div className="label">{label}</div>
-      <div className={`mt-1 truncate text-[20px] font-semibold ${tone || 'text-slate-900'}`}>{value}</div>
-      {hint ? <div className="mt-0.5 text-[11px] text-slate-500">{hint}</div> : null}
+    <div className="min-w-0 px-4 py-3">
+      <div className="flex items-center gap-1.5">
+        <span className={`status-dot ${accent ?? 'bg-slate-300'}`} />
+        <span className="label">{label}</span>
+      </div>
+      <div className={`stat-value ${tone}`}>{value}</div>
+      <div className="mt-0.5 truncate text-[10.5px] text-slate-500" title={hint}>
+        {hint}
+      </div>
     </div>
   );
 }
@@ -23,93 +51,202 @@ export function OverviewPage() {
   const config = useApiConfig();
   const tickets = useQuery({
     queryKey: ['tickets', 'overview'],
-    queryFn: () => api.listTickets({ limit: 20 }),
+    queryFn: () => api.listTickets({ limit: 30 }),
   });
   const approvals = useQuery({
     queryKey: ['approvals', 'pending', 'overview'],
-    queryFn: () => api.listPendingApprovals({ limit: 10 }),
+    queryFn: () => api.listPendingApprovals({ limit: 20 }),
   });
 
   const items = tickets.data?.items ?? [];
+  const tasks = approvals.data?.items ?? [];
   const pending = items.filter((item) => item.state === '待审批');
   const executing = items.filter((item) => item.state === '执行中' || item.state === '校验中');
-  const finished = items.filter((item) => item.state === '已完成');
   const w3 = items.filter((item) => item.write_level === 'W3');
+  const fundAmount = tasks.filter((item) => item.touches_fund).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const missingRole = tasks.filter((item) => item.missing_roles.length > 0);
   const distribution = TICKET_STATES.map((state) => ({
     state,
     count: items.filter((item) => item.state === state).length,
   })).filter((item) => item.count > 0);
 
+  // 决策队列：W3 > 涉资金 > 缺角色 > 等待时长；同源数据都来自审批待办接口。
+  const queue = [...tasks].sort((left, right) => {
+    const score = (task: typeof left) =>
+      (task.write_level === 'W3' ? 100 : task.write_level === 'W2' ? 40 : 0) +
+      (task.touches_fund ? 30 : 0) +
+      (task.missing_roles.length > 0 ? 20 : 0);
+    const diff = score(right) - score(left);
+    if (diff !== 0) return diff;
+    return new Date(left.created_at).getTime() - new Date(right.created_at).getTime();
+  });
+
   return (
     <div className="min-w-0 space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div className="min-w-0">
-          <h1 className="text-[18px] font-semibold text-slate-900">工作台</h1>
-          <p className="mt-1 break-words text-[12px] text-slate-500">
-            {config.scope.org_id} · {config.scope.period} · 系统 {config.scope.system_ids.join(' / ')} · 身份 {config.viewerName}
-          </p>
+      <section className="card overflow-hidden">
+        <div className="flex flex-wrap items-end justify-between gap-3 px-4 py-4">
+          <div className="min-w-0">
+            <div className="eyebrow">今日指挥台</div>
+            <h1 className="mt-0.5 text-[20px] font-semibold tracking-tight text-slate-900">工作台</h1>
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-slate-500">
+              <span className="inline-flex items-center gap-1">
+                <span className="status-dot bg-emerald-500" />
+                {config.scope.org_id}
+              </span>
+              <span className="text-slate-300">·</span>
+              <span>{config.scope.period}</span>
+              <span className="text-slate-300">·</span>
+              <span>{config.scope.system_ids.join(' / ')}</span>
+              <span className="text-slate-300">·</span>
+              <span>{config.viewerName}</span>
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="hidden items-center gap-1 text-[10.5px] text-slate-400 sm:flex">
+              <IconCheck width={12} height={12} />
+              数据 {tickets.dataUpdatedAt ? dateTime(new Date(tickets.dataUpdatedAt).toISOString()) : '—'}
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                void tickets.refetch();
+                void approvals.refetch();
+              }}
+            >
+              刷新
+            </button>
+            <Link to="/recon" className="btn btn-primary btn-sm">
+              发起对账
+            </Link>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => { void tickets.refetch(); void approvals.refetch(); }}>
-            刷新
-          </button>
-          <Link to="/recon" className="btn btn-primary btn-sm">
-            发起对账
-          </Link>
+        <div className="grid grid-cols-2 divide-x divide-y divide-slate-100 border-t border-slate-100 sm:grid-cols-4 sm:divide-y-0">
+          <Kpi
+            label="待你决策"
+            value={tasks.length || (approvals.isLoading ? '—' : 0)}
+            hint={missingRole.length > 0 ? `${missingRole.length} 张仍缺角色` : '角色已满足'}
+            accent="bg-amber-500"
+            tone={tasks.length > 0 ? 'text-amber-700' : 'text-slate-900'}
+          />
+          <Kpi
+            label="涉及资金"
+            value={amount(fundAmount)}
+            hint={`${tasks.filter((item) => item.touches_fund).length} 张待审批含资金写入`}
+            accent="bg-indigo-500"
+          />
+          <Kpi
+            label="W3 禁止自动执行"
+            value={w3.length}
+            hint="网关整单拒绝，零写入"
+            accent={w3.length > 0 ? 'bg-rose-500' : 'bg-slate-300'}
+            tone={w3.length > 0 ? 'text-rose-700' : 'text-slate-900'}
+          />
+          <Kpi
+            label="执行中 / 校验中"
+            value={executing.length}
+            hint={`当前页 ${items.length} 条工单样本`}
+            accent="bg-sky-500"
+          />
         </div>
-      </div>
+      </section>
 
       {tickets.error ? (
         <ErrorPanel error={tickets.error} onRetry={() => void tickets.refetch()} onOpenSettings={openSettingsPanel} />
       ) : null}
-
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Metric label="待审批（当前页）" value={pending.length} hint={`共取 ${items.length} 条工单`} tone="text-amber-700" />
-        <Metric label="待办审批任务" value={approvals.data?.items.length ?? '—'} hint={approvals.error ? '审批待办加载失败' : '需要你处理的角色'} />
-        <Metric label="执行中 / 校验中" value={executing.length} hint="有外部写入在途" tone="text-blue-700" />
-        <Metric label="W3（禁止自动执行）" value={w3.length} hint="网关整单拒绝，零写入" tone={w3.length > 0 ? 'text-rose-700' : 'text-slate-900'} />
-      </div>
-
       {approvals.error ? (
         <ErrorPanel error={approvals.error} onRetry={() => void approvals.refetch()} onOpenSettings={openSettingsPanel} compact />
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">
-        <section className="card min-w-0">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <section className="card min-w-0 overflow-hidden">
           <div className="card-head">
-            <h2 className="section-title">最近工单</h2>
-            <Link to="/tickets" className="link text-[12px]">全部工单</Link>
+            <div className="flex min-w-0 items-center gap-2">
+              <h2 className="section-title">待你决策</h2>
+              <span className="badge bg-amber-50 text-amber-700 ring-amber-200">{tasks.length}</span>
+              <span className="hidden text-[10.5px] text-slate-400 sm:inline">按 W 等级 → 涉资金 → 等待时长排序</span>
+            </div>
+            <Link to="/approvals" className="link inline-flex items-center gap-1 text-[12px]">
+              审批队列
+              <IconArrowRight width={12} height={12} />
+            </Link>
           </div>
 
-          {tickets.isLoading ? (
+          {approvals.isLoading ? (
             <div className="space-y-2 p-3">
-              {[0, 1, 2, 3].map((key) => <div key={key} className="skeleton h-12 w-full" />)}
+              {[0, 1, 2, 3].map((key) => (
+                <div key={key} className="skeleton h-[58px] w-full" />
+              ))}
             </div>
-          ) : items.length === 0 ? (
+          ) : queue.length === 0 ? (
             <div className="p-3">
-              <EmptyState variant="no-data" compact description="当前 scope 下没有工单；确认 org / period / systems 后再看。" />
+              <EmptyState
+                variant="no-data"
+                compact
+                description="没有待你决策的审批。可以核对当前身份与角色，或发起新一轮对账。"
+                actions={
+                  <>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => void approvals.refetch()}>
+                      刷新
+                    </button>
+                    <Link to="/recon" className="btn btn-secondary btn-sm">
+                      发起对账
+                    </Link>
+                  </>
+                }
+              />
             </div>
           ) : (
             <ul className="divide-y divide-slate-100">
-              {items.slice(0, 8).map((ticket) => (
-                <li key={ticket.ticket_id} className="min-w-0 px-3 py-2.5">
-                  <Link to={`/tickets/${ticket.ticket_id}`} className="block min-w-0 rounded-lg px-1 py-0.5 hover:bg-slate-50">
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className="font-mono text-[12px] text-slate-500">{ticket.ticket_no}</span>
-                      <span className="min-w-0 truncate text-[13px] font-medium text-slate-900">{ticket.business_key}</span>
-                      <StateBadge state={ticket.state} />
-                      <LevelBadge level={ticket.write_level} />
-                      <span className="ml-auto font-mono text-[12px] text-slate-700">{amount(ticket.amount)}</span>
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-400">
-                      <span>{ticket.scene_code}</span>
-                      <span>发起人 {shortId(ticket.initiator_id)}</span>
-                      <span>更新 {dateTime(ticket.updated_at)}</span>
-                      {ticket.touches_fund ? <span className="text-amber-600">涉及资金</span> : null}
-                    </div>
-                  </Link>
-                </li>
-              ))}
+              {queue.slice(0, 6).map((task) => {
+                const risk = task.write_level === 'W3' || task.touches_fund;
+                return (
+                  <li key={task.ticket_id} className="min-w-0">
+                    <Link
+                      to={`/approvals?ticket=${encodeURIComponent(task.ticket_id)}`}
+                      className="flex min-w-0 items-center gap-3 px-4 py-2.5 hover:bg-slate-50"
+                    >
+                      <span
+                        className={`h-8 w-[3px] shrink-0 rounded-full ${
+                          task.write_level === 'W3' ? 'bg-rose-500' : risk ? 'bg-amber-400' : 'bg-slate-200'
+                        }`}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                          <span className="font-mono text-[11.5px] text-slate-500">{task.ticket_no}</span>
+                          <span className="max-w-full truncate text-[12.5px] font-medium text-slate-900">
+                            {task.business_key}
+                          </span>
+                          <StateBadge state={task.state} />
+                          <LevelBadge level={task.write_level} />
+                          {task.touches_fund ? (
+                            <span className="badge bg-amber-50 text-amber-700 ring-amber-200">涉资金</span>
+                          ) : null}
+                        </span>
+                        <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10.5px] text-slate-400">
+                          <span>{task.scene_code}</span>
+                          <span>发起 {shortId(task.initiator_id)}</span>
+                          <span>等 {waitingSince(task.created_at)}</span>
+                          {task.missing_roles.length > 0 ? (
+                            <span className="inline-flex items-center gap-0.5 text-amber-600">
+                              <IconAlert width={11} height={11} />
+                              缺 {task.missing_roles.map((role) => ROLE_LABELS[role] ?? role).join('、')}
+                            </span>
+                          ) : (
+                            <span className="text-emerald-600">角色齐</span>
+                          )}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-right">
+                        <span className="block font-mono text-[12.5px] font-medium text-slate-900 num">
+                          {amount(task.amount)}
+                        </span>
+                        <span className="text-[10px] text-indigo-600">去审批 →</span>
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
@@ -117,80 +254,195 @@ export function OverviewPage() {
         <div className="min-w-0 space-y-4">
           <section className="card min-w-0">
             <div className="card-head">
-              <h2 className="section-title">状态分布（当前页）</h2>
-              <span className="text-[11px] text-slate-400">共 {items.length} 条</span>
+              <h2 className="section-title">风险雷达</h2>
+              <span className="text-[10.5px] text-slate-400">当前 scope</span>
+            </div>
+            <div className="card-body space-y-3">
+              {[
+                {
+                  label: 'W3 禁止自动执行',
+                  value: w3.length,
+                  tone: 'bg-rose-500',
+                  hint: w3.length > 0 ? '只能人工处置或终止' : '没有 W3 工单',
+                },
+                {
+                  label: '审批缺角色',
+                  value: missingRole.length,
+                  tone: 'bg-amber-400',
+                  hint: missingRole.length > 0 ? '通过后仍不会推进到执行' : '角色已满足',
+                },
+                {
+                  label: '执行中 / 校验中',
+                  value: executing.length,
+                  tone: 'bg-indigo-500',
+                  hint: '有外部写入在途',
+                },
+              ].map((row) => (
+                <div key={row.label} className="min-w-0">
+                  <div className="flex items-center justify-between gap-2 text-[11.5px]">
+                    <span className="truncate text-slate-600">{row.label}</span>
+                    <span className="font-mono font-medium text-slate-900 num">{row.value}</span>
+                  </div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <div className="progress flex-1">
+                      <span
+                        className={row.tone}
+                        style={{ width: `${items.length ? Math.min(100, (row.value / items.length) * 100) : 0}%` }}
+                      />
+                    </div>
+                    <span className="w-[112px] shrink-0 truncate text-right text-[10px] text-slate-400" title={row.hint}>
+                      {row.hint}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="card min-w-0">
+            <div className="card-head">
+              <h2 className="section-title">对账摘要</h2>
+              <Link to="/recon" className="link text-[12px]">
+                全部批次
+              </Link>
+            </div>
+            <div className="card-body">
+              <div className="flex items-start gap-2.5 rounded-lg bg-indigo-50/70 p-2.5">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-indigo-600 ring-1 ring-indigo-100">
+                  <IconScale />
+                </span>
+                <div className="min-w-0 text-[11px] leading-[17px] text-indigo-900">
+                  <div className="font-medium">从本期对账开始</div>
+                  <p className="text-indigo-700/80">
+                    发起后在这里看到匹配率、差异行、可自动处置结论与计量入口。
+                  </p>
+                </div>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded-lg border border-slate-200 px-2.5 py-2">
+                  <div className="label">待审批</div>
+                  <div className="mt-0.5 font-mono text-[15px] font-medium num">{tasks.length}</div>
+                </div>
+                <div className="rounded-lg border border-slate-200 px-2.5 py-2">
+                  <div className="label">当前页工单</div>
+                  <div className="mt-0.5 font-mono text-[15px] font-medium num">{items.length}</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="card min-w-0">
+            <div className="card-head">
+              <h2 className="section-title">状态分布</h2>
+              <span className="text-[10.5px] text-slate-400">当前页 {items.length} 条</span>
             </div>
             <div className="card-body space-y-2">
               {distribution.length === 0 ? (
                 <EmptyState variant="no-data" compact description="当前页没有可统计的状态分布。" />
               ) : (
-                distribution.map((item) => (
+                distribution.slice(0, 5).map((item) => (
                   <div key={item.state} className="min-w-0">
                     <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
                       <span className="truncate">{item.state}</span>
-                      <span className="font-mono">{item.count}</span>
+                      <span className="font-mono num">{item.count}</span>
                     </div>
                     <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                      <div className="h-full rounded-full bg-slate-700" style={{ width: `${(item.count / items.length) * 100}%` }} />
+                      <div
+                        className="h-full rounded-full bg-slate-700"
+                        style={{ width: `${(item.count / items.length) * 100}%` }}
+                      />
                     </div>
                   </div>
                 ))
               )}
             </div>
           </section>
-
-          <section className="card min-w-0">
-            <div className="card-head">
-              <h2 className="section-title">我的待办</h2>
-              <Link to="/approvals" className="link text-[12px]">去审批</Link>
-            </div>
-            <div className="card-body space-y-2">
-              {(approvals.data?.items ?? []).length === 0 ? (
-                <EmptyState variant="no-data" compact description="没有待办审批；如需审批请确认当前角色。" />
-              ) : (
-                (approvals.data?.items ?? []).slice(0, 4).map((task) => (
-                  <Link
-                    key={task.ticket_id}
-                    to={`/approvals?ticket=${task.ticket_id}`}
-                    className="block min-w-0 rounded-lg border border-slate-200 px-2.5 py-2 text-[12px] hover:bg-slate-50"
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="truncate font-medium text-slate-800">{task.ticket_no}</span>
-                      <span className="ml-auto shrink-0 font-mono text-slate-600">{amount(task.amount)}</span>
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      <StateBadge state={task.state} />
-                      <LevelBadge level={task.write_level} />
-                      <span className="badge bg-slate-100 text-slate-500 ring-slate-200">
-                        缺 {task.missing_roles.join('、') || '—'}
-                      </span>
-                    </div>
-                  </Link>
-                ))
-              )}
-            </div>
-          </section>
-
-          <section className="card min-w-0">
-            <div className="card-head">
-              <h2 className="section-title">完成情况</h2>
-            </div>
-            <div className="card-body grid grid-cols-2 gap-2 text-[12px]">
-              <div>
-                <div className="label">已完成</div>
-                <div className="mt-0.5 font-mono text-[16px] text-emerald-700">{finished.length}</div>
-              </div>
-              <div>
-                <div className="label">当前页总量</div>
-                <div className="mt-0.5 font-mono text-[16px]">{tickets.data?.items.length ?? '—'}</div>
-              </div>
-              <div className="col-span-2 text-[10px] leading-4 text-slate-400">
-                指标仅基于当前页样本，不是全量统计；全量指标以服务端报表为准。
-              </div>
-            </div>
-          </section>
         </div>
       </div>
+
+      <section className="card min-w-0 overflow-hidden">
+        <div className="card-head">
+          <div className="flex items-center gap-2">
+            <h2 className="section-title">最近工单</h2>
+            <span className="text-[10.5px] text-slate-400">最多 8 条 · 全量以工单页为准</span>
+          </div>
+          <Link to="/tickets" className="link text-[12px]">
+            全部工单
+          </Link>
+        </div>
+
+        {tickets.isLoading ? (
+          <div className="space-y-2 p-3">
+            {[0, 1, 2, 3].map((key) => (
+              <div key={key} className="skeleton h-9 w-full" />
+            ))}
+          </div>
+        ) : items.length === 0 ? (
+          <div className="p-3">
+            <EmptyState variant="no-data" compact description="当前 scope 下没有工单；确认 org / period / systems 后再看。" />
+          </div>
+        ) : (
+          <>
+            <div className="hidden overflow-x-auto sm:block">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>工单号</th>
+                    <th>业务键</th>
+                    <th>状态</th>
+                    <th>等级</th>
+                    <th className="text-right">金额</th>
+                    <th>场景</th>
+                    <th>更新时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.slice(0, 8).map((ticket) => (
+                    <tr key={ticket.ticket_id}>
+                      <td>
+                        <Link to={`/tickets/${ticket.ticket_id}`} className="font-mono text-[11.5px] text-indigo-600 hover:underline">
+                          {ticket.ticket_no}
+                        </Link>
+                      </td>
+                      <td className="max-w-[240px] truncate">
+                        <Link to={`/tickets/${ticket.ticket_id}`} className="font-medium text-slate-900 hover:underline">
+                          {ticket.business_key}
+                        </Link>
+                      </td>
+                      <td>
+                        <StateBadge state={ticket.state} />
+                      </td>
+                      <td>
+                        <LevelBadge level={ticket.write_level} />
+                      </td>
+                      <td className="num font-medium">{amount(ticket.amount)}</td>
+                      <td className="max-w-[160px] truncate text-slate-500">{ticket.scene_code}</td>
+                      <td className="whitespace-nowrap text-[11px] text-slate-500">{dateTime(ticket.updated_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <ul className="divide-y divide-slate-100 sm:hidden">
+              {items.slice(0, 8).map((ticket) => (
+                <li key={ticket.ticket_id}>
+                  <Link to={`/tickets/${ticket.ticket_id}`} className="block px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-[11px] text-slate-500">{ticket.ticket_no}</span>
+                      <StateBadge state={ticket.state} />
+                      <LevelBadge level={ticket.write_level} />
+                      <span className="ml-auto font-mono text-[12px] font-medium num">{amount(ticket.amount)}</span>
+                    </div>
+                    <div className="mt-1 truncate text-[12.5px] font-medium text-slate-900">{ticket.business_key}</div>
+                    <div className="mt-0.5 text-[10.5px] text-slate-400">{dateTime(ticket.updated_at)}</div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </section>
     </div>
   );
 }
