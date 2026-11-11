@@ -32,6 +32,12 @@ from .models import (
     ValidationIssue,
 )
 from .pipeline import DocParsePipeline
+from .statement_csv import (
+    StatementCsvError,
+    StatementRowIssue,
+    SupplierStatement,
+    map_supplier_statement_csv,
+)
 
 __all__ = [
     "CLASSIFICATION_THRESHOLD",
@@ -52,6 +58,10 @@ __all__ = [
     "MissingField",
     "ParseResult",
     "ParseStatus",
+    "StatementCsvError",
+    "StatementRowIssue",
+    "SupplierStatement",
     "UnsupportedFileTypeError",
     "ValidationIssue",
+    "map_supplier_statement_csv",
 ]

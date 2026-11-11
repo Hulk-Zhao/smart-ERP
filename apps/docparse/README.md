@@ -143,4 +143,84 @@ detect_file_kind → TextExtractor → RuleBasedClassifier → RuleBasedFieldMap
 | `invoice_zh.pdf` | 中文发票 PDF（Type0/Identity-H + ToUnicode），验证字段与字符级坐标 |
 | `scanned_no_text.pdf` | 无文本层 PDF（模拟扫描件）→ 明确降级「需 OCR」 |
 
+## 供应商对账单 CSV → 对账行级数据集（库内能力）
+
+`apps/docparse/statement_csv.py` 提供 `map_supplier_statement_csv(bytes, filename=...)`，
+把供应商对账单 CSV 映射成 `ReconLineIn` 字段结构的行：
+
+```python
+from apps.docparse import map_supplier_statement_csv
+
+statement = map_supplier_statement_csv(data, filename="DZ-2026-03.csv")
+dataset = statement.as_dataset()   # {"our_lines": [], "supplier_lines": [...]}
+```
+
+**只产出供应商侧**：文件通道拿不到我方数据，`our_lines` 恒为空，`as_dataset()` 也明确返回空列表；
+我方行仍需 ERP/MES/WMS 另提供。这是数据边界，不是占位实现。
+
+### 字段与失败行为（fail-closed）
+
+| 列 | 要求 | 缺失/非法时 |
+|---|---|---|
+| `doc_no` | 必需、非空 | `E_REQUIRED_EMPTY` |
+| `supplier_code` | 必需、非空 | `E_REQUIRED_EMPTY` |
+| `item_code` / `item_name` | 至少一个 | `E_ITEM_MISSING` |
+| `qty` | 必需且非空，可解析为数字 | 空 → `E_QTY_EMPTY`；非法 → `E_BAD_NUMBER` |
+| `unit` | 必需，经单位规范化 | 空 → `E_UNIT_EMPTY`；不在别名表 → `E_UNKNOWN_UNIT`（消息列出可用单位） |
+| `amount` / `unit_price` | 至少一个 | 都空 → `E_AMOUNT_MISSING`；非法 → `E_BAD_NUMBER` |
+| `line_no` | 可选；缺省用「文件行号 - 1」 | 非整数 → `E_BAD_LINE_NO`；与已有 `(doc_no, line_no)` 重复 → `E_DUPLICATE_LINE` |
+| `tax_included` | 可选，默认 `true` | 非 true/false/1/0/是/否 → `E_BAD_BOOL` |
+| `currency` / `period` / `tax_rate` / `scrap_qty` | 可选 | 数值列非法 → `E_BAD_NUMBER` |
+| 其它列（`doc_date`/`supplier_name`/`status`…） | 忽略，记入 `ignored_columns` | 不报错 |
+
+文件级错误：空文件 / 只有表头 → 拒收；表头列名重复 → `E_HEADER_DUPLICATE`；
+必需列缺失 → `StatementCsvError.missing_columns`；行内列数与表头不一致 → `E_COLUMN_COUNT`；
+内容完全重复 → `E_DUPLICATE_ROW`。
+
+失败时抛 `StatementCsvError`，`issues` 含**全部**错误行号与原因（不是遇到第一条就停），
+整文件拒收，不做部分输出。空值处理遵循「缺失 ≠ 0」：`qty` 为空直接报错；
+`amount` 为空但 `unit_price` 有值时保留 `None`，不推导、不补 0。
+
+### 单位规范化
+
+`NFKC`（全角/㎡ 等）→ 去空白 → `casefold` → 别名表。只合并语义相同的写法：
+
+| 规范值 | 接受的写法（示例） |
+|---|---|
+| `PCS` | 个、只、支、pcs、pc |
+| `SET` | 套、set |
+| `KG` / `G` / `T` | 千克、公斤、kg / 克、g / 吨、t |
+| `M` / `MM` / `M2` / `M3` | 米、m / 毫米、mm / 平方米、㎡ / 立方米 |
+| `L` / `ML` | 升、l / 毫升、ml |
+| `BOX` / `ROLL` / `PAIR` / `PACK` / `SHEET` | 箱 / 卷 / 双、对 / 包 / 张 |
+
+**`件`、`打` 等不在表内**：主数据不把箱/件当等价单位，这里也不猜，直接报
+`E_UNKNOWN_UNIT`；要支持需显式加别名并同步主数据。
+
+### 文件通道现状与接线清单（属 S8）
+
+现状：
+- `connector-gw` 文件通道只读 CSV（`ERP_FILE_INBOX=/data/inbox`），实体
+  `supplier_statement` / `delivery_note`，解析在 `apps/connectors/file/csvsource.py`；
+- **没有对外读端点**，也没挂给 api；`POST /v1/recon/runs` 已支持
+  `sources.statement_files`，但 `ReconDatasetRegistry.lookup()` 里没有登记过数据集，
+  所以当前走文件通道只会得到 `DATA_MISSING`。
+
+要接线需改三处（均不在本流）：
+1. connector-gw 增加只读入口：按 `entity=supplier_statement` 读 `ERP_FILE_INBOX`，
+   返回文件字节 + 文件名（复用 `apps/connectors/file/transport.py` 的 digest/幂等）；
+2. api 侧在启动或新增 ingest 步骤里：读文件 → `map_supplier_statement_csv(...)` →
+   `container.recon_datasets.register(filename, statement.as_dataset())`；
+3. 我方行来源仍需另接（ERP 导出或 `dataset.our_lines`），否则 `run_recon` 只能得到
+   「供应商有行、我方无行」的结论，不能产生匹配。
+
+`/v1/recon/runs` 契约不用改：登记的 dataset 就是现有的 `our_lines`/`supplier_lines` 结构。
+
+### 端到端演示（库内调用，不经 API）
+
+`tests/docparse/test_statement_import.py::test_end_to_end_dataset_feeds_reconcile`
+用测试内构造的 CSV（**不是种子数据**）完成：
+`CSV → supplier_lines → build_request → reconcile`，并断言 `metrics.supplier_lines == 2`、
+`matched == 0`（我方无行，不产生虚假匹配）。
+
 模糊扫描件与真实客户 PDF 不在离线夹具内（前者需要 OCR，后者涉及脱敏）。
