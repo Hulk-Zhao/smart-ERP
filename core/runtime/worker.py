@@ -41,6 +41,7 @@ from core.runtime.queue import (
     DEFAULT_RETRY_BACKOFF_SECONDS,
     Job,
     JobQueueStore,
+    LeaseLostError,
 )
 
 logger = logging.getLogger("erp.worker")
@@ -262,69 +263,98 @@ class Worker:
                 continue
 
     # ---------------------------------------------------------------- 消费
+    async def _settle_failure(
+        self, job: Job, *, error: str, permanent: bool = False
+    ) -> str | None:
+        """失败落账；租约已被接管时返回 None（结果丢弃），不拖死消费循环。"""
+
+        try:
+            return await self.queue.fail(
+                job.id,
+                owner=self.worker_id,
+                lease_gen=job.lease_gen,
+                error=error,
+                backoff_seconds=self.retry_backoff_seconds,
+                permanent=permanent,
+            )
+        except LeaseLostError as exc:
+            logger.warning("%s；失败结果被丢弃，任务已由接管方重新执行", exc)
+            return None
+
     async def _run_job(self, job: Job) -> None:
         handler = self.handlers.get(job.kind)
         if handler is None:
             self.stats.failed += 1
-            state = await self.queue.fail(
-                job.id,
-                owner=self.worker_id,
-                error=f"未知任务类型: {job.kind}",
-                permanent=True,
+            state = await self._settle_failure(
+                job, error=f"未知任务类型: {job.kind}", permanent=True
             )
-            logger.error("任务 %s kind=%s 未知，转 %s", job.id, job.kind, state)
+            if state is not None:
+                logger.error("任务 %s kind=%s 未知，转 %s", job.id, job.kind, state)
             return
+        lease_lost = False
         job_task = asyncio.ensure_future(handler(job))
         while True:
             done, _ = await asyncio.wait({job_task}, timeout=self.lease_seconds / 3)
             if done:
                 break
+            if lease_lost:
+                continue
             # 长任务续租，避免执行中被别的 worker 判 stale 抢走
-            renewed = await self.queue.heartbeat_lease(
-                job.id, owner=self.worker_id, lease_seconds=self.lease_seconds
-            )
-            if not renewed:
+            try:
+                await self.queue.heartbeat_lease(
+                    job.id,
+                    owner=self.worker_id,
+                    lease_gen=job.lease_gen,
+                    lease_seconds=self.lease_seconds,
+                )
+            except LeaseLostError as exc:
+                # 只警告一次：之后每 lease/3 都会失败，不必刷屏；handler 继续跑完，
+                # 落账会在 complete 处再被拒，结果照旧丢弃。
+                lease_lost = True
                 detail = await self._describe_lease_loss(job.id)
                 logger.warning(
                     "任务 %s 续租失败：租约已被他人接管，本次结果被丢弃"
                     "（到 complete 时不会再落 succeeded）。"
-                    "预期 state=running lease_owner=%s；%s",
+                    "预期 state=running lease_owner=%s；%s；%s",
                     job.id,
                     self.worker_id,
                     detail,
+                    exc,
                 )
         try:
             job_task.result()
         except asyncio.CancelledError:
             self.stats.failed += 1
-            await self.queue.fail(
-                job.id, owner=self.worker_id, error="worker 停止，任务回队列"
-            )
+            await self._settle_failure(job, error="worker 停止，任务回队列")
             raise
         except Exception as exc:  # noqa: BLE001 - 失败落账后继续下一条
             self.stats.failed += 1
-            state = await self.queue.fail(
-                job.id,
-                owner=self.worker_id,
-                error=f"{type(exc).__name__}: {exc}",
-                backoff_seconds=self.retry_backoff_seconds,
+            state = await self._settle_failure(
+                job, error=f"{type(exc).__name__}: {exc}"
             )
-            logger.warning("任务 %s 失败 attempts=%s -> %s", job.id, job.attempts, state)
+            if state is not None:
+                logger.warning(
+                    "任务 %s 失败 attempts=%s -> %s", job.id, job.attempts, state
+                )
         else:
-            completed = await self.queue.complete(job.id, owner=self.worker_id)
-            if completed:
-                self.stats.done += 1
-            else:
+            try:
+                await self.queue.complete(
+                    job.id, owner=self.worker_id, lease_gen=job.lease_gen
+                )
+            except LeaseLostError as exc:
                 # 结果没落账：计 discarded 而不是 done，否则汇总会「全绿但实际被重跑」。
                 self.stats.discarded += 1
                 detail = await self._describe_lease_loss(job.id)
                 logger.warning(
                     "任务 %s 完成落账失败：租约已被他人接管，本次结果被丢弃。"
-                    "预期 state=running lease_owner=%s；%s",
+                    "预期 state=running lease_owner=%s；%s；%s",
                     job.id,
                     self.worker_id,
                     detail,
+                    exc,
                 )
+            else:
+                self.stats.done += 1
 
     async def _consume(self, max_jobs: int | None, processed: list[int]) -> None:
         while not self._stop.is_set():

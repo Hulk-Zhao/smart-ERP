@@ -2,8 +2,10 @@
 
 语义与 01-技术架构 §1A.7.3 一致：
 
-- 认领：``FOR UPDATE SKIP LOCKED``，单条 UPDATE 原子完成 running + 租约 + attempts+1；
-- 成功：``succeeded``（终态）；
+- 认领：``FOR UPDATE SKIP LOCKED``，单条 UPDATE 原子完成 running + 租约 + attempts+1
+  + ``lease_gen``+1；``run_at IS NULL`` 表示「立即可领取」；
+- 成功：``succeeded``（终态）；``complete`` / ``fail`` / ``heartbeat`` 都必须带回
+  ``lease_gen``，与库里不一致时抛 :class:`LeaseLostError`（显式失败，不静默）；
 - 失败：未到 ``max_attempts`` → 回 ``queued`` 并按退避设置 ``run_at``；
   到上限 → ``dead``（终态，不再自动重试，等人工重放）；
 - 回收：``running`` 且 ``lease_expires_at`` 超过 ``grace_seconds`` 宽限仍未续租
@@ -51,6 +53,44 @@ class Job:
     payload: dict[str, Any]
     attempts: int
     max_attempts: int
+    # 认领代次：每次 claim +1。落账（complete/fail/heartbeat）必须带回来，
+    # 不匹配说明手里的租约已被回收/重领，结果不能写进账本。
+    lease_gen: int
+
+
+class LeaseLostError(RuntimeError):
+    """落账代次不匹配：调用方手里的租约已失效，操作被显式拒绝。"""
+
+    def __init__(
+        self,
+        job_id: int,
+        *,
+        action: str,
+        expected_owner: str,
+        expected_lease_gen: int,
+        actual_state: str | None,
+        actual_owner: str | None,
+        actual_lease_gen: int | None,
+    ) -> None:
+        self.job_id = job_id
+        self.action = action
+        self.expected_owner = expected_owner
+        self.expected_lease_gen = expected_lease_gen
+        self.actual_state = actual_state
+        self.actual_owner = actual_owner
+        self.actual_lease_gen = actual_lease_gen
+        if actual_state is None:
+            actual = "行已不存在"
+        else:
+            actual = (
+                f"state={actual_state} lease_owner={actual_owner} "
+                f"lease_gen={actual_lease_gen}"
+            )
+        super().__init__(
+            f"任务 {job_id} 的租约已失效（{action}）："
+            f"预期 state=running lease_owner={expected_owner} "
+            f"lease_gen={expected_lease_gen}，实际 {actual}"
+        )
 
 
 _CLAIM_SQL = text(
@@ -59,19 +99,21 @@ _CLAIM_SQL = text(
        SET state = 'running',
            lease_owner = :owner,
            lease_expires_at = now() + make_interval(secs => :lease_seconds),
-           attempts = j.attempts + 1
+           attempts = j.attempts + 1,
+           lease_gen = j.lease_gen + 1
      WHERE j.id = (
              SELECT id
                FROM erp.job_queue
               WHERE state = 'queued'
                 AND queue = ANY(:queues)
-                AND run_at <= now()
+                AND (run_at IS NULL OR run_at <= now())
                 AND attempts < max_attempts
-              ORDER BY priority DESC, run_at, id
+              ORDER BY priority DESC, run_at NULLS FIRST, id
               LIMIT 1
               FOR UPDATE SKIP LOCKED
            )
-    RETURNING j.id, j.queue, j.kind, j.payload, j.attempts, j.max_attempts
+    RETURNING j.id, j.queue, j.kind, j.payload, j.attempts, j.max_attempts,
+              j.lease_gen
     """
 )
 
@@ -89,6 +131,7 @@ _SETTLE_FAILED_SQL = text(
      WHERE id = :job_id
        AND state = 'running'
        AND lease_owner = :owner
+       AND lease_gen = :lease_gen
     RETURNING state
     """
 )
@@ -159,39 +202,113 @@ class JobQueueStore:
             payload=row["payload"] or {},
             attempts=int(row["attempts"]),
             max_attempts=int(row["max_attempts"]),
+            lease_gen=int(row["lease_gen"]),
+        )
+
+    async def _lease_lost(
+        self,
+        session: AsyncSession,
+        job_id: int,
+        *,
+        action: str,
+        owner: str,
+        lease_gen: int,
+    ) -> LeaseLostError:
+        """落账没命中时读回真实值，抛出带「预期/实际」的显式失败。"""
+
+        row = (
+            await session.execute(
+                text(
+                    "SELECT state, lease_owner, lease_gen FROM erp.job_queue "
+                    "WHERE id = :job_id"
+                ),
+                {"job_id": job_id},
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            return LeaseLostError(
+                job_id,
+                action=action,
+                expected_owner=owner,
+                expected_lease_gen=lease_gen,
+                actual_state=None,
+                actual_owner=None,
+                actual_lease_gen=None,
+            )
+        return LeaseLostError(
+            job_id,
+            action=action,
+            expected_owner=owner,
+            expected_lease_gen=lease_gen,
+            actual_state=str(row["state"]),
+            actual_owner=row["lease_owner"],
+            actual_lease_gen=int(row["lease_gen"]),
         )
 
     async def heartbeat_lease(
-        self, job_id: int, *, owner: str, lease_seconds: float = DEFAULT_LEASE_SECONDS
-    ) -> bool:
+        self,
+        job_id: int,
+        *,
+        owner: str,
+        lease_gen: int,
+        lease_seconds: float = DEFAULT_LEASE_SECONDS,
+    ) -> None:
+        """续租；代次不匹配时抛 :class:`LeaseLostError`，绝不静默返回。"""
+
         async with self._sf() as session, session.begin():
             result = await session.execute(
                 text(
                     "UPDATE erp.job_queue "
                     "SET lease_expires_at = now() + make_interval(secs => :lease_seconds) "
-                    "WHERE id = :job_id AND state = 'running' AND lease_owner = :owner"
+                    "WHERE id = :job_id AND state = 'running' "
+                    "AND lease_owner = :owner AND lease_gen = :lease_gen"
                 ),
-                {"job_id": job_id, "owner": owner, "lease_seconds": lease_seconds},
+                {
+                    "job_id": job_id,
+                    "owner": owner,
+                    "lease_gen": lease_gen,
+                    "lease_seconds": lease_seconds,
+                },
             )
-            return result.rowcount > 0
+            if result.rowcount == 0:
+                error = await self._lease_lost(
+                    session,
+                    job_id,
+                    action="heartbeat",
+                    owner=owner,
+                    lease_gen=lease_gen,
+                )
+                raise error
 
-    async def complete(self, job_id: int, *, owner: str) -> bool:
+    async def complete(self, job_id: int, *, owner: str, lease_gen: int) -> None:
+        """成功落账；代次不匹配时抛 :class:`LeaseLostError`。"""
+
         async with self._sf() as session, session.begin():
             result = await session.execute(
                 text(
                     "UPDATE erp.job_queue "
                     "SET state = 'succeeded', lease_owner = NULL, lease_expires_at = NULL "
-                    "WHERE id = :job_id AND state = 'running' AND lease_owner = :owner"
+                    "WHERE id = :job_id AND state = 'running' "
+                    "AND lease_owner = :owner AND lease_gen = :lease_gen"
                 ),
-                {"job_id": job_id, "owner": owner},
+                {"job_id": job_id, "owner": owner, "lease_gen": lease_gen},
             )
-            return result.rowcount > 0
+            if result.rowcount == 0:
+                error = await self._lease_lost(
+                    session,
+                    job_id,
+                    action="complete",
+                    owner=owner,
+                    lease_gen=lease_gen,
+                )
+                raise error
 
     async def fail(
         self,
         job_id: int,
         *,
         owner: str,
+        lease_gen: int,
         error: str,
         backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
         permanent: bool = False,
@@ -199,7 +316,7 @@ class JobQueueStore:
         """失败落账；返回终态 ``queued``（可重试）或 ``dead``（终态）。
 
         ``permanent=True`` 用于「未知 kind / 反序列化失败」这类重试也不会好的错误，
-        直接 dead，避免永远转圈。
+        直接 dead，避免永远转圈。代次不匹配时抛 :class:`LeaseLostError`。
         """
 
         async with self._sf() as session, session.begin():
@@ -211,9 +328,15 @@ class JobQueueStore:
                             "SET state = 'dead', last_error = :error, "
                             "lease_owner = NULL, lease_expires_at = NULL "
                             "WHERE id = :job_id AND state = 'running' "
-                            "AND lease_owner = :owner RETURNING state"
+                            "AND lease_owner = :owner AND lease_gen = :lease_gen "
+                            "RETURNING state"
                         ),
-                        {"job_id": job_id, "owner": owner, "error": error},
+                        {
+                            "job_id": job_id,
+                            "owner": owner,
+                            "lease_gen": lease_gen,
+                            "error": error,
+                        },
                     )
                 ).scalar_one_or_none()
             else:
@@ -223,14 +346,22 @@ class JobQueueStore:
                         {
                             "job_id": job_id,
                             "owner": owner,
+                            "lease_gen": lease_gen,
                             "error": error,
                             "backoff_seconds": backoff_seconds,
                         },
                     )
                 ).scalar_one_or_none()
-        if row is None:
-            raise RuntimeError(f"任务 {job_id} 不在 running/{owner} 名下，无法落失败态")
-        return str(row)
+            if row is None:
+                lost = await self._lease_lost(
+                    session,
+                    job_id,
+                    action="fail",
+                    owner=owner,
+                    lease_gen=lease_gen,
+                )
+                raise lost
+            return str(row)
 
     async def reclaim_stale(
         self,
