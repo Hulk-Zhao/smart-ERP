@@ -4,7 +4,7 @@
   "updated_at": "2026-11-11 21:30",
   "append_only": true,
   "rebuild_note": "2026-11-10 23:54 全量重建：按工作树真实文件 + 可跑通测试逐项核对后重写种子与留底；原文件（133 条，含 T201/TP7xx 等与工作树不符的声明）完整归档于本目录 ledger/_archive-dev-ledger-20261110-2345.json。2026-11-11 00:18 追加：按各流实测输出（platform 94 / connectors 82 / recon 63 / agents 59 / audit+security 51 / docparse 90 / deploy 30 / api 25 / observability 18 / e2e 11）校正 9 条状态并新增 T008/T608/T708/T901；未改写历史。本机时钟曾回拨（23:50→23:37），ts 仅供参考，先后一律以 seq 为准。2026-11-11 03:10 追加：独立复核 main=14ce70a 门禁四项通过；修正看板头部/差距块/T405；补记 T608 关闭（seq#135）；记录下一轮派单与 gh 未登录阻塞（seq#136）。",
-  "next_seq": 492,
+  "next_seq": 494,
   "fields": {
     "seq": "单调递增整数，写入时分配（本地最大 seq + 1）；排序与「谁覆盖谁」的唯一依据",
     "ts": "ISO 时间，本地时区，精确到分钟；仅用于展示与时钟异常检测（ts 倒退/未来 ts 告警），不参与排序",
@@ -6306,6 +6306,32 @@
       "actor": "集成会话",
       "evidence": "本 PR：`docs/product/tech/演示前统一重建清单.md`、`deploy/smart-erp/RUNBOOK.md` §10。",
       "note": "`12ba3e3 → 8416788`：9 个提交、65 个文件、+20751/−140；迁移 +1（`0014_connector_idem_grants`，head 0013→0014），审计链零改动。清单新增「迁移先行」（重建前 `alembic upgrade head`，`alembic current` 必须是 0014）、api+web 同批重建、`#158` 合入后需再同步一次（破坏性字段改名）；验证点补迁移 head 与重启后同 `idem_key` 仍 REPLAY。RUNBOOK 新增 §10 同口径。**live 演示栈全程只读，未重灌/未重启/未写入。**"
+    },
+    {
+      "seq": 492,
+      "ts": "2026-11-11 22:20",
+      "task_id": "B-APPROVAL-ROLES-INCONSISTENT",
+      "task_title": "#158 破坏性字段改名合入 main；演示栈需 api+web 同批重建",
+      "stream": "S4",
+      "type": "状态变更",
+      "from": "review",
+      "to": "review",
+      "actor": "集成会话",
+      "evidence": "PR #158 / main `7001418`；main CI run 43033505820 success。",
+      "note": "`approval_required_roles`/`approval_missing_roles`/`execution_required_roles`/`execution_missing_roles` 已进 main；`web/src/api/generated/contract.ts` 与 `web/src/api/mock.ts` 已同步（分支 CI 前端契约 job success）。**演示栈需 api + web 同批重建**，只换一边前端读不到新字段。卡保持 review，关闭仍等产品对「B 级连接器审批链 `satisfied` 是否提前要求第二票」的结论。"
+    },
+    {
+      "seq": 493,
+      "ts": "2026-11-11 22:20",
+      "task_id": "B-AUDIT-IMAGE-COUNT",
+      "task_title": "S4 演示阻断修复 rebase（保留 #158 字段）并登记两张后续卡",
+      "stream": "S4",
+      "type": "补充记录",
+      "from": "—",
+      "to": "review",
+      "actor": "集成会话",
+      "evidence": "PR #161 分支 `fix/audit-image-count @ bfe6fb0`（rebase 到 `7001418`）。",
+      "note": "冲突在 `apps/api/service.py::_ticket_detail` 与 `schemas.py`，已两侧都保留：`#158` 的 `approval_*`/`execution_*` + 本条 `audit_image_count` 真实影像数；`tests/api` 131 passed / 21 skipped、`gen:api --check` 一致。新增卡 `B-ROLLBACK-FLAG-NAME`、`B-AUDIT-CHAIN-IMAGE-COUNT`（演示后处理，不挡冻结）。"
     }
   ]
 }
