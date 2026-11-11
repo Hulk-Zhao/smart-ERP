@@ -526,6 +526,52 @@ docker exec s8-demo-pg psql -U postgres -d postgres -c \
 **不要放开 api 的 `ERP_DB_MAX_OVERFLOW`（已固定为 0），也不要放宽
 `db/00-provision.sql` 里的 `CONNECTION LIMIT 20`**——后者是用例守护的显式契约。
 
+### 8.1 多副本下的连接预算（隔离库实测，不是单副本外推）
+
+单副本的「空载 10 / 峰值 14 / 150 次全 200」**不能外推到多副本**：每个 api 进程各有
+一套池，进程之间既不共享、也不会互相让出。隔离环境（独立 PG15 容器 + `00-provision.sql`
+的 `CONNECTION LIMIT 20` + `alembic upgrade head`，与 live 库完全隔离）压测 20 秒：
+
+| 场景 | 副本数 | 稳态连接（各副本） | 峰值 | 结果 |
+| --- | --- | --- | --- | --- |
+| A | 2 | 18（9 / 9） | 18 | 7239 请求，0 个 5xx |
+| B | 3 | 20（9 / 9 / 2） | 20 | 5314 请求，631×500 + 11×504（12.1% 失败） |
+
+单个副本的理论上限是 **6 个引擎 × (`ERP_DB_POOL_SIZE` + `ERP_DB_MAX_OVERFLOW`) = 24**
+（默认 4+0）。场景 A/B 里每副本稳定在 9，只是「这 5 个接口压出来的」；6 个引擎被并发
+打满时，**一个副本就能吃光 20**。
+
+超限后是「排队」还是「报错」，取决于撞的是哪一层，两者别混：
+
+- **角色级 20 满**（新连接被 PG 拒绝，不排队）：立即 `500`，
+  `code=E-CONN-UNAVAILABLE`、`detail=服务内部错误: DBAPIError`、`retriable=true`、
+  `fail_code=F5`；容器日志是 `asyncpg.exceptions.TooManyConnectionsError: too many
+  connections for role "erp_app"`。
+- **进程内池满**（同一副本并发超过 4）：请求在 SQLAlchemy QueuePool 排队，30 秒请求超时
+  仍拿不到连接时返回 `504`，同为 `E-CONN-UNAVAILABLE`，`detail=请求处理超过 30 秒被中止`。
+
+同一对副本连打 3 轮（每轮 10 秒、轮间空闲 10 秒）：每轮结束都是 18，空闲 10 秒后仍是 18，
+三轮均不回落（重启 api 才回到 2）。**高水位只增不减，压测结束不会自己松手。**
+
+反直觉的一点：**连接不按副本平均分**。场景 B 里先起的两个副本各占 9，第三个只抢到 2，
+它的请求几乎全 500；只有重启先起的副本才会把连接让出来。所以「加副本扩容」在当前预算下
+等于「让新副本饿死」。
+
+多副本上线前按上限重算 `ERP_DB_POOL_SIZE`（不按实测 9 算）：
+
+| 副本数 | 每副本池上限 `floor(20 / 6 / N)` | 总量 |
+| --- | --- | --- |
+| 2 | 1 | 12 |
+| 3 | 1 | 18 |
+| ≥4 | 不可行 | — |
+
+N≥4 或需要更大池时，只能走共用实例变更审批给 `erp_app` 提 `CONNECTION LIMIT`，或拆库；
+不要靠调大 overflow 硬顶。复现路径：独立 PG15 容器 → `db/00-provision.sql` → 以
+`erp_migrator` 跑 `alembic upgrade head` → 起 N 个 api 容器（同一 `ERP_DATABASE_URL`、
+`ERP_DB_MAX_OVERFLOW=0`）→ 并发打 `/v1/tickets`、`/v1/approvals/pending`、
+`/v1/recon/batches`、`/v1/audit/...`、`/v1/metering/...`，同时用 superuser 每 0.5 秒采样
+`select client_addr, count(*) from pg_stat_activity where usename='erp_app' group by 1;`。
+
 ## 9. 演示写路径：`u8-stub` 是**模拟外部系统**，不是真 U8
 
 > ⚠️ **它不是 U8，也不是任何真实 ERP。** `u8-stub` 起的是仓库内的
