@@ -113,8 +113,12 @@ export function ErrorPanel({
   const w3 = isW3Forbidden(error);
   const approval = isApprovalConflict(error);
   const body = (apiError?.body ?? {}) as Record<string, unknown>;
-  const missing = Array.isArray(body.missing_roles) ? (body.missing_roles as string[]) : [];
-  const required = Array.isArray(body.required_roles) ? (body.required_roles as string[]) : [];
+  const rolesOf = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  const approvalMissing = rolesOf(body.approval_missing_roles);
+  const approvalRequired = rolesOf(body.approval_required_roles);
+  const executionMissing = rolesOf(body.execution_missing_roles);
+  const executionRequired = rolesOf(body.execution_required_roles);
   const notFound = NOT_FOUND_COPY[resolvedNotFoundKind];
   const conflict = CONFLICT_COPY[apiError?.code ?? ''] ?? CONFLICT_COPY['E-STATE-ILLEGAL'];
   const retryLabel = kind === 'notfound' ? '重新检查' : kind === 'conflict' ? '刷新' : '重试';
@@ -156,18 +160,18 @@ export function ErrorPanel({
               </p>
             </>
           )}
-          {missing.length > 0 ? (
+          {approvalMissing.length > 0 ? (
             <div className="mt-1 flex flex-wrap items-center gap-1">
               <span>尚缺角色：</span>
-              {missing.map((role) => (
+              {approvalMissing.map((role) => (
                 <RoleBadge key={role} role={role} />
               ))}
             </div>
           ) : null}
-          {required.length > 0 ? (
+          {approvalRequired.length > 0 ? (
             <div className="mt-1 flex flex-wrap items-center gap-1 text-slate-600">
               <span>需要角色：</span>
-              {required.map((role) => (
+              {approvalRequired.map((role) => (
                 <RoleBadge key={role} role={role} />
               ))}
             </div>
@@ -188,18 +192,39 @@ export function ErrorPanel({
           <p className="mt-1 break-words">{conflict.description}</p>
           {approval ? (
             <>
-              {missing.length > 0 ? (
+              {approvalMissing.length === 0 && executionMissing.length > 0 ? (
+                <p className="mt-1 break-words text-[11px] text-amber-800">
+                  审批链已满足；执行另需 B 级连接器强制双签（审批一票 ≠ 执行一票）。
+                </p>
+              ) : null}
+              {executionMissing.length > 0 ? (
                 <div className="mt-1 flex flex-wrap items-center gap-1">
-                  <span>尚缺角色：</span>
-                  {missing.map((role) => (
+                  <span>执行尚缺角色：</span>
+                  {executionMissing.map((role) => (
                     <RoleBadge key={role} role={role} />
                   ))}
                 </div>
               ) : null}
-              {required.length > 0 ? (
+              {executionRequired.length > 0 ? (
                 <div className="mt-1 flex flex-wrap items-center gap-1 text-slate-600">
-                  <span>需要角色：</span>
-                  {required.map((role) => (
+                  <span>执行需要角色：</span>
+                  {executionRequired.map((role) => (
+                    <RoleBadge key={role} role={role} />
+                  ))}
+                </div>
+              ) : null}
+              {approvalMissing.length > 0 ? (
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                  <span>审批尚缺角色：</span>
+                  {approvalMissing.map((role) => (
+                    <RoleBadge key={role} role={role} />
+                  ))}
+                </div>
+              ) : null}
+              {approvalRequired.length > 0 ? (
+                <div className="mt-1 flex flex-wrap items-center gap-1 text-slate-600">
+                  <span>审批需要角色：</span>
+                  {approvalRequired.map((role) => (
                     <RoleBadge key={role} role={role} />
                   ))}
                 </div>
