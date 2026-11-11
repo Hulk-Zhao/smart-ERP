@@ -98,6 +98,36 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
+  # 0b. G0 门禁（T007）：最小纵向切片必须整条链路跑通
+  #    fake 连接器 → AG-1 happy path → 审计前像/后像 → 工单在列表接口可见。
+  #    卡上判据原文：「未跑通不得开 6 条流」。门禁实际晚于六条流启动这一事实
+  #    记在 docs/product/tech/ledger/S0.jsonl，不在 CI 注释里美化。
+  #    「跳过 = 失败」由 tests/contract/conftest.py 在会话结束时强制，不依赖
+  #    外部 grep 约定；0 收集同样判红。
+  # ---------------------------------------------------------------------------
+  g0-gate:
+    name: G0 门禁（最小纵向切片）
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: 切片用例（skip 即红）
+        # -o addopts="" 防止 pyproject 的全局 addopts 悄悄加 --ignore/-k；
+        # -v 让日志能逐条读出用例名；-rs 打印 skip 原因（conftest 会把 skip 判红）。
+        run: python -m pytest tests/contract -v -o addopts="" -rs
+
+  # ---------------------------------------------------------------------------
   # 1. 部署面静态校验：compose 能解析、内存预算不超标、变量齐全、探针路径真实
   # ---------------------------------------------------------------------------
   deploy-static:
