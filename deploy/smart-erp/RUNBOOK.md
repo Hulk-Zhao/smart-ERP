@@ -703,10 +703,14 @@ HTTP/1.1 500 Internal Server Error
    `curl 127.0.0.1:8021/stub/receipts` 能看回执，但**远程/公网访问不到 8021**，
    公网入口只有 web 的 nginx（`/erp/api/`）。api 走容器内网 `http://u8-stub:8021`，
    不受宿主绑定影响。所以「当场展示回执」只能用演示机本机终端或经 api 的 executed_steps。
-5. **改了 demo 身份就要 `--force-recreate api`，`docker restart` 不重读 env。**
-   容器环境变量在创建时固定，restart 只换进程。补 `ERP_DEMO_SESSION_IDENTITIES`
-   的 `periods` 时必须 `up -d --no-deps --force-recreate api`，再用
-   `docker exec erp_api printenv ERP_DEMO_SESSION_IDENTITIES` 确认进去了。
+5. **换了 `.env` 必须 `--force-recreate`，`docker restart` 不重读 env。**
+   容器环境变量在创建时固定，restart 只换进程、沿用旧 env。具体后果：改了
+   `ERP_DEMO_SESSION_IDENTITIES` 或期段后只 restart，新身份/新期段**不会生效**——
+   登录仍是旧 scope、上传演示仍 403，而且 `printenv` 才看得出来。
+   正确顺序：改 `.env` → `up -d --no-deps --force-recreate <service>` →
+   `docker exec <c> printenv <KEY>` 复核。
+   本机实例：2026-11-11 23:13 给四条身份统一补 `2026-10`（上传演示用），
+   已用 force-recreate 生效（四条都验证过 200 且能选 2026-10）。
 6. **上传的对账单登记在 api 进程内存里。** `POST /v1/recon/statements` 之后必须由
    **同一个 api 进程**跑 `/v1/recon/runs`（`sources.statement_files`），否则
    `422 E-DATA-MISSING（F1）`；api 一旦重启/重建，要重新上传。
@@ -717,7 +721,18 @@ HTTP/1.1 500 Internal Server Error
    与 `12ba3e3` 行为一致），连接器零调用、工单状态不变。演示补偿请展示种子里的
    `TK-202609-0012/0013` 已回滚链，不要现场点 compensate。
 
-### 10.2 开演前 10 分钟检查单（逐条照抄，`$SHA` = 冻结 sha）
+### 10.2 开演前 10 分钟检查单（最终版，`$SHA` = 冻结 sha）
+
+**当前 live 状态（2026-11-11 重建后实测，演出前以本节第 1～8 条复核为准）**
+
+| 项 | 现值 |
+| --- | --- |
+| 镜像 | api/web/gw/scheduler/worker_agent/worker_io/u8-stub 均为 `f1bdbc9…d01f` |
+| 迁移 head | `0014_connector_idem_grants` |
+| 验链 | `seed_images=54 runtime_added=1 images=55 problems=0`（1 张是冒烟那单） |
+| 桩 | 当前 `receipts=1`（`PO-STUB-000001`，冒烟遗留）、`business_writes=1`；**开演前执行第 4 条 reset 归零** |
+| 四身份 | 4×200，periods 含 `2026-07/08/09/10` |
+| `connector_idempotency` | 1（冒烟那单）；新种子重灌后回到 0 |
 
 在 `deploy/smart-erp/` 下执行；`DSN_MIG` 从 `.env` 取，不在命令行写明文口令。
 
@@ -813,5 +828,24 @@ curl -s -X POST http://127.0.0.1:8010/v1/recon/statements -H "X-Session-Token: $
 # sources.statement_files=["supplier_statement_2026-10.csv"]，带 Idempotency-Key）
 # 期望 metrics：supplier_lines=3 matched=3 diff_lines=1 diff_amount=10.0000
 ```
+
+### 10.3 补偿怎么讲：讲种子里的已回滚单，不现场点
+
+同步回滚入口保持关闭（`ERP_ROLLBACK_SYNC_ENABLED` 不下发）。原因是口径冲突：
+补偿路径不写 `ticket_event`（`B-COMP-NO-EVENT`），现场点通一次冲销会出现
+「桩上有回滚、审计链里没有事件」，与「可审计」的卖点自相矛盾。少演一个动作可以，
+不能在现场制造查不到的证据链。
+
+演示改成打开这三张单（manufacturing 租户，`ORG-SZ`）：
+
+| 单号 | 状态 | 事件链 | 讲什么 | 审计影像 |
+| --- | --- | --- | --- | --- |
+| `TK-202609-0012` | 已回滚 | 6 步：计划中→待审批→执行中→校验中→补偿中→已回滚 | 调账后总账不平，完整补偿回滚；关联结算单 `ST-202608-004#7`、`ST-202608-005#7` | 2 张：u8 采购发票 / wms 收货单 |
+| `TK-202609-0013` | 已回滚 | 同上 6 步 | 主数据合并误并供应商，已回滚；关联结算单 `ST-202608-005#12`、`ST-202608-006#12` | 2 张：wms 收货单 / sap 会计凭证 |
+| `TK-202609-0011` | 补偿中 | 5 步，停在补偿中 | 补演「进行中」的中间态 | 2 张：u8 付款申请 / u8 采购发票 |
+
+口径要准：这几张单的证据是**状态链 + 审计影像 + 验链 `problems=0`**；
+种子里没有补偿任务行（`erp.compensation_task` 为运行态表），桩是内存态、
+reset 后也没有它们的冲销回执。**不要说「桩上能查到冲销」**，也不要现场点 compensate。
 
 
