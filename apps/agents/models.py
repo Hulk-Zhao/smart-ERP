@@ -1,5 +1,7 @@
 """S3 运行时自有表模型。
 
+- ``erp.ticket_plan_step``：执行计划真源（0013）；重启后恢复入口据此重建步骤，
+  不再依赖调用方把 steps 再给一遍；
 - ``erp.compensation_task``：补偿队列（0002 建表，0004 补租约两列）；
 - ``erp.ticket_event_anchor``：事件链锚点，热路径 O(1) 校验链尾；
 - ``erp.audit_guard_state``：全局写入开关，巡检断链后降级只读；
@@ -13,6 +15,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
@@ -26,13 +29,42 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apps.platform.db.base import SCHEMA, Base
 
 COMPENSATION_STATES: tuple[str, ...] = ("queued", "running", "done", "failed")
+
+
+class TicketPlanStep(Base):
+    """执行计划真源：与 ``ticket_step``（执行记录）分开，按 ``step_no`` 全量保存。
+
+    只存「怎么执行」的输入（动作键、目标系统、请求体、幂等键）；动作等级与
+    verify 声明仍在代码注册表里，不在库里，避免库被改写后抬高执行等级。
+    """
+
+    __tablename__ = "ticket_plan_step"
+    __table_args__ = (
+        CheckConstraint("step_no >= 1", name="ck_ticket_plan_step_no_positive"),
+        {"schema": SCHEMA},
+    )
+
+    ticket_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA}.ticket.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    step_no: Mapped[int] = mapped_column(Integer, primary_key=True)
+    action_key: Mapped[str] = mapped_column(Text, nullable=False)
+    target_system: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    idem_key: Mapped[str] = mapped_column(Text, nullable=False)
+    verify_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
 
 
 class CompensationTask(Base):

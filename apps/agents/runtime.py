@@ -28,7 +28,7 @@ from apps.agents.events import EventRecord
 from apps.agents.failure import Failure, classify_exception, failure_of
 from apps.agents.lease import LeaseManager, LeaseNotHeld
 from apps.agents.state_machine import DEVIATION_THRESHOLD, TransitionContext
-from apps.agents.store import TicketStore
+from apps.agents.store import PlanStep, TicketStore
 from apps.platform.connectors.sdk import CompensateResult, UnknownOutcome, VerifyResult
 from apps.platform.contracts.ticket import TicketState
 from apps.platform.policy.gateway import (
@@ -37,6 +37,7 @@ from apps.platform.policy.gateway import (
     default_metrics_registry,
 )
 from apps.platform.policy.levels import ActionSpec, SceneSpec
+from apps.platform.policy.registry import ActionRegistry
 from observability.metrics import MetricsRegistry
 
 UNIQUE_VERIFY_KINDS = frozenset({"read_by_external_id", "read_by_idem_key"})
@@ -148,6 +149,7 @@ class TicketRuntime:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], datetime] | None = None,
         metrics: MetricsRegistry | None = None,
+        actions: ActionRegistry | None = None,
     ) -> None:
         if verifier is None or compensator is None:
             raise ValueError("必须同时注入 verifier 与 compensator（或连接器实现）")
@@ -170,6 +172,8 @@ class TicketRuntime:
         self._sleep = sleep
         self._clock = clock or (lambda: datetime.now(tz=UTC))
         self._metrics = metrics if metrics is not None else default_metrics_registry()
+        # 恢复入口用：动作等级 / verify 只在代码里声明，计划表里不存这些
+        self._actions = actions
         # 启动自检的第一次成对采样；之后每轮补偿再采一次（只取增量，不重复累计）
         self._clock_mark = (monotonic(), wall_time())
 
@@ -264,6 +268,27 @@ class TicketRuntime:
                     f"工单 {ticket_id} 当前为 {ticket.state}，必须先审批进入「执行中」"
                 )
 
+            # 计划先落库再执行：进程在任何一步中途死掉，恢复入口都能从库里拿到
+            # 「还剩哪些步骤」，不需要调用方把 steps 再给一遍。
+            await self._store.save_plan(
+                ticket_id,
+                [
+                    PlanStep(
+                        step_no=index,
+                        action_key=planned.action.key,
+                        target_system=planned.target_system,
+                        payload=dict(planned.payload),
+                        idem_key=planned.idem_key,
+                        verify_payload=(
+                            dict(planned.verify_payload)
+                            if planned.verify_payload is not None
+                            else None
+                        ),
+                    )
+                    for index, planned in enumerate(steps, start=1)
+                ],
+            )
+
             existing = {step.step_no: step for step in await self._store.list_steps(ticket_id)}
             run = _RunState()
 
@@ -345,6 +370,53 @@ class TicketRuntime:
             )
         finally:
             await self._leases.release(ticket_id, owner)
+
+    async def resume(
+        self,
+        ticket_id: UUID,
+        *,
+        owner: str,
+        scene: SceneSpec,
+        trace_id: str | None = None,
+    ) -> ExecutionReport:
+        """恢复入口：计划从库里读，动作声明从代码注册表取，**不接收 steps**。
+
+        只覆盖「已知工单、进程重启/租约过期后续跑」；扫描执行中工单并自动调度
+        是 B-RESUME-NO-ENTRY 的范围，不在本入口内。
+        """
+        if self._actions is None:
+            raise RuntimeGuardError(
+                "恢复入口需要注入 ActionRegistry：动作等级与 verify 只在代码里声明，"
+                "不能从库里读"
+            )
+        plan = await self._store.load_plan(ticket_id)
+        if not plan:
+            raise RuntimeGuardError(
+                f"工单 {ticket_id} 没有持久化执行计划，无法在无 steps 的情况下续跑"
+            )
+
+        steps: list[PlannedStep] = []
+        for row in plan:
+            try:
+                action = self._actions.get(row.action_key)
+            except KeyError as exc:
+                raise RuntimeGuardError(
+                    f"计划动作 {row.action_key} 未在代码注册表中声明，拒绝续跑"
+                ) from exc
+            steps.append(
+                PlannedStep(
+                    action=action,
+                    target_system=row.target_system,
+                    payload=dict(row.payload),
+                    idem_key=row.idem_key,
+                    verify_payload=(
+                        dict(row.verify_payload) if row.verify_payload is not None else None
+                    ),
+                )
+            )
+        return await self.execute(
+            ticket_id, owner=owner, steps=steps, scene=scene, trace_id=trace_id
+        )
 
     # ------------------------------------------------------------- 单步推进
     async def _resume_verifying(
