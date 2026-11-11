@@ -151,6 +151,9 @@ class TicketDetailOut(TicketOut):
     approval_missing_roles: list[str] = Field(description=_APPROVAL_MISSING_DESC)
     execution_required_roles: list[str] = Field(description=_EXECUTION_REQUIRED_DESC)
     execution_missing_roles: list[str] = Field(description=_EXECUTION_MISSING_DESC)
+    #: 审计影像张数：``erp.audit_image`` 中经本工单步骤 ``audit_image_id`` 引用到的
+    #: 行数，与 ``GET /v1/audit/tickets/{id}/images`` 同源。**不等于步骤数**：
+    #: 失败/被驳回的步骤没有影像。
     audit_image_count: int
     #: 同步回滚入口是否开放（``ERP_ROLLBACK_SYNC_ENABLED``）。
     #: false 时前端必须禁用按钮并说明原因，不能靠「点了报错」提示。

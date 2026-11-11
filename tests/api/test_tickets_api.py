@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from conftest import PREFIX
+import asyncio
+
+from conftest import PREFIX, SYSTEM, TENANT
+
+from apps.api.store import TicketStepRecord
+from apps.platform.policy.levels import WriteLevel
 
 
 def _decision(env, ticket: str, *, role: str = "reviewer", who: str = "reviewer", key: str = "k-review"):
@@ -230,3 +235,61 @@ def test_compensate_requires_fail_code_without_writing(env):
     assert response.status_code == 422
     assert response.json()["code"] == "E-DATA-MISSING"
     assert len(env.connector.writes) == 1
+
+
+def _seed_step(env, ticket: str, *, step_no: int, object_id: str) -> TicketStepRecord:
+    step = TicketStepRecord(
+        step_no=step_no,
+        action_key="u8.trade.save_draft",
+        system=SYSTEM,
+        object_type="draft",
+        object_id=object_id,
+        level=WriteLevel.W1,
+        idem_key=f"idem-{object_id}",
+    )
+    asyncio.run(
+        env.container.tickets.record_step(
+            tenant_id=TENANT,
+            ticket_id=env.tickets[ticket],
+            step=step,
+            request_hash=f"hash-{object_id}",
+        )
+    )
+    return step
+
+
+def test_audit_image_count_counts_images_not_steps(env):
+    """1 张影像 + 2 个步骤时详情必须显示 1；改回 ``len(ticket.steps)`` 即变红。
+
+    审计影像的正源是 ``erp.audit_image`` 中被本工单步骤引用到的行，不是步骤数：
+    这一步没有影像（执行失败 / 被驳回）时两者会分叉，而详情页同时展示
+    「审计影像 N 张」与影像列表条数，任何分叉都会被观众当场看到。
+    """
+
+    first = _seed_step(env, "normal", step_no=1, object_id="D-IMG-1")
+    _seed_step(env, "normal", step_no=2, object_id="D-NO-IMG-2")
+    image = asyncio.run(
+        env.container.ledger.append_image(
+            tenant_id=TENANT,
+            ticket_id=env.tickets["normal"],
+            step_id=first.step_id,
+            system=SYSTEM,
+            object_type="draft",
+            object_id="D-IMG-1",
+            before={"qty": 1},
+            after={"qty": 2},
+        )
+    )
+    first.audit_image_id = image.id
+
+    response = env.client.get(
+        f"{PREFIX}/tickets/{env.tickets['normal']}",
+        params=env.scope_params(),
+        headers=env.headers(),
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["steps"]) == 2
+    assert body["audit_image_count"] == 1
+

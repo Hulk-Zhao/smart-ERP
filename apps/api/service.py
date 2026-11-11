@@ -511,7 +511,7 @@ async def get_ticket(
     ticket = await _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     await _hydrate_approvals(container, ticket)
-    return _ticket_detail(container, ticket)
+    return await _ticket_detail(container, ticket)
 
 
 async def approve_ticket(
@@ -1857,8 +1857,15 @@ def _ticket_out(ticket: TicketRecord) -> TicketOut:
     )
 
 
-def _ticket_detail(container: ApiContainer, ticket: TicketRecord) -> TicketDetailOut:
+async def _ticket_detail(
+    container: ApiContainer, ticket: TicketRecord
+) -> TicketDetailOut:
     records = container.approvals.records(str(ticket.ticket_id))
+    # 影像张数与 /v1/audit/images 同源（erp.audit_image 经步骤指针引用到的行），
+    # 不能拿 step 数顶替：一步可能没有影像（失败/驳回），两者不是同一件事。
+    audit_image_count = await container.ledger.count_images(
+        AuditQuery(tenant_id=ticket.tenant_id, ticket_id=ticket.ticket_id)
+    )
     return TicketDetailOut(
         **_ticket_out(ticket).model_dump(),
         steps=[_step_out(step) for step in ticket.steps],
@@ -1876,7 +1883,7 @@ def _ticket_detail(container: ApiContainer, ticket: TicketRecord) -> TicketDetai
         approval_missing_roles=list(_approval_missing_roles(container, ticket)),
         execution_required_roles=list(_execution_required_roles(container, ticket)),
         execution_missing_roles=list(_execution_missing_roles(container, ticket)),
-        audit_image_count=len(ticket.steps),
+        audit_image_count=audit_image_count,
         rollback_available=sync_rollback_enabled(),
     )
 

@@ -281,6 +281,11 @@ class AuditLedger:
     async def list_images(self, query: AuditQuery) -> list[AuditImage]:
         return await self._store.list_images(query)
 
+    async def count_images(self, query: AuditQuery) -> int:
+        """影像张数；与 :meth:`list_images` 同一谓词，专供详情页避免物化整页。"""
+
+        return await self._store.count_images(query)
+
     async def tenant_ids(self) -> list[UUID]:
         return await self._store.tenant_ids()
 
