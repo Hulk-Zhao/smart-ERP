@@ -67,6 +67,7 @@ from apps.api.schemas import (
     MissingItemOut,
     MoneyOut,
     ReconBatchOut,
+    ReconBatchSummaryOut,
     ReconDatasetIn,
     ReconDiffDetailOut,
     ReconDiffOut,
@@ -1208,6 +1209,42 @@ async def get_recon_batch(
     scope = _require_scope(session, build_scope(scope_in))
     view = await _load_view(container, session, scope, batch_id)
     return ReconBatchOut.model_validate(view["batch"])
+
+
+async def list_recon_batches(
+    container: ApiContainer,
+    session: SessionToken,
+    *,
+    scope_in: ScopeIn,
+    cursor: str | None,
+    limit: int | None,
+) -> tuple[list[ReconBatchSummaryOut], str | None]:
+    """批次列表：租户/组织/期间/系统全部进查询条件，计数与详情同一份投影。
+
+    空列表 = 该 scope 下确实没有批次；scope 本身越权由 ``_require_scope`` 抛
+    ``E-AUTHZ-001``（403），绝不用空数组冒充「没有权限」。
+    """
+
+    scope = _require_scope(session, build_scope(scope_in))
+    rows, next_cursor = await _recon_store(container).list_batches(
+        tenant_id=session.tenant_id,
+        org_id=scope.org_id,
+        period=scope.period,
+        system_ids=frozenset(scope.system_ids),
+        cursor=cursor,
+        limit=page_bounds(limit),
+    )
+    return [
+        ReconBatchSummaryOut(
+            batch_id=row.batch_id,
+            status=row.status,
+            line_count=row.line_count,
+            diff_count=row.diff_count,
+            diff_amount=row.diff_amount,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ], next_cursor
 
 
 def _try_metering_policy(container: ApiContainer) -> MeteringPolicy | None:

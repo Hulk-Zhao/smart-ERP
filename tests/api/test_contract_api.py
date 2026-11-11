@@ -16,6 +16,7 @@ REQUIRED_PATHS = (
     "/v1/tickets/{ticket_id}/actions/cancel",
     "/v1/tickets/{ticket_id}/actions/compensate",
     "/v1/recon/runs",
+    "/v1/recon/batches",
     "/v1/recon/runs/{batch_id}",
     "/v1/recon/runs/{batch_id}/diffs",
     "/v1/recon/runs/{batch_id}/diffs/{diff_id}",

@@ -1244,6 +1244,33 @@
         "title": "Page[AuditImageOut]",
         "type": "object"
       },
+      "Page_ReconBatchSummaryOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReconBatchSummaryOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[ReconBatchSummaryOut]",
+        "type": "object"
+      },
       "Page_ReconDiffOut_": {
         "properties": {
           "items": {
@@ -1385,6 +1412,65 @@
           "created_at"
         ],
         "title": "ReconBatchOut",
+        "type": "object"
+      },
+      "ReconBatchSummaryOut": {
+        "description": "批次列表项。计数与详情同源；``None`` = 旧批次无可读投影，不伪造 0。",
+        "properties": {
+          "batch_id": {
+            "format": "uuid",
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "diff_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diff Amount"
+          },
+          "diff_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diff Count"
+          },
+          "line_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Count"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "batch_id",
+          "status",
+          "created_at"
+        ],
+        "title": "ReconBatchSummaryOut",
         "type": "object"
       },
       "ReconDatasetIn": {
@@ -3348,6 +3434,120 @@
         "summary": "按批次出计量表",
         "tags": [
           "计量"
+        ]
+      }
+    },
+    "/v1/recon/batches": {
+      "get": {
+        "description": "按 `(created_at, id)` 键集分页（倒序），租户/组织/期间/系统全部下推到查询条件。行数、差异数、差异金额取自与 `GET /recon/runs/{batch_id}` 同一份持久化投影，不另算一遍；旧批次没有投影时相应字段为 `null`，不伪造 0。\n\n**空态语义**：`items: []` 只表示该 scope 下确实没有批次；scope 越权返回 403 `E-AUTHZ-001`，绝不用空数组冒充「没有权限」。",
+        "operationId": "list_batches_v1_recon_batches_get",
+        "parameters": [
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "每页条数，默认 20",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "每页条数，默认 20",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "组织",
+            "in": "query",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "组织",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "期间，如 2026-10",
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "description": "期间，如 2026-10",
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "description": "系统列表，可重复传",
+            "in": "query",
+            "name": "system_ids",
+            "required": true,
+            "schema": {
+              "description": "系统列表，可重复传",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "title": "System Ids",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ReconBatchSummaryOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "批次列表",
+        "tags": [
+          "对账"
         ]
       }
     },

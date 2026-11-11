@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -151,6 +152,42 @@ def _load(store: SqlReconStore, batch_id: UUID, tenant_id: UUID) -> BatchSnapsho
     return asyncio.run(store.load(batch_id, tenant_id))
 
 
+def _projection(*, diff_count: int, supplier_lines: int, diff_amount: str) -> dict:
+    return {
+        "view_version": 1,
+        "batch": {
+            "status": "已完成",
+            "diff_count": diff_count,
+            "metrics": {
+                "supplier_lines": supplier_lines,
+                "diff_amount": diff_amount,
+            },
+        },
+    }
+
+
+def _list_batches(
+    store: SqlReconStore,
+    *,
+    tenant_id: UUID,
+    org_id: str = "ORG-1",
+    period: str = "2026-10",
+    system_ids: frozenset[str] = frozenset({"u8", "statement"}),
+    cursor: str | None = None,
+    limit: int = 20,
+):
+    return asyncio.run(
+        store.list_batches(
+            tenant_id=tenant_id,
+            org_id=org_id,
+            period=period,
+            system_ids=system_ids,
+            cursor=cursor,
+            limit=limit,
+        )
+    )
+
+
 def test_roundtrip_survives_new_store_instance(session_factory) -> None:
     snapshot = _snapshot(
         (
@@ -285,3 +322,68 @@ def test_missing_supplier_code_surfaces_as_data_gap(session_factory) -> None:
     assert loaded.lines[0].supplier_code is None
     statement = build_statement(loaded, _policy())
     assert "supplier_code" in {gap.field for gap in statement.data_gaps}
+
+
+def test_list_batches_reads_projection_and_applies_scope(session_factory) -> None:
+    """列表计数只读 ``result_view``（与详情同源），列上的 metrics 不参与。
+
+    故意把列上 ``metrics`` 写成 99，列表仍应返回投影里的真实值——否则又是
+    「列表算一遍、详情算一遍」的两套口径。
+    """
+
+    tenant = uuid4()
+    store = SqlReconStore(session_factory)
+    base = datetime(2026, 11, 1, tzinfo=UTC)
+    for index in range(3):
+        snapshot = _snapshot(
+            (_line(line_no=1, status="已匹配"),),
+            view=_projection(
+                diff_count=index,
+                supplier_lines=2 + index,
+                diff_amount=f"{index}.0000",
+            ),
+        )
+        snapshot = replace(
+            snapshot,
+            tenant_id=tenant,
+            created_at=base + timedelta(minutes=index),
+            metrics={"supplier_lines": 99, "diff_amount": "999.0000"},
+        )
+        asyncio.run(store.save(snapshot))
+
+    rows, next_cursor = _list_batches(store, tenant_id=tenant, limit=20)
+    assert next_cursor is None
+    assert [row.line_count for row in rows] == [4, 3, 2]  # 倒序：index 2,1,0
+    assert [row.diff_count for row in rows] == [2, 1, 0]
+    assert [row.diff_amount for row in rows] == ["2.0000", "1.0000", "0.0000"]
+
+    first, cursor = _list_batches(store, tenant_id=tenant, limit=2)
+    assert len(first) == 2 and cursor is not None
+    rest, tail = _list_batches(store, tenant_id=tenant, limit=2, cursor=cursor)
+    assert len(rest) == 1 and tail is None
+    assert {row.batch_id for row in [*first, *rest]} == {row.batch_id for row in rows}
+
+    assert _list_batches(store, tenant_id=uuid4())[0] == []
+    assert _list_batches(store, tenant_id=tenant, org_id="ORG-2")[0] == []
+    assert _list_batches(store, tenant_id=tenant, period="2026-11")[0] == []
+    assert (
+        _list_batches(store, tenant_id=tenant, system_ids=frozenset({"u8"}))[0] == []
+    )
+
+
+def test_list_batches_keeps_nulls_for_unprojected_rows(session_factory) -> None:
+    tenant = uuid4()
+    snapshot = replace(
+        _snapshot((_line(line_no=1, status="已匹配"),)),
+        tenant_id=tenant,
+        metrics={"supplier_lines": 1, "diff_amount": "0.0000"},
+    )
+    asyncio.run(SqlReconStore(session_factory).save(snapshot))
+
+    rows, _ = _list_batches(SqlReconStore(session_factory), tenant_id=tenant)
+
+    assert len(rows) == 1
+    # 旧批次没有投影：行数/差异数/金额一律 null，不拿列上的 metrics 伪装成投影。
+    assert rows[0].line_count is None
+    assert rows[0].diff_count is None
+    assert rows[0].diff_amount is None
