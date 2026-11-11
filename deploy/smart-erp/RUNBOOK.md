@@ -497,3 +497,32 @@ docker compose -f deploy/smart-erp/docker-compose.yml --profile full exec alertm
 > `SmartErpAuditChainBroken` 在 t+0s `inactive` → t+11s `pending` → t+83s `firing`，
 > Alertmanager `/api/v2/alerts` 出现 `severity=P0` 条目，`status.state=active`，receiver=`erp-unrouted`。
 
+## 6. 档位混跑与 `erp_app` 连接预算
+
+**demo 档 `worker` 与 full 档 `worker-agent` / `worker-io` 不得同时运行。** 两个后果叠加：
+
+1. 三者消费同一批队列（agent / io），同时运行会对同一任务重复消费；
+2. 三者共用 `erp_app` 角色的 20 连接上限，多跑一档就多占一份连接池，峰值会触发
+   `too many connections for role "erp_app"`（对外表现为 API 500）。
+
+切档时先停旧档 worker，再起新档：
+
+```bash
+docker compose -f deploy/smart-erp/docker-compose.yml --profile demo stop worker
+docker compose -f deploy/smart-erp/docker-compose.yml --profile full stop worker-agent worker-io
+```
+
+**`erp_app` 的连接数是池高水位，不是实时负载。** 单个 api 进程内有 6 个独立引擎
+（container / ticket_sql / approval_sql / audit_integrity / price_book / recon_store），
+连接只增不减：api 重启后才回落到 10 左右，之后随负载峰值累积且不会主动下降。
+排查命令与判定：
+
+```bash
+docker exec s8-demo-pg psql -U postgres -d postgres -c \
+  "select count(*) from pg_stat_activity where usename='erp_app';"
+```
+
+接近 20 时先重启 api 观察是否回落；确需扩容就调小 `ERP_DB_POOL_SIZE`，
+**不要放开 api 的 `ERP_DB_MAX_OVERFLOW`（已固定为 0），也不要放宽
+`db/00-provision.sql` 里的 `CONNECTION LIMIT 20`**——后者是用例守护的显式契约。
+
