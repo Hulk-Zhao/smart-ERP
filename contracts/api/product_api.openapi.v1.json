@@ -2046,6 +2046,35 @@
         "title": "ScopeIn",
         "type": "object"
       },
+      "SessionOut": {
+        "description": "当前会话身份：前端只读这里，不再从构建期变量猜角色/用户。",
+        "properties": {
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "tenant_id",
+          "roles"
+        ],
+        "title": "SessionOut",
+        "type": "object"
+      },
       "SupplierMasterIn": {
         "additionalProperties": false,
         "properties": {
@@ -3194,6 +3223,28 @@
         "summary": "按工单读取审计影像",
         "tags": [
           "审计"
+        ]
+      }
+    },
+    "/v1/auth/session": {
+      "get": {
+        "description": "当前会话身份；缺失/过期/无效令牌统一 401（由 ``session_dep`` 抛出）。",
+        "operationId": "read_session_v1_auth_session_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Read Session",
+        "tags": [
+          "会话"
         ]
       }
     },

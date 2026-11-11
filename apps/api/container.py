@@ -208,9 +208,13 @@ def get_container() -> ApiContainer:
         # 生产装配：工单/审批都落 PostgreSQL；巡检复用同一个指标注册表，
         # 保证 ``/metrics`` 能读到后台巡检写的值。
         from apps.api.approval_sql import SqlApprovalStore
+        from apps.api.demo_session import bind_demo_session
+        from apps.platform.config import get_settings
 
         _CONTAINER = ApiContainer(approval_records=SqlApprovalStore())
         _CONTAINER.audit_integrity = AuditIntegrityScanner(metrics=_CONTAINER.metrics)
+        # demo 档静态会话：部署期 env 注入，默认关闭；full/生产由 Settings 拒绝启动。
+        bind_demo_session(_CONTAINER, get_settings())
     return _CONTAINER
 
 

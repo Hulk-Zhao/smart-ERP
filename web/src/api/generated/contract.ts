@@ -1,15 +1,15 @@
 /**
  * 本文件由 `node scripts/gen-api-types.mjs` 从 C16 冻结契约生成，请勿手改。
  * 源文件：contracts/api/product_api.openapi.v1.json
- * 契约 sha256：2c373ec30c9f5af99507fd8b26cb971b37856a7526e880291621e3721210b316
+ * 契约 sha256：6e47f28a034e175f8214691afa6780086fc68f5bdedeb8e1276fb101511d3e67
  * 契约版本：1.0.0 · C16
  *
  * 契约变更流程：后端重新生成契约 → 执行 `npm run gen:api` → 评审类型差异。
  */
 
-export const CONTRACT_SHA256 = "2c373ec30c9f5af99507fd8b26cb971b37856a7526e880291621e3721210b316";
+export const CONTRACT_SHA256 = "6e47f28a034e175f8214691afa6780086fc68f5bdedeb8e1276fb101511d3e67";
 export const CONTRACT_VERSION = "1.0.0";
-export const CONTRACT_PATH_COUNT = 17;
+export const CONTRACT_PATH_COUNT = 18;
 
 /** 写接口（POST）路径；前端统一补 Idempotency-Key。 */
 export const WRITE_PATHS = ["/v1/approvals/{ticket_id}/approve","/v1/approvals/{ticket_id}/reject","/v1/recon/runs","/v1/tickets/{ticket_id}/actions/approve","/v1/tickets/{ticket_id}/actions/cancel","/v1/tickets/{ticket_id}/actions/compensate","/v1/tickets/{ticket_id}/actions/reject"] as const;
@@ -399,6 +399,15 @@ export interface ScopeIn {
   system_ids: string[];
 }
 
+/**
+ * 当前会话身份：前端只读这里，不再从构建期变量猜角色/用户。
+ */
+export interface SessionOut {
+  roles: string[];
+  tenant_id: string;
+  user_id: string;
+}
+
 export interface SupplierMasterIn {
   aliases?: string[];
   code: string;
@@ -550,6 +559,11 @@ export interface ApiOperations {
   };
     body: never;
     response: PageAuditImageOut;
+  };
+  "GET /v1/auth/session": {
+    query: never;
+    body: never;
+    response: SessionOut;
   };
   "GET /v1/metering/batches/{batch_id}/statement": {
     query: {

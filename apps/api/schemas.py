@@ -60,6 +60,17 @@ class Page(BaseModel, Generic[T]):  # noqa: UP046 - 运行环境 Python 3.11 不
     next_cursor: str | None = None
 
 
+# --------------------------------------------------------------------------- 会话
+
+
+class SessionOut(BaseModel):
+    """当前会话身份：前端只读这里，不再从构建期变量猜角色/用户。"""
+
+    user_id: UUID
+    tenant_id: UUID
+    roles: list[str]
+
+
 # --------------------------------------------------------------------------- 工单
 
 
