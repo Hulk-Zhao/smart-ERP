@@ -29,7 +29,8 @@
 fixtures/recon/upload_demo/*_crlf.csv -text
 
 # 二进制文件不做换行转换
-*.png binary*.jpg binary
+*.png binary
+*.jpg binary
 *.jpeg binary
 *.gif binary
 *.ico binary
