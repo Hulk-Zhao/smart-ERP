@@ -198,6 +198,8 @@ function detail(row: TicketOut): TicketDetailOut {
     required_roles: required,
     missing_roles: row.ticket_id === T_DUAL ? ['approver'] : required,
     audit_image_count: (IMAGES[row.ticket_id] ?? []).length,
+    // 与后端默认一致：同步回滚入口关闭，前端据此禁用按钮。
+    rollback_available: false,
   };
 }
 
@@ -363,23 +365,11 @@ function action(ticketId: string, kind: string, body: Record<string, unknown>) {
     return { status: 200, body: { ticket_id: row.ticket_id, action: 'cancel', state: row.state, version: row.version } };
   }
   if (kind === 'compensate') {
-    if (!body.fail_code) return problem(422, 'E-DATA-MISSING', '触发补偿必须声明失败分类（fail_code）');
-    if (!['执行中', '补偿中'].includes(row.state)) {
-      return problem(409, 'E-STATE-ILLEGAL', '只有执行中/补偿中可触发补偿');
-    }
-    row.state = '已回滚';
-    row.version += 1;
-    return {
-      status: 200,
-      body: {
-        ticket_id: row.ticket_id,
-        action: 'compensate',
-        state: row.state,
-        version: row.version,
-        executed_steps: [],
-        manual_tasks: [],
-      },
-    };
+    return problem(
+      503,
+      'E-ROLLBACK-UNAVAILABLE',
+      '同步回滚入口已关闭（ERP_ROLLBACK_SYNC_ENABLED 未开启）：本期只读，未调用任何连接器',
+    );
   }
   return problem(422, 'E-PARSE-FAILED', '未知动作');
 }

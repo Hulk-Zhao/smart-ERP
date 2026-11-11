@@ -7,12 +7,14 @@ import { renderPage } from './helpers/render';
 import { problem, startApi, type TestApi } from './helpers/server';
 
 let server: TestApi;
+let detail: ReturnType<typeof ticketDetail>;
 
 beforeEach(async () => {
   resetApiConfig();
+  detail = ticketDetail();
   server = await startApi((request) => {
     if (request.method === 'GET' && request.path === `/v1/tickets/${W3_TICKET_ID}`) {
-      return { body: ticketDetail() };
+      return { body: detail };
     }
     if (request.method === 'GET' && request.path === `/v1/audit/tickets/${W3_TICKET_ID}/images`) {
       return { body: { items: [auditImage()], next_cursor: null } };
@@ -71,5 +73,28 @@ describe('工单详情：真实链路 + W3 403', () => {
     const action = server.requests.find((item) => item.path.endsWith('/actions/approve'));
     expect(action?.headers['idempotency-key']).toBeTruthy();
     expect(action?.body).toMatchObject({ scope: { org_id: 'ORG-1', period: '2026-10' } });
+  });
+});
+
+describe('工单详情：同步回滚开关（rollback_available）', () => {
+  it('关闭时禁用按钮并给出可读原因', async () => {
+    detail = ticketDetail({ state: '执行中', write_level: 'W1', rollback_available: false });
+    renderPage(<TicketDetailPage />, { route: `/tickets/${W3_TICKET_ID}`, path: '/tickets/:ticketId' });
+
+    const button = await screen.findByRole('button', { name: '触发补偿 / 回滚' });
+    expect(button).toBeDisabled();
+    expect(screen.getByText(/同步回滚入口已关闭/)).toBeInTheDocument();
+  });
+
+  it('打开时可点击并进入确认面板', async () => {
+    detail = ticketDetail({ state: '执行中', write_level: 'W1', rollback_available: true });
+    renderPage(<TicketDetailPage />, { route: `/tickets/${W3_TICKET_ID}`, path: '/tickets/:ticketId' });
+
+    const button = await screen.findByRole('button', { name: '触发补偿 / 回滚' });
+    expect(button).toBeEnabled();
+    expect(screen.queryByText(/同步回滚入口已关闭/)).not.toBeInTheDocument();
+
+    fireEvent.click(button);
+    expect(await screen.findByRole('button', { name: '确认补偿' })).toBeInTheDocument();
   });
 });

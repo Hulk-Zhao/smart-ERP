@@ -1,13 +1,13 @@
 /**
  * 本文件由 `node scripts/gen-api-types.mjs` 从 C16 冻结契约生成，请勿手改。
  * 源文件：contracts/api/product_api.openapi.v1.json
- * 契约 sha256：6addfb9234276ddd4390fef265215503404aa8fba4413d03da64d7897b4a61ac
+ * 契约 sha256：2c373ec30c9f5af99507fd8b26cb971b37856a7526e880291621e3721210b316
  * 契约版本：1.0.0 · C16
  *
  * 契约变更流程：后端重新生成契约 → 执行 `npm run gen:api` → 评审类型差异。
  */
 
-export const CONTRACT_SHA256 = "6addfb9234276ddd4390fef265215503404aa8fba4413d03da64d7897b4a61ac";
+export const CONTRACT_SHA256 = "2c373ec30c9f5af99507fd8b26cb971b37856a7526e880291621e3721210b316";
 export const CONTRACT_VERSION = "1.0.0";
 export const CONTRACT_PATH_COUNT = 17;
 
@@ -417,6 +417,7 @@ export interface TicketDetailOut {
   org_id: string;
   period: string;
   required_roles: string[];
+  rollback_available: boolean;
   scene_code: string;
   state: TicketStateCode;
   steps: TicketStepOut[];

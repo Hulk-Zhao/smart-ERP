@@ -50,6 +50,7 @@ from apps.api.recon_snapshot import (
     snapshot_from_batch,
 )
 from apps.api.recon_store import ReconConflict, ReconStore, SqlReconStore
+from apps.api.rollback_gate import sync_rollback_enabled
 from apps.api.schemas import (
     ActionIn,
     ActionOut,
@@ -607,6 +608,14 @@ async def compensate_ticket(
         initiator_id=ticket.initiator_id,
         reason=body.reason,
     )
+    # 开关放在鉴权之后：跨租户/无权重先 403，再谈「入口是否开放」——漏鉴权比漏开关严重。
+    # 这里之前的 scope 校验与取数都是纯读（进程内仓储），不碰连接器、不写库，关闭态依旧零副作用。
+    if not sync_rollback_enabled():
+        raise ProblemError(
+            ErrorCode.ROLLBACK_UNAVAILABLE,
+            "同步回滚入口已关闭（ERP_ROLLBACK_SYNC_ENABLED 未开启）："
+            "本期只读，未调用任何连接器，工单状态未改变。",
+        )
     if ticket.state not in (TicketState.EXECUTING, TicketState.COMPENSATING):
         raise ProblemError(
             ErrorCode.STATE_ILLEGAL,
@@ -1557,6 +1566,7 @@ def _ticket_detail(container: ApiContainer, ticket: TicketRecord) -> TicketDetai
         required_roles=list(_required_roles(container, ticket)),
         missing_roles=list(_missing_roles(container, ticket)),
         audit_image_count=len(ticket.steps),
+        rollback_available=sync_rollback_enabled(),
     )
 
 

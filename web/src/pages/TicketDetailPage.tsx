@@ -25,6 +25,10 @@ const ACTION_CONFIRM: Record<TicketAction, string> = {
   compensate: '确认补偿',
 };
 
+// 关闭同步回滚时给用户的解释：不能只把按钮灰掉，否则「为什么点不了」会变成新的误导。
+const ROLLBACK_DISABLED_REASON =
+  '同步回滚入口已关闭（本期只读）：待补偿执行器路径上线后开放；点击不会产生任何外部写入。';
+
 type ActionFailCode = NonNullable<TicketActionPayload['fail_code']>;
 
 const FAIL_CODES: ActionFailCode[] = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7'];
@@ -207,23 +211,32 @@ export function TicketDetailPage() {
             <p className="text-[12px] text-slate-500">当前状态「{detail.state}」没有可执行动作（终态或需人工处置）。</p>
           ) : (
             <div className="flex flex-wrap gap-2">
-              {actions.map((action) => (
-                <button
-                  key={action}
-                  type="button"
-                  className={`btn btn-sm ${action === 'approve' ? 'btn-primary' : action === 'compensate' ? 'btn-danger' : 'btn-secondary'}`}
-                  onClick={() => {
-                    setActiveAction(action);
-                    setComment('');
-                    setConfirmedManual(false);
-                    mutation.reset();
-                  }}
-                >
-                  {ACTION_LABELS[action]}
-                </button>
-              ))}
+              {actions.map((action) => {
+                const disabled = action === 'compensate' && !detail.rollback_available;
+                return (
+                  <button
+                    key={action}
+                    type="button"
+                    className={`btn btn-sm ${action === 'approve' ? 'btn-primary' : action === 'compensate' ? 'btn-danger' : 'btn-secondary'}`}
+                    disabled={disabled}
+                    title={disabled ? ROLLBACK_DISABLED_REASON : undefined}
+                    onClick={() => {
+                      setActiveAction(action);
+                      setComment('');
+                      setConfirmedManual(false);
+                      mutation.reset();
+                    }}
+                  >
+                    {ACTION_LABELS[action]}
+                  </button>
+                );
+              })}
             </div>
           )}
+
+          {actions.includes('compensate') && !detail.rollback_available ? (
+            <p className="text-[11px] leading-5 text-amber-700">{ROLLBACK_DISABLED_REASON}</p>
+          ) : null}
 
           {activeAction ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">

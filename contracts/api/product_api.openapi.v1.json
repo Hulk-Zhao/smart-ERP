@@ -2146,6 +2146,10 @@
             "title": "Required Roles",
             "type": "array"
           },
+          "rollback_available": {
+            "title": "Rollback Available",
+            "type": "boolean"
+          },
           "scene_code": {
             "title": "Scene Code",
             "type": "string"
@@ -2214,7 +2218,8 @@
           "approvals",
           "required_roles",
           "missing_roles",
-          "audit_image_count"
+          "audit_image_count",
+          "rollback_available"
         ],
         "title": "TicketDetailOut",
         "type": "object"
