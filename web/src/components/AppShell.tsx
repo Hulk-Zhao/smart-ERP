@@ -87,9 +87,9 @@ const SCOPE_HINT: Record<ScopePanelState, string> = {
   'multi-org':
     '该令牌授权了多个组织，服务端不替你选择。请填写要使用的 org_id，保存后才会加载数据。',
   'missing-period': '该令牌的授权期内没有可用账期（period 为 null），请手动填写 period。',
-  missing: '当前无法获取默认范围：会话未返回 default_scope（端点可能未启用）。请手动填写下面三项。',
+  missing: '当前无法获取默认范围：会话未返回 default_scope（端点可能未启用）。下面三项是未确认的旧值/环境默认值，核对后保存才会加载数据。',
   unavailable:
-    '当前无法获取默认范围：会话端点返回 401（演示会话未启用或令牌无效）。可先手动填写下面三项，或更换令牌。',
+    '当前无法获取默认范围：会话端点返回 401（演示会话未启用或令牌无效）。下面三项未经确认，先核对保存或更换令牌。',
   error: '当前无法获取默认范围：会话端点异常。请手动填写下面三项。',
 };
 
@@ -161,15 +161,9 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
       (defaultScope.org_id ?? '') === org &&
       (defaultScope.period ?? '') === periodValue &&
       defaultScope.system_ids.join(',') === systemIds.join(',');
-    // 与会话默认范围一致就不落本地存储，下次启动继续跟随令牌；不一致则是用户显式手填。
-    // 会话本轮还没回复（pending）时也别把占位值固化成本地事实，等 default_scope 或用户手填。
-    const scopeSource: ScopeSource = sameAsDefault
-      ? 'session'
-      : scopeEdited
-        ? 'manual'
-        : config.scopeSource === 'pending'
-          ? 'pending'
-          : 'unresolved';
+    // 与会话默认范围一致就不落本地存储，下次启动继续跟随令牌；不一致则是用户核对后确认的范围。
+    // 保存动作本身就是确认：未确认的旧默认值只有经过这一步才会被当成可用范围。
+    const scopeSource: ScopeSource = sameAsDefault ? 'session' : 'manual';
     configureApi({
       baseUrl: baseUrl.trim() || '/erp/api',
       token: token.trim(),
@@ -725,7 +719,7 @@ export function AppShell() {
         </header>
 
         <main className="app-content">
-          {session.status === 'ready' && !session.scopeReady ? (
+          {session.status === 'ready' && session.scopeIssue !== null ? (
             <ScopeGate session={session} onOpenSettings={() => setSettingsOpen(true)} />
           ) : (
             <Outlet />

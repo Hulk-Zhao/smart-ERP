@@ -35,7 +35,14 @@ let reply: BatchesReply = 'projected';
 
 function sessionReply() {
   if (reply === 'unauthorized') return problem(401, 'E-AUTHZ-001', '缺少会话令牌（请求头 X-Session-Token）');
-  return { body: { user_id: REVIEWER_ID, tenant_id: TENANT_ID, roles: ['reviewer'] } };
+  return {
+    body: {
+      user_id: REVIEWER_ID,
+      tenant_id: TENANT_ID,
+      roles: ['reviewer'],
+      default_scope: { org_id: 'ORG-1', period: '2026-10', system_ids: ['u8', 'statement'] },
+    },
+  };
 }
 
 function batchesReply() {

@@ -196,6 +196,13 @@ describe('default_scope 为 null / 端点未启用：明确提示并可手填', 
     expect(screen.getByTestId('scope-org')).not.toBeDisabled();
     expect(screen.getByTestId('save-settings')).not.toBeDisabled();
 
+    // 关键：ORG-1 只是未确认的旧默认值，未经用户保存不得当作可用范围发业务请求。
+    expect(screen.getByTestId('scope-gate')).toHaveAttribute('data-state', 'missing-scope');
+    expect(paths(server)).not.toContain('/v1/tickets');
+    expect(paths(server)).not.toContain('/v1/approvals/pending');
+    expect(paths(server)).not.toContain('/v1/recon/batches');
+
+    // 保存即确认：这一步之后 ORG-1 才是用户认可的范围。
     fireEvent.click(screen.getByTestId('save-settings'));
     await waitFor(() => expect(within(kpi('待你决策')).getByText('1')).toBeTruthy());
     expect(lastRequest(server, '/v1/approvals/pending')?.query.org_id).toEqual(['ORG-1']);

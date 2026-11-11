@@ -70,20 +70,26 @@ export function useSession(): SessionState {
   }, [session, status]);
 
   const scopeReady = config.scope.org_id.trim() !== '' && config.scope.period.trim() !== '';
+  // 只有会话带出（session）或用户在面板里确认过（manual）的 scope 才算「已确认」。
+  // 旧版本 localStorage 里没带 scopeManual 的 ORG-1 只会落到 unresolved：有值，但不代表可用。
+  const scopeConfirmed = config.scopeSource === 'session' || config.scopeSource === 'manual';
 
   let scopeIssue: ScopeIssue | null = null;
   if (session && !scopeReady) {
     const scope = session.default_scope ?? null;
-    if (!scope) scopeIssue = 'missing-scope';
-    else if (!scope.org_id) scopeIssue = 'multi-org';
-    else if (!scope.period) scopeIssue = 'missing-period';
+    if (scope && !scope.org_id) scopeIssue = 'multi-org';
+    else if (scope && !scope.period) scopeIssue = 'missing-period';
+    else if (!scope) scopeIssue = 'missing-scope';
     else scopeIssue = 'incomplete';
+  } else if (session && config.scopeSource === 'unresolved') {
+    // 会话没给出默认范围，现值只是未确认的旧默认值/占位值：不许拿它发查询。
+    scopeIssue = 'missing-scope';
   }
 
   // 会话已返回但 scope 还没写进配置（同一轮渲染里 effect 尚未执行）时先别发请求，避免用占位 org 打后端。
   const canQuery =
     status === 'ready'
-      ? config.scopeSource !== 'pending' && scopeReady
+      ? scopeConfirmed && scopeReady
       : status === 'error' && scopeReady;
 
   return {
