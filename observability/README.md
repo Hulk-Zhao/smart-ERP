@@ -298,7 +298,7 @@ registry.observe_recon_result(result, duration_seconds=elapsed)  # result 为 ap
    两边不通，所以这条 P0 继续保持注释——不明就里地取消注释，等于恢复一条哑告警。
 6. **规则不评估 = 规则不存在**：仓库里没有任何抓取/评估进程时，写好的规则与注释掉的规则在故障当天
    没有区别。2026-11-11 核实：`deploy/` 全目录没有 Prometheus / Alertmanager，也没有
-   `scrape_configs` / `rule_files`；compose 的 9 个服务里没有任何进程读取 `alerts.rules.yaml`。
+   `scrape_configs` / `rule_files`；compose 的 10 个服务里没有任何进程读取 `alerts.rules.yaml`。
    当前 2 条「生效」规则的真实状态只是「语法合法 + 有采集点」，**不构成可观测性**。
    评估器（含抓取配置）接入前，验收与文档不得写「已告警」「线上有告警」，只能写「规则已定义、待评估器」。
 
@@ -324,7 +324,7 @@ git grep -n -E "\.(record_ticket|record_stage|record_recon_batch|observe_recon_r
 > 即便合入，它写的是 scheduler 进程的内存，而 `/metrics` 只在 web 进程——见第 5 条判据。
 
 > **更进一步：连那 2 条「生效」规则也没有评估器。** 2026-11-11 核实：`deploy/` 全目录无
-> Prometheus / Alertmanager，无 `scrape_configs` / `rule_files`，compose 的 9 个服务里没有进程
+> Prometheus / Alertmanager，无 `scrape_configs` / `rule_files`，compose 的 10 个服务里没有进程
 > 读取 `alerts.rules.yaml`。它们的序列写得出、promtool 也能通过，但没有任何进程会评估规则，
 > 因此故障发生时与注释掉的规则没有区别。这就是 §6.1.2 第 6 条的由来。
 
@@ -473,7 +473,7 @@ smart_erp_audit_chain_broken 0
 规则文件：[alerts.rules.yaml](./alerts.rules.yaml)（Prometheus rule file，`groups[0].rules` 共 12 条：生效 2、已注释 9、建议未启用 1）。
 
 > **部署内没有评估器**：`deploy/` 全目录没有 Prometheus / Alertmanager，也没有 `scrape_configs` /
-> `rule_files` 配置，compose 的 9 个服务没有任何进程读取本文件。下表「生效」只表示**未被注释、
+> `rule_files` 配置，compose 的 10 个服务没有任何进程读取本文件。下表「生效」只表示**未被注释、
 > 且依赖指标有真实采集点**，不表示线上有告警——在评估器（含抓取配置）接入前，这 2 条与注释掉的
 > 规则在故障当天没有区别。依据见 §6.1.2 第 6 条。
 

@@ -6,7 +6,7 @@
 #
 # ⚠ 部署内没有评估器（2026-11-11 核实，基准 origin/main 0f597b3）
 #   本文件是「规则定义」，不是「正在生效的告警」。deploy/ 全目录没有 Prometheus /
-#   Alertmanager，也没有任何 scrape_configs 或 rule_files 配置；compose 的 9 个服务里
+#   Alertmanager，也没有任何 scrape_configs 或 rule_files 配置；compose 的 10 个服务里
 #   没有任何进程读取或评估本文件。下面标「生效」的 2 条，真实状态是：语法通过、有采集点，
 #   但没有任何进程会评估它们——故障发生时，与注释掉的规则没有区别。
 #   在评估器（含抓取配置）接入前，不得在任何地方声称「线上有告警」。
