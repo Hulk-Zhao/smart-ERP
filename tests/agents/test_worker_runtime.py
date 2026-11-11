@@ -324,21 +324,39 @@ def test_scheduler_runs_ticks_then_releases_lease(db: str) -> None:
 
 
 def test_health_scheduler_reports_expired_lease(db: str) -> None:
+    """过期/未过期都用确定时间值断言，不靠 sleep 与机器时钟赛跑。"""
+
+    async def _set_expiry(env, expires_at: str) -> None:
+        # 只接受两个确定值；直接写字面量，避免 asyncpg 把字符串参数当 timestamptz 绑定。
+        assert expires_at in ("infinity", "-infinity")
+        async with env.sf() as session, session.begin():
+            await session.execute(
+                text(
+                    "UPDATE erp.scheduler_lease "
+                    f"SET expires_at = '{expires_at}'::timestamptz "
+                    "WHERE scope = 'health-test'"
+                )
+            )
+
     async def _run() -> None:
         async with db_env(db) as env:
             scheduler = Scheduler(
                 session_factory=env.sf,
                 owner="scheduler-health",
                 scope="health-test",
-                lease_seconds=0.1,
+                lease_seconds=30.0,
             )
             assert await scheduler.acquire() is True
             config = HealthConfig(
                 target="scheduler", database_url=db, scope="health-test"
             )
+
+            # 未过期：把租约钉死为 'infinity'，无论机器时钟/事务时间如何都必须健康。
+            await _set_expiry(env, "infinity")
             assert (await check_once(config)).ok
 
-            await asyncio.sleep(0.15)
+            # 已过期：钉死为 '-infinity'，不需要等租约自然到期。
+            await _set_expiry(env, "-infinity")
             expired = await check_once(config)
             assert not expired.ok
             assert "过期" in expired.payload.get("reason", "")

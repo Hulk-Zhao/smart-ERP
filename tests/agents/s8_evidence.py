@@ -330,6 +330,53 @@ async def _read(path: Path) -> str:
         return ""
 
 
+async def _wait_scheduler_ready(
+    url: str,
+    logs: dict[str, Path],
+    procs: dict[str, subprocess.Popen],
+    timeout: float = 30.0,
+) -> dict | None:
+    """等两个进程都打印「启动」且库里出现 owner；不用固定 sleep 猜启动时间。"""
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        if any(proc.poll() is not None for proc in procs.values()):
+            return None
+        started = 0
+        for path in logs.values():
+            if "启动" in await _read(path):
+                started += 1
+        rows = await _fetch(
+            url, "SELECT owner FROM erp.scheduler_lease WHERE scope = 'scheduler'"
+        )
+        if started == len(logs) and rows and rows[0]["owner"]:
+            return dict(rows[0])
+        await asyncio.sleep(0.1)
+    return None
+
+
+async def _wait_scheduler_owner(
+    url: str, want: str, log_path: Path, timeout: float = 30.0
+) -> str | None:
+    """轮询到指定副本接管（库内 owner 与日志同时到位）；不靠自然过期计时。"""
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        rows = await _fetch(
+            url, "SELECT owner FROM erp.scheduler_lease WHERE scope = 'scheduler'"
+        )
+        owner = rows[0]["owner"] if rows else None
+        if owner == want and "获得租约" in await _read(log_path):
+            return owner
+        await asyncio.sleep(0.1)
+    rows = await _fetch(
+        url, "SELECT owner FROM erp.scheduler_lease WHERE scope = 'scheduler'"
+    )
+    return rows[0]["owner"] if rows else None
+
+
 async def scenario_scheduler_single_point(url: str) -> dict:
     await _truncate(url, "erp.scheduler_lease")
     log_dir = Path(tempfile.mkdtemp(prefix="s8-sched-"))
@@ -346,37 +393,41 @@ async def scenario_scheduler_single_point(url: str) -> dict:
                     "core.runtime.scheduler",
                     "--owner",
                     f"s8-{name}",
+                    # 租约放长到 60s：观察「谁是唯一 leader」期间不会自然过期，
+                    # 之后用 '-infinity' 确定性地制造过期，不依赖 4s TTL + sleep。
                     "--lease-seconds",
-                    "4",
+                    "60",
                     "--tick-seconds",
-                    "1",
+                    "0.5",
                 ],
                 cwd=ROOT,
                 env=_subenv(url),
                 stdout=subprocess.DEVNULL,
                 stderr=handles[name],
             )
-        await asyncio.sleep(3)
-        first_owner = (
-            await _fetch(
-                url, "SELECT owner FROM erp.scheduler_lease WHERE scope = 'scheduler'"
-            )
-        )[0]["owner"]
+        lease = await _wait_scheduler_ready(url, logs, procs)
+        first_owner = lease["owner"] if lease else None
         leaders_initial = [
             name
             for name in ("A", "B")
             if "获得租约" in await _read(logs[name])
         ]
-        loser = "B" if first_owner == "s8-A" else "A"
-        owner_name = "A" if first_owner == "s8-A" else "B"
-        _hard_kill(procs[owner_name])
-        await asyncio.sleep(6)
-        second_owner = (
-            await _fetch(
-                url, "SELECT owner FROM erp.scheduler_lease WHERE scope = 'scheduler'"
+        owner_name = "A" if first_owner == "s8-A" else "B" if first_owner == "s8-B" else ""
+        loser = "B" if owner_name == "A" else "A"
+        second_owner = None
+        takeover_logged = False
+        if owner_name:
+            _hard_kill(procs[owner_name])
+            # 强杀后把租约钉成 '-infinity'，下一个 tick 立即满足接管条件。
+            await _execute(
+                url,
+                "UPDATE erp.scheduler_lease SET expires_at = '-infinity' "
+                "WHERE scope = 'scheduler'",
             )
-        )[0]["owner"]
-        takeover_logged = "获得租约" in await _read(logs[loser])
+            second_owner = await _wait_scheduler_owner(
+                url, f"s8-{loser}", logs[loser]
+            )
+            takeover_logged = "获得租约" in await _read(logs[loser])
     finally:
         for proc in procs.values():
             if proc.poll() is None:
