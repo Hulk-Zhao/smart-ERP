@@ -428,6 +428,26 @@ class ReconDiffDetailOut(ReconDiffOut):
     unattributed: UnattributedOut | None = None
 
 
+class SuggestIn(BaseModel):
+    """助手建议入参；本期只支持 ``next_action`` 一类。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ticket_id: UUID
+    kind: Literal["next_action"] = "next_action"
+
+
+class SuggestOut(BaseModel):
+    """助手建议出参；降级时 ``source="rule"`` 且带 ``fallback_reason``。"""
+
+    suggestion: str
+    reasons: list[str]
+    source: Literal["llm", "rule"]
+    model: str
+    generated_at: datetime
+    fallback_reason: str | None = None
+
+
 # --------------------------------------------------------------------------- 计量（结果计费）
 
 
