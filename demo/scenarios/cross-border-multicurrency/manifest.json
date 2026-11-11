@@ -1,0 +1,150 @@
+{
+  "scenario": "cross-border-multicurrency",
+  "display_name": "瀚海跨境 · 多主体多币种结算",
+  "industry": "跨境供应链（消费电子 / 家居 / 户外）",
+  "story": "深圳、香港、新加坡三个主体做转口与本地交付；外币订单按成交日汇率折算，进口报关计提关税与进口增值税，月末跨主体按内部转移价结算，供应商对账单同时出现汇率、税率与单位换算差异。",
+  "base_currency": "CNY",
+  "timezone": "Asia/Shanghai",
+  "generated_at": "2026-11-11T09:00:00+08:00",
+  "seed": 175594653851488,
+  "window": {
+    "start": "2025-11-12",
+    "end": "2026-11-11"
+  },
+  "tenant_id": "4cce09eb-b8b3-5c69-8fa9-8a86b3021688",
+  "demo_scope": {
+    "org_id": "ORG-SZ",
+    "period": "2026-09",
+    "system_ids": [
+      "u8",
+      "wms"
+    ]
+  },
+  "demo_users": {
+    "initiator": {
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "display": "沈立诚（对账运营）"
+    },
+    "reviewer": {
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "display": "顾清和（财务复核）"
+    },
+    "approver": {
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "display": "陆明远（业务负责人）"
+    },
+    "cfo": {
+      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "display": "宋知微（财务负责人）"
+    }
+  },
+  "row_counts": {
+    "scenario": 1,
+    "organization": 3,
+    "warehouse": 3,
+    "currency": 60,
+    "tax_rate": 4,
+    "customer": 30,
+    "supplier": 80,
+    "item": 600,
+    "bom_line": 1383,
+    "sales_order": 360,
+    "sales_order_line": 2202,
+    "sales_delivery": 360,
+    "sales_delivery_line": 2202,
+    "sales_invoice": 360,
+    "sales_invoice_line": 2202,
+    "purchase_order": 180,
+    "purchase_order_line": 612,
+    "goods_receipt": 180,
+    "goods_receipt_line": 612,
+    "purchase_invoice": 180,
+    "purchase_invoice_line": 612,
+    "inventory_lot": 612,
+    "production_order": 60,
+    "production_material_issue": 227,
+    "gl_entry": 1260,
+    "recon_case": 312,
+    "ticket_case": 16,
+    "promotion": 0,
+    "rebate_accrual": 0,
+    "fx_rate": 48,
+    "customs_declaration": 120,
+    "intercompany_settlement": 60
+  },
+  "erp_counts": {
+    "recon_batches": 3,
+    "recon_lines": 312,
+    "tickets": 16,
+    "ticket_steps": 20,
+    "ticket_events": 61,
+    "audit_images": 18,
+    "approval_records": 25,
+    "recon_line_links": 16,
+    "price_book": 1
+  },
+  "checks": {
+    "ok": true,
+    "problems": [],
+    "latest_business_date": "2026-09-26",
+    "diff_types": [
+      "candidate",
+      "duplicate",
+      "missing_doc",
+      "qty",
+      "rounding_tolerance",
+      "scrap",
+      "tax",
+      "unit_price",
+      "unparseable",
+      "uom"
+    ],
+    "ticket_states": [
+      "已回滚",
+      "已完成",
+      "已终止",
+      "已锁定",
+      "已驳回",
+      "待审批",
+      "待确认",
+      "执行中",
+      "校验中",
+      "补偿中",
+      "需人工处置"
+    ],
+    "compensation_chains": 2
+  },
+  "files": {
+    "scenario.csv": "22007def5d065afd5aee80052bda42f89991eabea345f7295760151ed52aaf43",
+    "organization.csv": "96b60ccdc120abc8aea4baaf7194f2e529dacf768986fce9685cc33f379633f2",
+    "warehouse.csv": "b96b907982ce3af9c473fbd729ab0bdce60b603ce085dfb9cf7db1ef550349d7",
+    "currency.csv": "8b5b2250ac1e12d6e2369d18166cb526acfec4ef90c1d60c43e7a240df726608",
+    "tax_rate.csv": "4d4fdb0f14054530a142712235c6e0ed2ec2734ef25a1974e5dda205d866dbe6",
+    "customer.csv": "17fe8150aafa1dc4c2096eca706e9c09cb2fe1f474443afda49251300586dbef",
+    "supplier.csv": "6b0bd98e4e25d52f0425113bc551f0a5f3e6dbdc246a0b728c751c70bc2316da",
+    "item.csv": "76aae2f99a169aff8ff1cf07395330d8df1b529b628e6f76a460e6a7f412f01f",
+    "bom_line.csv": "1b76c94d9e0b4b2c4fc0831836950badbead58079ead670499211ab2fb14be93",
+    "sales_order.csv": "91c8428422e6b50f603a84252414352e7f4a97f14102e820c141ca4b46cf7958",
+    "sales_order_line.csv": "41dc2a5d7d56a85224974b78dad7359070aaf826838103f3f56db52ba7a059c0",
+    "sales_delivery.csv": "aa7350496534e1647507e4fc1672fb224842f83f74a97e3ee26123c29785912b",
+    "sales_delivery_line.csv": "725fa1e7cda3bee592be8f6daca7d50b89f28df9461be666279b098298871333",
+    "sales_invoice.csv": "02afcbcbe69bcecdfe01e33f0fd988c367a2ba6905746675090ef63c198d7c32",
+    "sales_invoice_line.csv": "79c02da2e008fbb62e6b64488b620976f335c7fdd13447fdf364804805e31be0",
+    "purchase_order.csv": "c95627ee102dd1b0506be893246d7120674fac858376ba03a5faf13f4e2ed823",
+    "purchase_order_line.csv": "906043cad74b1e034df26872ed86e5236751cf82a05b684a426c2e19e70e0ff6",
+    "goods_receipt.csv": "36abc05053e3bfbe7d1ca252fc072e7bdbca99d03e62f5f151e4124f8082b8a1",
+    "goods_receipt_line.csv": "4bdd790b87534ab3c0717422d73ee1e9553f243114c07b7d08fa76b5ac89d61d",
+    "purchase_invoice.csv": "a3ef93c43b504c2b05a99968a069c61ed4df3b334645febe47d1467c15f972e2",
+    "purchase_invoice_line.csv": "3696889fac71332d865482a23aa8acf97ebbb8e1cd08c6c85e35bfe78273e77e",
+    "inventory_lot.csv": "7394ee6434e91facd47bc0eb3c7e5436bd803574583029ef3f34aa86a3dd5bb3",
+    "production_order.csv": "ef1bcf67397d1536d1ff04d72660fcdce2fdf8810b3f08962b7a7c04fdc880e6",
+    "production_material_issue.csv": "e6ea6d67f4f8878edea69066926b0f0e2b2afad1c70ef05df5c71fa4ff6f4ef2",
+    "gl_entry.csv": "cf997b405e77354710709c7e432d2a86662e0698825351b55dd05a02f7e7f331",
+    "recon_case.csv": "e702d625dc88f720b76e8de73dde1f0fd18c96a08c08c253ed1d89a14120a597",
+    "ticket_case.csv": "5f3533faf61df7ca32c6743ae07cbeae3830d9f3c95348a51b02a8d74906b8c3",
+    "fx_rate.csv": "96e55cda76cac63620ab0a8d34a2d6ef4dfd1d10ae7d80b1c4adbc56113a7cad",
+    "customs_declaration.csv": "f46a02ad7c885e8dfecfb681944ba82d16199739c75750b398ddc71e58894405",
+    "intercompany_settlement.csv": "85caeda1998fbe31319e415c84cc047cea69ae22a28d1cae2fd1b5c1e6e10425",
+    "erp_seed.json": "1b8f002100e4235e6be2011d7bd8eace088e57266d3d70931e45902fb7436800"
+  }
+}

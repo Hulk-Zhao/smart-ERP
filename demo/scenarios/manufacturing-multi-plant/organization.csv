@@ -1,0 +1,4 @@
+scenario,timezone,org_code,org_name,legal_entity,country,base_currency
+manufacturing-multi-plant,Asia/Shanghai,ORG-SZ,苏州总装厂,苏州华辰精密制造有限公司,CN,CNY
+manufacturing-multi-plant,Asia/Shanghai,ORG-NB,宁波精工园,宁波华辰精工科技有限公司,CN,CNY
+manufacturing-multi-plant,Asia/Shanghai,ORG-WH,武汉电子厂,武汉华辰电子组件有限公司,CN,CNY

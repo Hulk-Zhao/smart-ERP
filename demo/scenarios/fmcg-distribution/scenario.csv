@@ -1,0 +1,2 @@
+scenario,display_name,industry,story,base_currency,timezone,generated_at,seed
+fmcg-distribution,臻选快消 · 华东经销网络,快消品分销（饮料 / 休闲零食 / 个护 / 调味品）,上海总部统一管理 30 家一级/二级经销商与 KA 直营系统；月度促销与阶梯返利先计提后核销，信用额度与账期约束大量小额订单，月末以经销商结算单对账并处理促销费用差异。,CNY,Asia/Shanghai,2026-11-11T09:00:00+08:00,227696405335814
