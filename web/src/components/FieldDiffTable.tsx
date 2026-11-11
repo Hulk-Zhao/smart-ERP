@@ -46,35 +46,58 @@ export function FieldDiffTable({
         <span>{reasonLabel}</span>
       </div>
       <ul className="divide-y divide-slate-100">
-        {rows.map((row) => (
-          <li key={row.key} className="grid min-w-0 gap-2 px-3 py-2 text-[12px] sm:grid-cols-5 sm:items-start">
-            <div className="min-w-0">
-              <div className="font-medium text-slate-800">{row.field}</div>
-              {row.unit ? <div className="text-[10px] text-slate-400">单位：{row.unit}</div> : null}
-            </div>
-            <div className="min-w-0 break-words">
-              <span className="label mr-1 sm:hidden">{mineLabel}</span>
-              <span className="font-mono text-slate-700">{text(row.ours)}</span>
-            </div>
-            <div className="min-w-0 break-words">
-              <span className="label mr-1 sm:hidden">{theirsLabel}</span>
-              <span className="font-mono text-slate-700">{text(row.theirs)}</span>
-            </div>
-            <div className="min-w-0 break-words">
-              <span className="label mr-1 sm:hidden">{deltaLabel}</span>
-              <span className={`font-mono ${row.delta && row.delta.startsWith('+') ? 'text-emerald-700' : row.delta && row.delta.startsWith('-') ? 'text-rose-700' : 'text-slate-600'}`}>
-                {row.delta ?? '—'}
-              </span>
-            </div>
-            <div className="min-w-0">
-              <span className="label mr-1 sm:hidden">{reasonLabel}</span>
-              <span className="inline-flex flex-wrap items-center gap-1">
-                <FieldDiffKindBadge kind={row.reason} />
-                {row.reasonLabel ? <span className="text-[11px] text-slate-500">{row.reasonLabel}</span> : null}
-              </span>
-            </div>
-          </li>
-        ))}
+        {rows.map((row) => {
+          const oursText = text(row.ours);
+          const theirsText = text(row.theirs);
+          const changed = oursText !== theirsText;
+          const deltaTone =
+            row.delta && row.delta.startsWith('+')
+              ? 'text-emerald-700'
+              : row.delta && row.delta.startsWith('-')
+                ? 'text-rose-700'
+                : 'text-slate-600';
+          return (
+            <li key={row.key} className="grid min-w-0 gap-2 px-3 py-2 text-[12px] sm:grid-cols-5 sm:items-start">
+              <div className="min-w-0">
+                <div className="font-medium text-slate-800">{row.field}</div>
+                {row.unit ? <div className="text-[10px] text-slate-400">单位：{row.unit}</div> : null}
+              </div>
+              <div className="min-w-0 break-words">
+                <span className="label mr-1 sm:hidden">{mineLabel}</span>
+                <span
+                  className={`inline-block max-w-full break-words rounded px-1 font-mono ${
+                    changed ? 'diff-cell-ours text-rose-800' : 'text-slate-700'
+                  }`}
+                >
+                  {oursText}
+                </span>
+              </div>
+              <div className="min-w-0 break-words">
+                <span className="label mr-1 sm:hidden">{theirsLabel}</span>
+                <span
+                  className={`inline-block max-w-full break-words rounded px-1 font-mono ${
+                    changed ? 'diff-cell-theirs text-emerald-800' : 'text-slate-700'
+                  }`}
+                >
+                  {theirsText}
+                </span>
+              </div>
+              <div className="min-w-0 break-words">
+                <span className="label mr-1 sm:hidden">{deltaLabel}</span>
+                <span className={`rounded px-1 font-mono ${deltaTone} ${row.delta && row.delta !== '—' ? 'diff-cell-changed' : ''}`}>
+                  {row.delta ?? '—'}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <span className="label mr-1 sm:hidden">{reasonLabel}</span>
+                <span className="inline-flex flex-wrap items-center gap-1">
+                  <FieldDiffKindBadge kind={row.reason} />
+                  {row.reasonLabel ? <span className="text-[11px] text-slate-500">{row.reasonLabel}</span> : null}
+                </span>
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
