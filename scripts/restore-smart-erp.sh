@@ -18,10 +18,16 @@
 #     --dump backups/2026-11-11/smart_erp-...dump \
 #     --target-url postgresql+asyncpg://erp_migrator:***@hulkai_aps_postgres:5432/smart_erp_restore \
 #     [--objects backups/.../erp_objects-...tar.gz --target-volume erp_objects_restore] \
-#     [--force]
+#     [--force] [--create-db]
 #
-# 退出码：0 成功；2 参数/环境不满足；3 安全红线；4 目标库非空且未加 --force；
-#         5 恢复后对象集合与备份包不一致（--force 留下的旧对象，见 §3.5）。
+# 退出码（区分「参数写错」与「目标库不存在」，出事时不能靠猜）：
+#   0  成功
+#   2  参数/环境不满足（缺参数、备份文件不存在、连不上实例等）
+#   3  安全红线：目标库名不是 smart_erp / smart_erp_*
+#   4  目标库非空且未加 --force
+#   5  对象集合不一致（恢复库比备份包多对象，或备份包有对象没恢复出来）
+#   6  目标库不存在且未加 --create-db
+#   7  --create-db 建库失败（通常是连接角色没有 CREATEDB 权限）
 # =============================================================================
 set -euo pipefail
 
@@ -33,6 +39,8 @@ TARGET_URL=""
 OBJECTS_TAR=""
 TARGET_VOLUME=""
 FORCE=0
+CREATE_DB=0
+CREATE_DB_OWNER=""
 
 usage() {
   cat <<'EOF'
@@ -42,7 +50,14 @@ usage() {
   --objects <file>       erp_objects 的 tar.gz（可选）
   --target-volume <名>   对象解包到哪个卷（给 --objects 时必须）
   --force                目标库非空也继续（pg_restore --clean --if-exists）
+  --create-db            目标库不存在时自动建库（要求连接角色有 CREATEDB）
+  --create-db-owner <角色> 自动建库时的库主，默认=连接串用户；用 DBA 角色建库时
+                         必须显式指向应用迁移角色（如 erp_migrator），否则它连
+                         CREATE SCHEMA 的权限都没有（隐含开启 --create-db）
   -h, --help             显示帮助
+
+退出码：0 成功 / 2 参数或环境 / 3 库名红线 / 4 非空且未 --force /
+        5 对象集合不一致 / 6 目标库不存在且未 --create-db / 7 自动建库失败
 
 环境变量：ERP_DB_NETWORK / ERP_BACKUP_PG_IMAGE / ERP_BACKUP_OBJECT_IMAGE
 EOF
@@ -57,6 +72,10 @@ while [[ $# -gt 0 ]]; do
     --objects)       OBJECTS_TAR="${2:-}"; shift 2 ;;
     --target-volume) TARGET_VOLUME="${2:-}"; shift 2 ;;
     --force)         FORCE=1; shift ;;
+    --create-db)     CREATE_DB=1; shift ;;
+    --create-db-owner)
+                     [[ -n "${2:-}" ]] || { echo "ERROR: --create-db-owner 需要一个角色名" >&2; exit 2; }
+                     CREATE_DB=1; CREATE_DB_OWNER="$2"; shift 2 ;;
     -h|--help)       usage; exit 0 ;;
     *)               usage; die "未知参数: $1" ;;
   esac
@@ -91,13 +110,55 @@ _parse_url "$TARGET_URL"
 # 红线：目标库名必须以 smart_erp 开头（演练库允许 smart_erp_restore 这类后缀）
 if [[ ! "$DB_NAME" =~ ^smart_erp($|_) ]]; then
   echo "ERROR: 目标库 '${DB_NAME}' 不是 smart_erp / smart_erp_*，拒绝恢复（防止写进 APS 的库）" >&2
-  exit 4
+  exit 3
 fi
 
 psql_target() {
   docker run --rm --network "$NETWORK" -e "PGPASSWORD=${DB_PASS}" "$PG_IMAGE" \
     psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc "$1"
 }
+
+# 维护库连接：只用来判断目标库是否存在、必要时建库，不碰任何业务对象
+psql_admin() {
+  docker run --rm --network "$NETWORK" -e "PGPASSWORD=${DB_PASS}" "$PG_IMAGE" \
+    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -tAc "$1"
+}
+
+# ---- 0. 目标库是否存在（源库被 DROP 是灾备的常态，不能靠 psql 裸报错）-------
+if ! DB_EXISTS="$(psql_admin "select 1 from pg_database where datname = '${DB_NAME}'")"; then
+  echo "ERROR: 连不上 PostgreSQL（${DB_HOST}:${DB_PORT}，用户 ${DB_USER}）或没有读 pg_database 的权限" >&2
+  exit 2
+fi
+DB_EXISTS="$(printf '%s' "${DB_EXISTS}" | tr -d '[:space:]')"
+
+if [[ "${DB_EXISTS}" != "1" ]]; then
+  if (( CREATE_DB )); then
+    DB_OWNER="${CREATE_DB_OWNER:-$DB_USER}"
+    echo "+ 目标库 ${DB_NAME} 不存在，按 --create-db 创建（OWNER ${DB_OWNER}，连接角色 ${DB_USER}）"
+    if ! psql_admin "CREATE DATABASE \"${DB_NAME}\" OWNER \"${DB_OWNER}\""; then
+      echo "ERROR: 建库 ${DB_NAME} 失败：连接角色 ${DB_USER} 没有 CREATEDB 权限，或无权把库主设为 ${DB_OWNER}。" >&2
+      echo "       处理：换一个有 CREATEDB 的连接串重跑，并用 --create-db-owner 指定应用迁移角色（如 erp_migrator）。" >&2
+      exit 7
+    fi
+    # 库主不是连接用户时，必须显式确认，否则后续 alembic CREATE SCHEMA 会被拒
+    if [[ "${DB_OWNER}" == "${DB_USER}" && "${DB_USER}" == "postgres" ]]; then
+      echo "WARN: 库主被设为 postgres；应用迁移角色（如 erp_migrator）将没有 CREATE SCHEMA 权限。" >&2
+      echo "      用 DBA 角色建库时请加 --create-db-owner erp_migrator 重来。" >&2
+    fi
+  else
+    cat >&2 <<EOF
+ERROR: 目标库 ${DB_NAME} 不存在。恢复脚本不会悄悄替你建库，两种做法：
+  1) 人工建库后重跑同一命令（OWNER 用应用迁移角色，不要用 postgres）：
+       CREATE DATABASE "${DB_NAME}" OWNER "<应用迁移角色，如 erp_migrator>";
+  2) 加 --create-db，由脚本自动建库：
+       以应用角色连接： --create-db（库主=连接串用户）
+       以 DBA 角色连接： --create-db --create-db-owner <应用迁移角色>
+     （连接角色需要 CREATEDB；没有权限时脚本以退出码 7 明确失败）。
+提示：灾备场景源库已被 DROP 时，目标库通常也不存在——用第 2 种做法可以一条命令走完。
+EOF
+    exit 6
+  fi
+fi
 
 # ---- 1. 非空库检查 ----------------------------------------------------------
 EXISTING="$(psql_target "select count(*) from information_schema.tables
@@ -112,25 +173,9 @@ fi
 
 echo "== smart-ERP 恢复：${DUMP} → ${DB_NAME}（force=${FORCE}）=="
 
-# ---- 2. 数据库恢复 ----------------------------------------------------------
-RESTORE_ARGS=(--single-transaction --exit-on-error)
-(( FORCE )) && RESTORE_ARGS+=(--clean --if-exists)
-
-echo "+ pg_restore ${RESTORE_ARGS[*]}"
-docker run --rm -i --network "$NETWORK" -e "PGPASSWORD=${DB_PASS}" "$PG_IMAGE" \
-  pg_restore --dbname "postgresql://${DB_USER}@${DB_HOST}:${DB_PORT}/${DB_NAME}" \
-  "${RESTORE_ARGS[@]}" < "$DUMP"
-
-# ---- 3. 核对 ----------------------------------------------------------------
-TABLE_COUNT="$(psql_target "select count(*) from information_schema.tables where table_schema = 'erp'" | tr -d '[:space:]')"
-ALEMBIC_REV="$(psql_target "select coalesce(max(version_num), 'NONE') from erp.alembic_version_erp" 2>/dev/null | tr -d '[:space:]' || true)"
-[[ -n "$ALEMBIC_REV" ]] || ALEMBIC_REV="NONE"
-echo "核对：erp schema 表数=${TABLE_COUNT}；alembic 版本=${ALEMBIC_REV}"
-
-# ---- 3.5 一致性校验：库内对象集合 − 备份包对象集合 必须为空 -------------------
-# --force 的 --clean 只清「备份包里出现过的对象」，不会删掉备份包里没有的旧表/
-# 旧序列/旧外键，可能得到半新半旧的库。这里显式比对用户 schema（erp/public）下的
-# 表/序列/视图/物化视图/外部表/外键，多出来的即拒绝通过。
+# ---- 2. 对象清单（恢复前后各用一次）-----------------------------------------
+# 备份包对象集合从 pg_restore -l 解析；恢复库对象集合从目录读。两边都只取
+# user schema（erp/public）的表/序列/视图/物化视图/外部表/外键。
 HOST_DUMP_DIR="$(cd "$(dirname "$DUMP")" && { pwd -W 2>/dev/null || pwd; })"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -178,6 +223,42 @@ db_objects() {
 }
 
 dump_objects > "${TMP_DIR}/dump.txt"
+
+# ---- 2.5 --force 的前置一致性检查（必须在 pg_restore 之前）-------------------
+# --force 走的是 `pg_restore --clean --if-exists`。备份包里含 `SCHEMA erp`，
+# 于是 --clean 会先发 `DROP SCHEMA erp`；此时若目标库的 erp schema 里有备份包
+# 没有的旧表，DROP 被依赖挡住，pg_restore 以 1 退出，§3.5 的后置校验根本跑不到
+# （历史缺陷：同样一件事在 public 能抓到、在 erp 抓不到）。所以先把「多出来的
+# 对象」在恢复前拦住，复用同一套对象清单与退出码 5。
+if (( FORCE )); then
+  db_objects > "${TMP_DIR}/db_before.txt"
+  EXTRA_BEFORE="$(comm -13 "${TMP_DIR}/dump.txt" "${TMP_DIR}/db_before.txt")"
+  if [[ -n "$EXTRA_BEFORE" ]]; then
+    echo "ERROR: 目标库 ${DB_NAME} 存在备份包中没有的对象，--force 的 --clean 会在 DROP SCHEMA 处被依赖挡住：" >&2
+    echo "$EXTRA_BEFORE" | sed 's/^/  + /' >&2
+    echo "处理：确认这些对象可删除后先手工 DROP（尤其是 erp schema 里的残留表），再用同一备份 --force 重跑；不要直接放行。" >&2
+    exit 5
+  fi
+fi
+
+# ---- 3. 数据库恢复 ----------------------------------------------------------
+RESTORE_ARGS=(--single-transaction --exit-on-error)
+(( FORCE )) && RESTORE_ARGS+=(--clean --if-exists)
+
+echo "+ pg_restore ${RESTORE_ARGS[*]}"
+docker run --rm -i --network "$NETWORK" -e "PGPASSWORD=${DB_PASS}" "$PG_IMAGE" \
+  pg_restore --dbname "postgresql://${DB_USER}@${DB_HOST}:${DB_PORT}/${DB_NAME}" \
+  "${RESTORE_ARGS[@]}" < "$DUMP"
+
+# ---- 3. 核对 ----------------------------------------------------------------
+TABLE_COUNT="$(psql_target "select count(*) from information_schema.tables where table_schema = 'erp'" | tr -d '[:space:]')"
+ALEMBIC_REV="$(psql_target "select coalesce(max(version_num), 'NONE') from erp.alembic_version_erp" 2>/dev/null | tr -d '[:space:]' || true)"
+[[ -n "$ALEMBIC_REV" ]] || ALEMBIC_REV="NONE"
+echo "核对：erp schema 表数=${TABLE_COUNT}；alembic 版本=${ALEMBIC_REV}"
+
+# ---- 3.5 后置一致性校验：库内对象集合 − 备份包对象集合 必须为空 ---------------
+# 兜底：即便恢复过程没有报错，也要确认恢复库没有多出备份包之外的对象、
+# 备份包里的对象也都真的恢复出来了。对象清单与函数在 §2 已定义，dump.txt 直接复用。
 db_objects   > "${TMP_DIR}/db.txt"
 EXTRA="$(comm -13 "${TMP_DIR}/dump.txt" "${TMP_DIR}/db.txt")"
 MISSING="$(comm -23 "${TMP_DIR}/dump.txt" "${TMP_DIR}/db.txt")"
