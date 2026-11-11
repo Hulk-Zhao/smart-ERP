@@ -668,3 +668,123 @@ HTTP/1.1 500 Internal Server Error
  "simulated":true,"system":"u8-stub（模拟外部系统，不是真实 U8）"}]}
 ```
 
+## 10. 演示前重建演练与「开演前 10 分钟」检查单
+
+本节来自 2026-11-11 的**旁路栈全流程演练**（另起 compose project、独立卷/端口/PG，
+与 live 完全隔离；`8416788` 的 app/web/gw 三个镜像现建现起）：迁移 → 起 demo 档 →
+`demo/load.py --all` → 重启 api → `POST /stub/reset`，全程无手工补步骤即通过。
+演练结果：`images=54 seed_images=54 runtime_added=0 problems=0`、
+`connector_idempotency=0`、`receipts=0 / business_writes=0`、四身份登录 200。
+
+要复现旁路演练，用同一份 compose 另起 project，覆盖四类资源即可（不复制 compose 文件，
+避免服务清单两处维护）：`container_name` 全部加 `drill` 后缀、宿主端口换到 18xxx、
+`volumes.*.name` 换成 `s8drill_*`、`networks.smart-erp-net.name` 换成 `s8drill_net`
+（`erp-db-net` 指向演练自己的外部网络），再单独起一个 PG15 容器跑
+`db/00-provision.sql`。
+
+### 10.1 四个会卡住人的点
+
+1. **`0013 → 0014` 必须用 `erp_migrator` 跑。** `0014_connector_idem_grants` 里是
+   `GRANT ... TO erp_app`，`erp_app` 自己不是表属主、也没有授权权限；用业务账号跑会在
+   这一步直接 `permission denied`。迁移统一：
+   `docker run --rm --network <db-net> -e ERP_DATABASE_URL=<erp_migrator DSN>
+   --entrypoint alembic smart-erp/app:$SHA upgrade head`
+2. **重灌种子后必须重启 api。** `demo/load.py` 只换库里的数据；api 进程内的 HTTP 幂等
+   缓存（`container.idempotency`，进程内存，按固定 `Idempotency-Key` 存响应体）不会失效。
+   不重启就点演示动线，会拿到上一轮种子算出的**旧响应**（看起来像「点了没反应」或
+   「状态没变」）。顺序固定为：灌种子 → `docker restart erp_api` → 等 healthy →
+   再点页面。（连接器写幂等已在 `0014` 落 PG，重启不再是它的必需项；这里重启是为了
+   HTTP 幂等缓存与后台任务的内存态。）
+3. **桩的 `_seq` 从 `000001` 起。** 唯一常规的归零手段是 `POST /stub/reset`（容器重启
+   虽然也会归零，但那是副作用，不该当步骤用）；不 reset 的话上一轮的
+   `PO-STUB-000002` 会带进这一轮，和讲解里的「第一单」对不上。已验证：reset → 写单
+   → reset → 再写，两次都是 `PO-STUB-000001`。
+4. **`u8-stub` 只绑 `127.0.0.1:8021`（宿主回环）。** 意味着：演示机上本地
+   `curl 127.0.0.1:8021/stub/receipts` 能看回执，但**远程/公网访问不到 8021**，
+   公网入口只有 web 的 nginx（`/erp/api/`）。api 走容器内网 `http://u8-stub:8021`，
+   不受宿主绑定影响。所以「当场展示回执」只能用演示机本机终端或经 api 的 executed_steps。
+
+### 10.2 开演前 10 分钟检查单（逐条照抄，`$SHA` = 冻结 sha）
+
+在 `deploy/smart-erp/` 下执行；`DSN_MIG` 从 `.env` 取，不在命令行写明文口令。
+
+```bash
+cd deploy/smart-erp
+PGPASSWORD="$(sed -n 's|^ERP_MIGRATION_DATABASE_URL=postgresql+asyncpg://erp_migrator:\([^@]*\)@.*|\1|p' .env)"
+DSN_MIG="postgresql://erp_migrator:${PGPASSWORD}@s8-demo-pg:5432/smart_erp"
+# s8-demo-pg / s8-demo-db-net 是本机演示栈的 PG 容器名与网络名；
+# 换机器时按 `.env` 的 ERP_DB_NETWORK 与 PG 容器名替换这两处（不是 127.0.0.1）。
+```
+
+1）镜像 sha 是否等于冻结 sha（4 个容器逐个看，任何一个旧 tag 即停）
+
+```bash
+docker ps --filter name=erp_ --format '{{.Names}}\t{{.Image}}' | sort
+# 期望：erp_api / erp_web / erp_gw / erp_u8_stub 的行尾都是 <$SHA>，
+#       不允许出现别的 sha（尤其 erp_api 与 erp_web 必须同批）
+```
+
+2）迁移 head 是否为 `0014`
+
+```bash
+docker exec -e PGPASSWORD="$PGPASSWORD" s8-demo-pg \
+  psql -U erp_migrator -d smart_erp -tAc "select version_num from erp.alembic_version_erp"
+# 期望：0014_connector_idem_grants
+# 注意表名是 erp.alembic_version_erp（db/migrations/env.py 的 VERSION_TABLE），
+# 不是默认的 alembic_version；查错表会得到「relation does not exist」而不是空结果。
+```
+
+3）四身份都能登录（返回 200 且 `user_id` 对得上）
+
+```bash
+python - <<'PY'
+import json, re, urllib.request
+env = dict(re.findall(r'(?m)^([A-Z_]+)=(.*)$', open('.env', encoding='utf-8').read()))
+for i in json.loads(env['ERP_DEMO_SESSION_IDENTITIES']):
+    req = urllib.request.Request('http://127.0.0.1:8010/v1/auth/session',
+                                 headers={'X-Session-Token': i['token']})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        b = json.loads(r.read())
+    print(r.status, b['user_id'], sorted(b['roles']))
+PY
+# 期望 4 行 200：aaaaaaaa=operator；bbbbbbbb=finance,reviewer；
+#               dddddddd=approver,cfo,reviewer；eeeeeeee=approver,finance,reviewer
+```
+
+4）桩是干净的（回执 0、业务写入 0）
+
+```bash
+curl -s -X POST http://127.0.0.1:8021/stub/reset
+curl -s http://127.0.0.1:8021/stub/receipts | python -c "import json,sys;print('receipts=',len(json.load(sys.stdin)['items']))"
+curl -s http://127.0.0.1:8021/stub/requests | python -c "import json,sys;d=json.load(sys.stdin)['items'];print('business_writes=',len([x for x in d if x['method'] in ('POST','DELETE') and not x['path'].startswith('/stub/')]))"
+# 期望：receipts= 0 / business_writes= 0
+```
+
+5）连接器幂等表是空的（新种子不该带运行时写结果）
+
+```bash
+docker exec -e PGPASSWORD="$PGPASSWORD" s8-demo-pg \
+  psql -U erp_migrator -d smart_erp -tAc "select count(*) from erp.connector_idempotency"
+# 期望：0
+```
+
+6）审计链自洽（`problems=0`）
+
+```bash
+docker run --rm --network s8-demo-db-net -v "$PWD/../..:/repo" -w /repo \
+  --entrypoint python smart-erp/app:$SHA demo/verify_audit_chain.py --dsn "$DSN_MIG" --all
+# 期望末行：TOTAL seed_images=54 runtime_added=0 images=54 mode=prefix problems=0
+# 若刚冒烟过，runtime_added 会 >0 且 images=seed+runtime，只要 problems=0 即可
+```
+
+7）页面与服务在（可选，30 秒）
+
+```bash
+curl -s -o /dev/null -w 'web=%{http_code}\n' http://127.0.0.1:8088/
+curl -s -o /dev/null -w 'api=%{http_code}\n' http://127.0.0.1:8088/erp/api/healthz
+# 期望：web=200 / api=200
+```
+
+任一条不符：不要开演。先按 §3 回滚到上一个可用 sha，再查原因。
+
+
