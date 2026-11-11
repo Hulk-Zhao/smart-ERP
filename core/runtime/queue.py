@@ -6,7 +6,8 @@
 - 成功：``succeeded``（终态）；
 - 失败：未到 ``max_attempts`` → 回 ``queued`` 并按退避设置 ``run_at``；
   到上限 → ``dead``（终态，不再自动重试，等人工重放）；
-- 回收：``running`` 且 ``lease_expires_at < now()`` 视为 owner 已死，
+- 回收：``running`` 且 ``lease_expires_at`` 超过 ``grace_seconds`` 宽限仍未续租
+  才视为 owner 已死（``exclude_owner`` 可排除调用方自己持有的行），
   未超限回 ``queued``，超限转 ``dead``；
 - 单跑由状态机（``state='running'`` + 租约）保证，不靠唯一索引硬撞。
 """
@@ -29,6 +30,17 @@ DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_RETRY_BACKOFF_SECONDS = 5.0
 # 单次 reclaim_stale 最多回收条数，避免一次事务锁太多行。
 DEFAULT_RECLAIM_BATCH = 100
+# reclaim 的宽限默认值。依据是租约的续约节奏而不是拍脑袋：
+# 在跑任务每 ``lease_seconds / 3`` 续租一次（默认 60/3 = 20s），所以「上一次续约后
+# 一个续租间隔内」租约随时可能看起来该续了；而本机 Docker Desktop 的时钟同步
+# 已实测会让 ``clock_timestamp()`` 前跳 1s 级，前跳会把「还没续上的活租约」误判成过期。
+# 宽限取一个续租间隔：过期超过 lease/3 才回收，挡住「漏一拍 + 秒级前跳」。
+# 更大的前跳由 ``exclude_owner``（本次 sweep 不回收自己）与后续 ``lease_gen``
+# 代次围栏兜底，不靠继续加宽 grace。
+# 代价：真死掉的 worker 的任务最坏多等 ``grace + 一次回收间隔``。
+# 默认租约 60s、心跳 10s（compose 下发 30s）：从最后一次续约算起约 60+20+10~30s
+# 才被回收；不加宽限时是 60+10~30s，即这次改动让「真死」多等一个续租间隔。
+DEFAULT_RECLAIM_GRACE_SECONDS = DEFAULT_LEASE_SECONDS / 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,9 +233,21 @@ class JobQueueStore:
         return str(row)
 
     async def reclaim_stale(
-        self, *, backoff_seconds: float = 0.0, limit: int = DEFAULT_RECLAIM_BATCH
+        self,
+        *,
+        backoff_seconds: float = 0.0,
+        limit: int = DEFAULT_RECLAIM_BATCH,
+        exclude_owner: str | None = None,
+        grace_seconds: float = 0.0,
     ) -> int:
-        """回收租约过期的 running：未超限回 queued，超限转 dead。返回条数。"""
+        """回收租约过期的 running：未超限回 queued，超限转 dead。返回条数。
+
+        ``exclude_owner``：跳过该 owner 持有的行。worker 传入自己的 ``worker_id``，
+        这样「自己还在跑、但库时钟前跳把租约看成已过期」时不会自己把自己判死。
+        ``grace_seconds``：过期宽限，只有 ``lease_expires_at < now() - grace``
+        才算过期。默认 0 是严格语义；常驻进程应传自己的续租间隔
+        （``lease_seconds / 3``，见 :data:`DEFAULT_RECLAIM_GRACE_SECONDS`）。
+        """
 
         async with self._sf() as session, session.begin():
             result = await session.execute(
@@ -249,14 +273,23 @@ class JobQueueStore:
                              SELECT id
                                FROM erp.job_queue
                               WHERE state = 'running'
-                                AND lease_expires_at < now()
+                                AND lease_expires_at < now() - make_interval(secs => :grace)
+                                AND (
+                                      CAST(:exclude_owner AS text) IS NULL
+                                      OR lease_owner IS DISTINCT FROM CAST(:exclude_owner AS text)
+                                    )
                               ORDER BY lease_expires_at
                               LIMIT :limit
                               FOR UPDATE SKIP LOCKED
                            )
                     """
                 ),
-                {"backoff": backoff_seconds, "limit": limit},
+                {
+                    "backoff": backoff_seconds,
+                    "limit": limit,
+                    "grace": grace_seconds,
+                    "exclude_owner": exclude_owner,
+                },
             )
             return int(result.rowcount or 0)
 
