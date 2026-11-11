@@ -196,7 +196,17 @@ def test_killed_worker_heartbeat_stops_then_job_is_reclaimable(db: str) -> None:
             before = await check_once(config)
             assert not before.ok, "心跳已停 10 分钟，探针必须失败"
 
-            await asyncio.sleep(0.1)
+            # 过期与否用确定值判定：把租约钉到 '-infinity'，不再靠 sleep 0.1s
+            # 冲掉 0.05s 租约——宿主机墙钟会回拨，那样在全量跑里会回收 0 条。
+            async with env.sf() as session, session.begin():
+                await session.execute(
+                    text(
+                        "UPDATE erp.job_queue "
+                        "SET lease_expires_at = '-infinity'::timestamptz "
+                        "WHERE id = :job_id"
+                    ),
+                    {"job_id": job_id},
+                )
             reclaimed = await queue.reclaim_stale()
             assert reclaimed == 1
 

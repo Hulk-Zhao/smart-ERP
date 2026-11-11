@@ -85,6 +85,18 @@
       "minimum": 1,
       "description": "助手建议每租户每分钟上限（单实例内存令牌桶），超限 429"
     },
+    "ERP_AUDIT_ANCHOR": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "scheduler"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "1",
+      "description": "1/true/yes/on 开启日切锚点（full 档默认），0/false/no/off 关闭（demo 档在 .env.demo 置 0）；非法值 scheduler 启动即失败"
+    },
     "ERP_BUILD_PLATFORM": {
       "type": "string",
       "scope": "build",

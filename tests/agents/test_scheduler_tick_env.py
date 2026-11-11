@@ -14,13 +14,19 @@ from unittest import mock
 from core.runtime import scheduler as sched
 
 ENV_KEY = "ERP_SCHEDULER_TICK_SECONDS"
+ANCHOR_KEY = "ERP_AUDIT_ANCHOR"
 
 
-def _parse_with_env(value: str | None, argv: list[str] | None = None):
+def _parse_with_env(
+    value: str | None, argv: list[str] | None = None, extra: dict[str, str] | None = None
+):
     env = dict(os.environ)
     env.pop(ENV_KEY, None)
+    env.pop(ANCHOR_KEY, None)
     if value is not None:
         env[ENV_KEY] = value
+    if extra:
+        env.update(extra)
     with mock.patch.dict(os.environ, env, clear=True):
         return sched._parse_args(argv or [])
 
@@ -55,6 +61,36 @@ class SchedulerTickEnvTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             _parse_with_env("0")
         self.assertIn(ENV_KEY, str(ctx.exception))
+
+    def test_audit_anchor_defaults_on(self) -> None:
+        args = _parse_with_env(None)
+        self.assertTrue(args.audit_anchor)
+        self.assertEqual(args.audit_anchor_source, "default")
+
+    def test_audit_anchor_env_can_disable(self) -> None:
+        args = _parse_with_env(None, extra={ANCHOR_KEY: "0"})
+        self.assertFalse(args.audit_anchor)
+        self.assertEqual(args.audit_anchor_source, "env")
+
+    def test_audit_anchor_cli_beats_env(self) -> None:
+        args = _parse_with_env(None, ["--no-audit-anchor"], extra={ANCHOR_KEY: "1"})
+        self.assertFalse(args.audit_anchor)
+        self.assertEqual(args.audit_anchor_source, "cli")
+
+    def test_invalid_audit_anchor_env_fails_fast_with_key_name(self) -> None:
+        with self.assertRaises(SystemExit) as ctx:
+            _parse_with_env(None, extra={ANCHOR_KEY: "maybe"})
+        self.assertIn(ANCHOR_KEY, str(ctx.exception))
+
+    def test_scheduler_builds_anchor_service_by_default(self) -> None:
+        scheduler = sched.Scheduler(session_factory=None, owner="test")
+        self.assertIsNotNone(scheduler.anchor_service)
+
+    def test_scheduler_anchor_service_can_be_disabled(self) -> None:
+        scheduler = sched.Scheduler(
+            session_factory=None, owner="test", audit_anchor=False
+        )
+        self.assertIsNone(scheduler.anchor_service)
 
     def test_startup_log_reports_configured_lease_and_effective(self) -> None:
         """启动日志必须自证：配置值 / 来源 / lease / 实际生效间隔。"""

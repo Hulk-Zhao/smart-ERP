@@ -207,6 +207,9 @@ services:
       # 启动日志会打 `tick_seconds=60 source=env lease=30 effective=15`，别只看这个数。
       ERP_SCHEDULER_TICK_SECONDS: ${ERP_SCHEDULER_TICK_SECONDS:-60}
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
+      # 日切锚点：full 档默认开启；demo 档在 .env.demo 里置 0，
+      # 演示环境不再每 tick 给有审计影像的租户补锚点行（避免与演示无关的写入和告警噪声）。
+      ERP_AUDIT_ANCHOR: ${ERP_AUDIT_ANCHOR:-1}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
       # 审计链 gauge 写在本进程内存，必须由本进程 serve /metrics（README §6.1.2 第 5 条）。
       # 端口只 expose 不发布；关闭开关等于让 P0 规则永远 absent，默认必须为 true。
