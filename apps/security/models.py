@@ -11,9 +11,11 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
+    Identity,
     Index,
     MetaData,
     Text,
@@ -78,11 +80,23 @@ class ConfigChangeRow(SecurityBase):
             "approver_id IS NULL OR approver_id <> actor_id",
             name="ck_config_change_dual",
         ),
+        CheckConstraint("length(hash) = 64", name="ck_config_change_hash_sha256"),
+        CheckConstraint(
+            "length(prev_hash) = 0 OR length(prev_hash) = 64",
+            name="ck_config_change_prev_hash_sha256",
+        ),
+        # 同租户链序号唯一：verify 依赖它稳定排序（同一事务内 now() 可能相同）
+        UniqueConstraint("tenant_id", "chain_seq", name="uq_config_change_chain_seq"),
+        # 同租户同父只允许一个后继：并发追加退化为写入失败，而不是静默分叉
+        UniqueConstraint("tenant_id", "prev_hash", name="uq_config_change_parent"),
         Index("config_change_tenant_created_idx", "tenant_id", "created_at"),
         {"schema": SCHEMA},
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    chain_seq: Mapped[int] = mapped_column(
+        BigInteger, Identity(always=True), nullable=False
+    )
     tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     target: Mapped[str] = mapped_column(Text, nullable=False)

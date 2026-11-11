@@ -112,9 +112,19 @@ class ConfigChangeResult:
 
 
 class ConfigAuditRecorder(Protocol):
-    """审计落点（生产写 ``config_change`` 链，测试用内存实现）。"""
+    """审计落点（测试用内存实现；生产 PG 实现见 ``config_change_chain``）。"""
 
     def record(self, entry: ConfigAuditEntry) -> None: ...
+
+
+class AsyncConfigAuditRecorder(Protocol):
+    """异步审计落点（asyncpg 写 ``config_change`` 链）。
+
+    只能配合 :meth:`ConfigChangeService.apply_async` 使用；同步的 ``apply``
+    遇到它会明确报错，避免「判定通过但审计没落库」。
+    """
+
+    async def record_async(self, entry: ConfigAuditEntry) -> None: ...
 
 
 @dataclass
@@ -186,13 +196,17 @@ class ConfigGate:
 
 
 class ConfigChangeService:
-    """配置变更的唯一入口：授权 → 双人 → 审计，三步都不可绕过。"""
+    """配置变更的唯一入口：授权 → 双人 → 审计，三步都不可绕过。
+
+    同步调用用 :meth:`apply`（内存 recorder）；真实 PG 落库用
+    ``await apply_async(...)`` + :class:`AsyncConfigAuditRecorder`。
+    """
 
     def __init__(
         self,
         *,
         gate: ConfigGate | None = None,
-        recorder: ConfigAuditRecorder | None = None,
+        recorder: ConfigAuditRecorder | AsyncConfigAuditRecorder | None = None,
     ) -> None:
         self._gate = gate or ConfigGate()
         self._recorder = recorder
@@ -201,20 +215,21 @@ class ConfigChangeService:
     def gate(self) -> ConfigGate:
         return self._gate
 
-    def apply(
+    def _authorize_and_build(
         self,
         *,
         principal: UserPrincipal,
         change: ConfigChange,
-        approver: UserPrincipal | None = None,
-    ) -> ConfigChangeResult:
+        approver: UserPrincipal | None,
+    ) -> tuple[ConfigGrant, ConfigAuditEntry]:
+        """授权与双人判定；任何一步拒绝都不会构造审计条目。"""
+
         grant = self._gate.authorize_write(principal, change)
         approved_by = self._gate.assert_approved(
             actor=principal, change=change, approver=approver
         )
-        change_id = uuid4()
         entry = ConfigAuditEntry(
-            change_id=change_id,
+            change_id=uuid4(),
             tenant_id=principal.tenant_id,
             kind=change.kind,
             target=change.target,
@@ -225,14 +240,54 @@ class ConfigChangeService:
             emergency=change.emergency,
             ticket_id=change.ticket_id,
         )
-        if self._recorder is not None:
-            self._recorder.record(entry)
+        return grant, entry
+
+    @staticmethod
+    def _result(grant: ConfigGrant, entry: ConfigAuditEntry) -> ConfigChangeResult:
         return ConfigChangeResult(
-            change_id=change_id,
+            change_id=entry.change_id,
             requires_dual_review=grant.requires_dual_review,
             approver_id=entry.approver_id,
             audit=entry,
         )
+
+    def apply(
+        self,
+        *,
+        principal: UserPrincipal,
+        change: ConfigChange,
+        approver: UserPrincipal | None = None,
+    ) -> ConfigChangeResult:
+        grant, entry = self._authorize_and_build(
+            principal=principal, change=change, approver=approver
+        )
+        if self._recorder is not None:
+            record = getattr(self._recorder, "record", None)
+            if record is None:
+                raise TypeError(
+                    "recorder 只实现了 record_async（PG 落库），"
+                    "请改用 await apply_async(...)"
+                )
+            record(entry)
+        return self._result(grant, entry)
+
+    async def apply_async(
+        self,
+        *,
+        principal: UserPrincipal,
+        change: ConfigChange,
+        approver: UserPrincipal | None = None,
+    ) -> ConfigChangeResult:
+        grant, entry = self._authorize_and_build(
+            principal=principal, change=change, approver=approver
+        )
+        if self._recorder is not None:
+            record_async = getattr(self._recorder, "record_async", None)
+            if record_async is not None:
+                await record_async(entry)
+            else:
+                self._recorder.record(entry)
+        return self._result(grant, entry)
 
 
 def assert_audit_entries(
@@ -251,6 +306,7 @@ __all__ = [
     "LOW_RISK_KINDS",
     "MASK",
     "SECRET_FIELDS",
+    "AsyncConfigAuditRecorder",
     "ConfigAccessDenied",
     "ConfigApproverRoleRequired",
     "ConfigAuditEntry",
