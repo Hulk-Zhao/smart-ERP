@@ -11,8 +11,9 @@
 #     api:8010（对账、写阶段） / scheduler:8011（审计链） / compensation:8013（补偿队列、时钟）
 #   生效 11 条：2 条对账 + unresolved + overdue×3 + future_retry + clock×2 + 审计链 P0
 #     + 1 条抓取掉线（目标消失时上面的规则全部安静，必须单独把「抓不到」变成告警）
-#   注释 1 条：写失败率（采集点已具备，阻塞点只剩阈值无真实基线）
-#   建议 1 条：对账请求失败率（等一个结账周期的基线）
+#   注释 0 条：2026-11-11 实测后删除了原先注释的 2 条（写失败率、对账请求失败率）。
+#     前者在演示档恒无样本，后者恒为同一错误码 100%（连接器未装配），
+#     「恒不触发的规则也是不存在的规则」，删除理由见文件内 tombstone 与 README §6.1.3。
 #
 # 标签约定：severity = P0（立即叫醒，安全/审计）| P1（15 分钟内响应）| P2（工作时间处理）。
 # 每条规则都写 why_paged：说明为什么值得半夜叫醒人，而不是“指标看起来不对”。
@@ -42,33 +43,20 @@ groups:
           runbook: "docker compose ps 看该容器；查容器日志与 /metrics 返回码；确认 ERP_METRICS_ENABLED 未被关掉"
 
       # ------------------------------------------------------------------
-      # P1：写入失败率（采集点已具备，仍注释）
+      # 已删除（2026-11-11 实测后删除）：写失败率 SmartErpWriteFailureRateHigh
       # 指标：smart_erp_write_stage_failures_total / smart_erp_write_stage_total
-      # 采集点：apps/platform/policy/gateway.py:226（WriteGateway.execute 按阶段埋点），
-      #         写入进程是 api，/metrics 在 api:8010 上可见。
+      # 采集点：apps/platform/policy/gateway.py:226（WriteGateway.execute 按阶段埋点）
+      # 实测（演示档三套场景，demo/load.py 全量导入后）：
+      #   工单 48 条，pending_write 全为 null（48/48）→ approve 不进入 WriteGateway；
+      #   write_stage_total / write_stage_failures_total 在整个会话里恒 absent；
+      #   空载 absent，跑完 1,000 / 10,000 行对账后仍 absent。
+      # 为什么删除而不是启用：失败率的分母恒为 absent（absent 不是 0），
+      #   clamp_min(...,0.001) 会把任何一次失败放大成 100% 常驻告警，
+      #   而当前连一次失败都产生不了——恒不触发的规则等于不存在，
+      #   留着只会制造「写入已覆盖」的错觉。
+      # 重新引入条件：演示或生产出现真实 pending_write，跑满一个结账周期、
+      #   write_stage_total{stage="write"} ≥ 200 后按实测 P95 定阈值。
       # ------------------------------------------------------------------
-      # 待真实基线后再启用：失败率是真实可采集的信号，但 5% / 10m 只是分析值，
-      # 尚未跑满一个真实写入周期；凭猜启用会制造假阳性，与「假规则」同罪。
-      # 待真实基线（跑满一个结账周期后按真实 P95 重定阈值）
-      # - alert: SmartErpWriteFailureRateHigh
-      #   expr: >-
-      #     sum(rate(smart_erp_write_stage_failures_total{stage="write"}[5m]))
-      #     /
-      #     clamp_min(sum(rate(smart_erp_write_stage_total{stage="write"}[5m])), 0.001)
-      #     > 0.05
-      #   for: 10m
-      #   labels:
-      #     severity: P1
-      #     service: smart-erp
-      #   annotations:
-      #     summary: "写入阶段失败率 > 5%（持续 10 分钟）"
-      #     description: >-
-      #       最近 10 分钟内 {{ $value | humanizePercentage }} 的 WriteGateway 写入失败。
-      #       失败工单不会静默丢弃，但可能已产生外部副作用，需要确认补偿是否跑完。
-      #     why_paged: >-
-      #       写入是唯一对外产生副作用的动作；失败率持续升高意味着数据正在与外部系统分叉，
-      #       拖到早上会扩大需要人工核对的单据范围，且补偿窗口可能已过期。
-      #     runbook: "docs/product/tech/01-技术架构.md#3.7 观测；先查 gateway.write 失败 span 与补偿积压"
 
       # ------------------------------------------------------------------
       # P1：unresolved 持续增长
@@ -304,31 +292,18 @@ groups:
           runbook: "查看连接器限流余量与批次切分参数"
 
       # ------------------------------------------------------------------
-      # 建议（不启用）：对账请求失败率
+      # 已删除（2026-11-11 实测后删除）：对账请求失败率 SmartErpReconRunFailureRateHigh
       # 指标：smart_erp_recon_runs_failed_total / smart_erp_recon_batches_total
-      # 采集点：已有（apps/api/service.py:1145、:1148 / :1137）
-      # 建议规则 · 待真实基线后再启用（有采集点不等于可以凭猜定阈值）
-      # 依据：失败是硬错误（stage=input/engine/persist），比 pending_manual 这类
-      #   业务分流更严重，所以阈值可比「批次未自动完成率 2%」宽一些；先以 5% / 15m
-      #   作为候选，跑满一个结账周期后按真实 P95 重定。分母用已处理批次数，
-      #   避免夜间空窗把 1 次失败放大成高失败率。
+      # 采集点：apps/api/service.py:1145、:1148（失败）/ :1137（成功批次）
+      # 实测（三套 demo 场景，真实 POST /v1/recon/runs，共 46 次有效请求）：
+      #   46/46 全部 503，code=E-CONN-UNAVAILABLE，stage=input；
+      #   smart_erp_recon_batches_total 在三个 api 进程里全 absent（没有任何成功批次）。
+      # 根因：api 进程从不装配连接器（全仓没有读取 ERP_CONNECTOR_GW_URL 的代码），
+      #   pick_meta() 必然抛 E-CONN-UNAVAILABLE；线上 demo 栈同一请求同样 503。
+      # 为什么删除：该指标当前 100% 失败且只反映同一个装配缺陷；
+      #   分母缺失时失败率不是「高」而是「无法定义」——启用后要么常驻告警，
+      #   要么在修好装配后变成 0/0 永不触发，两种都不是业务信号。
+      # 另外：请求体校验失败（422）在进入 handler 前被拒，不计入该指标，分母天生偏小。
+      # 重新引入条件：先修 api 侧连接器装配（apps/ 范围，不属本文件职责），
+      #   再跑满一个结账周期、有 ≥1 次成功批次后采基线。
       # ------------------------------------------------------------------
-      # 待真实基线后再启用（跑满一个结账周期后按真实失败率重定阈值）
-      # - alert: SmartErpReconRunFailureRateHigh
-      #   expr: >-
-      #     sum(rate(smart_erp_recon_runs_failed_total[15m]))
-      #     / clamp_min(sum(rate(smart_erp_recon_batches_total[15m])), 0.001)
-      #     > 0.05
-      #   for: 15m
-      #   labels:
-      #     severity: P1
-      #     service: smart-erp
-      #   annotations:
-      #     summary: "对账请求失败率 > 5%（持续 15 分钟）"
-      #     description: >-
-      #       最近 15 分钟 {{ $value | humanizePercentage }} 的对账请求直接失败，
-      #       按 stage=input/engine/persist、code=<ErrorCode|unclassified> 拆分。
-      #     why_paged: >-
-      #       请求级失败意味着整批没有产出结果，比批次进人工更严重；
-      #       夜间持续失败会直接卡住次日结账，拖到白天人工队列会放大。
-      #     runbook: "按 stage/code 拆分 smart_erp_recon_runs_failed_total，先看 input 与 persist"

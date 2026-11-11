@@ -105,10 +105,9 @@ def test_required_alerts_are_covered(rules: list[dict]) -> None:
         "SmartErpClockSkewP1",
         "SmartErpAuditChainBroken",
     }, names
-    # 仍然无真实阈值的两条只能注释：写失败率、对账请求失败率。
-    text = RULE_FILE.read_text(encoding="utf-8")
-    assert "# - alert: SmartErpWriteFailureRateHigh" in text
-    assert "# - alert: SmartErpReconRunFailureRateHigh" in text
+    # 2026-11-11 实测后：写失败率与对账请求失败率都不具备可评估性，已从注释态改为显式删除。
+    # 不允许再以「注释」形式留空壳（「恒不触发的规则也是不存在的规则」）。
+    assert _commented_alert_names() == []
 
 
 # ---------------------------------------------------------------- P0 触发演示
@@ -233,26 +232,12 @@ WRITER_LOCATIONS = {
 #: 有生产写入点的指标族。``up`` 是 Prometheus 内置序列，不在此表。
 WIRED_METRICS = set(WRITER_LOCATIONS)
 
-#: 注释态规则的锚点与归属流标记。任何一条被注释的规则都必须二选一：
-#: 「采集点待接线（归属流：…）」或「待真实基线」——不允许无理由地静默停用。
+#: 注释态规则的锚点。2026-11-11 起注释集合必须为空：停用只有「删除 + tombstone」一种形态。
 _COMMENTED_ALERT_RE = re.compile(r"^\s*#\s*-\s*alert:\s*(?P<name>[A-Za-z0-9_]+)\s*$", re.M)
-_MARKER_PREFIXES = ("采集点待接线（归属流：", "待真实基线")
 
 
 def _commented_alert_names() -> list[str]:
     return [m.group("name") for m in _COMMENTED_ALERT_RE.finditer(RULE_FILE.read_text(encoding="utf-8"))]
-
-
-def _marker_for(name: str) -> str:
-    """取注释规则紧邻上方的非空行，即停用理由 + 归属流。"""
-
-    lines = RULE_FILE.read_text(encoding="utf-8").splitlines()
-    for index, line in enumerate(lines):
-        if re.fullmatch(rf"\s*#\s*-\s*alert:\s*{re.escape(name)}", line):
-            for previous in reversed(lines[:index]):
-                if previous.strip():
-                    return previous.strip()
-    raise AssertionError(f"未找到被注释的规则 {name}")
 
 
 def test_dead_backlog_alert_is_removed(rules: list[dict]) -> None:
@@ -291,20 +276,19 @@ def test_every_wired_metric_has_a_production_writer() -> None:
         assert snippet in source, f"{metric} 的生产写入点 {relative}::{snippet} 已不存在"
 
 
-def test_every_commented_rule_states_owner_or_baseline() -> None:
-    """停用不是删除：每条注释规则都必须写清归属流/解锁条件，或「待真实基线」。"""
+def test_removed_rules_leave_a_reasoned_tombstone() -> None:
+    """删除也是决策：每条被删的规则都必须留下实测数字与重新引入条件。"""
 
-    names = _commented_alert_names()
-    assert len(names) == len(set(names)), names
-    expected = {
-        "SmartErpWriteFailureRateHigh",
-        "SmartErpReconRunFailureRateHigh",
-    }
-    assert set(names) == expected, set(names) ^ expected
-    for name in names:
-        marker = _marker_for(name)
-        assert marker.startswith("#"), (name, marker)
-        assert any(prefix in marker for prefix in _MARKER_PREFIXES), (name, marker)
+    text = RULE_FILE.read_text(encoding="utf-8")
+    for name, numbers in (
+        ("SmartErpWriteFailureRateHigh", ("pending_write", "absent")),
+        ("SmartErpReconRunFailureRateHigh", ("E-CONN-UNAVAILABLE", "absent")),
+    ):
+        assert f"# - alert: {name}" not in text, f"{name} 不应再以注释形式存在"
+        assert name in text, f"{name} 的删除理由必须留痕"
+        for token in numbers:
+            assert token in text, (name, token)
+    assert text.count("重新引入条件") >= 2
 
 
 def test_active_rules_only_reference_wired_metrics(rules: list[dict]) -> None:
