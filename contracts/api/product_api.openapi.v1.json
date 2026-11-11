@@ -2135,6 +2135,16 @@
       "SessionOut": {
         "description": "当前会话身份：前端只读这里，不再从构建期变量猜角色/用户。",
         "properties": {
+          "default_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionScopeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "roles": {
             "items": {
               "type": "string"
@@ -2159,6 +2169,45 @@
           "roles"
         ],
         "title": "SessionOut",
+        "type": "object"
+      },
+      "SessionScopeOut": {
+        "description": "服务端从会话授权范围派生出的默认 scope（只读，不来自请求）。\n\n``org_id`` 多组织授权时为 ``None``，由前端让用户选择，服务端不猜；\n``period`` 仅在授权期内存在合法 ``YYYY-MM`` 时给出最新一个，否则 ``None``。",
+        "properties": {
+          "org_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org Id"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "system_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "System Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "system_ids"
+        ],
+        "title": "SessionScopeOut",
         "type": "object"
       },
       "SupplierMasterIn": {

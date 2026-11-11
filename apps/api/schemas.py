@@ -63,12 +63,25 @@ class Page(BaseModel, Generic[T]):  # noqa: UP046 - 运行环境 Python 3.11 不
 # --------------------------------------------------------------------------- 会话
 
 
+class SessionScopeOut(BaseModel):
+    """服务端从会话授权范围派生出的默认 scope（只读，不来自请求）。
+
+    ``org_id`` 多组织授权时为 ``None``，由前端让用户选择，服务端不猜；
+    ``period`` 仅在授权期内存在合法 ``YYYY-MM`` 时给出最新一个，否则 ``None``。
+    """
+
+    org_id: str | None = None
+    period: str | None = None
+    system_ids: list[str]
+
+
 class SessionOut(BaseModel):
     """当前会话身份：前端只读这里，不再从构建期变量猜角色/用户。"""
 
     user_id: UUID
     tenant_id: UUID
     roles: list[str]
+    default_scope: SessionScopeOut | None = None
 
 
 # --------------------------------------------------------------------------- 工单

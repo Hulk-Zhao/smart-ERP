@@ -1,13 +1,13 @@
 /**
  * 本文件由 `node scripts/gen-api-types.mjs` 从 C16 冻结契约生成，请勿手改。
  * 源文件：contracts/api/product_api.openapi.v1.json
- * 契约 sha256：87cab47a12ce4cd0f8dc0fb5a242aa3c6fc283ead9eaf71c40e63875c677132d
+ * 契约 sha256：2167554becf596c0545e7243a66fcdb63f0c6157b6a64f3da521f536b37992c9
  * 契约版本：1.0.0 · C16
  *
  * 契约变更流程：后端重新生成契约 → 执行 `npm run gen:api` → 评审类型差异。
  */
 
-export const CONTRACT_SHA256 = "87cab47a12ce4cd0f8dc0fb5a242aa3c6fc283ead9eaf71c40e63875c677132d";
+export const CONTRACT_SHA256 = "2167554becf596c0545e7243a66fcdb63f0c6157b6a64f3da521f536b37992c9";
 export const CONTRACT_VERSION = "1.0.0";
 export const CONTRACT_PATH_COUNT = 19;
 
@@ -420,9 +420,22 @@ export interface ScopeIn {
  * 当前会话身份：前端只读这里，不再从构建期变量猜角色/用户。
  */
 export interface SessionOut {
+  default_scope?: SessionScopeOut | null;
   roles: string[];
   tenant_id: string;
   user_id: string;
+}
+
+/**
+ * 服务端从会话授权范围派生出的默认 scope（只读，不来自请求）。
+ * 
+ * ``org_id`` 多组织授权时为 ``None``，由前端让用户选择，服务端不猜；
+ * ``period`` 仅在授权期内存在合法 ``YYYY-MM`` 时给出最新一个，否则 ``None``。
+ */
+export interface SessionScopeOut {
+  org_id?: string | null;
+  period?: string | null;
+  system_ids: string[];
 }
 
 export interface SupplierMasterIn {

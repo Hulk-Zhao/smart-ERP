@@ -18,6 +18,8 @@ from apps.api.container import ApiContainer
 from apps.api.demo_session import BANNER, bind_demo_session
 from apps.platform.api.errors import ProblemError
 from apps.platform.config import ConfigError, Settings
+from apps.security.identity import ScopeGrant, UserPrincipal
+from apps.security.scope import Scope, ScopeGuard
 
 TOKEN = "demo-token-0123456789abcdef"
 
@@ -50,6 +52,11 @@ def test_read_current_session(env: ApiEnv) -> None:
         "user_id": str(REVIEWER),
         "tenant_id": str(TENANT),
         "roles": ["finance", "reviewer"],
+        "default_scope": {
+            "org_id": "ORG-1",
+            "period": "2026-10",
+            "system_ids": ["statement", "u8"],
+        },
     }
 
 
@@ -134,3 +141,132 @@ def test_demo_session_rejects_short_token() -> None:
 def test_demo_session_rejects_bad_uuid() -> None:
     with pytest.raises(ConfigError, match="UUID"):
         _demo_settings(demo_session_user_id="not-a-uuid")
+
+
+# --------------------------------------------------------------- 默认 scope 派生
+
+
+def _bind_scope(
+    env: ApiEnv,
+    token: str,
+    *,
+    orgs: set[str],
+    periods: set[str],
+    systems: set[str],
+) -> None:
+    """把一个带指定授权范围的令牌登记进当前测试容器。"""
+
+    principal = UserPrincipal(
+        tenant_id=TENANT,
+        user_id=APPROVER,
+        roles=frozenset({"approver"}),
+        grant=ScopeGrant(
+            org_ids=frozenset(orgs),
+            periods=frozenset(periods),
+            system_ids=frozenset(systems),
+        ),
+    )
+    env.container.session_directory.bind(
+        token, env.container.broker.issue_session(principal)
+    )
+
+
+def _scope_of(env: ApiEnv, token: str) -> dict:
+    response = env.client.get(
+        f"{PREFIX}/auth/session", headers={"X-Session-Token": token}
+    )
+
+    assert response.status_code == 200
+    return response.json()["default_scope"]
+
+
+def test_default_scope_single_org_and_latest_valid_period(env: ApiEnv) -> None:
+    token = "scope-single-org-token"
+    _bind_scope(
+        env,
+        token,
+        orgs={"ORG-SZ"},
+        periods={"2026-07", "2026-08", "2026-09"},
+        systems={"u8", "wms", "sap"},
+    )
+
+    assert _scope_of(env, token) == {
+        "org_id": "ORG-SZ",
+        "period": "2026-09",
+        "system_ids": ["sap", "u8", "wms"],
+    }
+
+
+def test_multiple_orgs_return_null_so_the_client_must_choose(env: ApiEnv) -> None:
+    """多组织不猜：服务端返回 null，由前端进入选择态。"""
+
+    token = "scope-multi-org-token"
+    _bind_scope(
+        env,
+        token,
+        orgs={"ORG-SZ", "ORG-SH"},
+        periods={"2026-09"},
+        systems={"u8"},
+    )
+
+    scope = _scope_of(env, token)
+
+    assert scope["org_id"] is None
+    assert scope["period"] == "2026-09"
+
+
+def test_invalid_period_is_rejected_instead_of_compared_as_string(env: ApiEnv) -> None:
+    """非 YYYY-MM 不参与「最新」比较；全不合法时返回 null。"""
+
+    mixed = "scope-period-mixed-token"
+    _bind_scope(
+        env,
+        mixed,
+        orgs={"ORG-SZ"},
+        periods={"2026-13", "2026-9", "2026-09"},
+        systems={"u8"},
+    )
+    assert _scope_of(env, mixed)["period"] == "2026-09"
+
+    invalid = "scope-period-invalid-token"
+    _bind_scope(
+        env,
+        invalid,
+        orgs={"ORG-SZ"},
+        periods={"2026-13", "2026-9"},
+        systems={"u8"},
+    )
+    assert _scope_of(env, invalid)["period"] is None
+
+
+def test_request_scope_is_never_echoed(env: ApiEnv) -> None:
+    """默认 scope 只来自令牌授权，query 里传别的 org/period 不回显、不报错。"""
+
+    response = env.client.get(
+        f"{PREFIX}/auth/session",
+        headers=env.headers("reviewer"),
+        params={"org_id": "ORG-2", "period": "2026-12", "system_ids": ["sap"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["default_scope"] == {
+        "org_id": "ORG-1",
+        "period": "2026-10",
+        "system_ids": ["statement", "u8"],
+    }
+
+
+def test_default_scope_is_accepted_by_scope_guard(env: ApiEnv) -> None:
+    """返回的默认 scope 必须是授权范围子集，而不是另一套口径。"""
+
+    session = env.container.session_directory.resolve(env.tokens["reviewer"])
+    scope = _scope_of(env, env.tokens["reviewer"])
+
+    # 单一 org、合法 period 时两个字段必然非空；构造 Scope 再走一次闸口。
+    ScopeGuard(session.grant).authorize(
+        Scope(
+            org_id=scope["org_id"],
+            period=scope["period"],
+            system_ids=tuple(scope["system_ids"]),
+        )
+    )
