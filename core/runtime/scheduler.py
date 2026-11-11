@@ -11,7 +11,9 @@
 语义：
 
 - 抢锁 / 续约同一条 ``INSERT ... ON CONFLICT DO UPDATE``：仅当「当前就是我」
-  或「已过期」时才更新成功并 ``RETURNING``，否则没有行 = 没抢到；
+  或「``owner`` 为空（已释放）」或「已过期」时才更新成功并 ``RETURNING``，
+  否则没有行 = 没抢到。``owner`` 为空即可接管，不要求 ``now()`` 已越过
+  ``expires_at``——释放后的接管不能依赖时钟单调前进；
 - tick：回收租约过期的 ``running`` 任务（``JobQueueStore.reclaim_stale``），
   可选跑全链审计巡检（``--audit-verify``，断链会被 ``AuditGuard`` 冻结写入）；
   默认还会每 60s 跑一个 ``audit_image`` 链校验时间片（``--no-audit-image-scan``
@@ -67,6 +69,7 @@ _ACQUIRE_SQL = text(
            heartbeat_at = now(),
            updated_at = now()
      WHERE l.owner = EXCLUDED.owner
+        OR l.owner IS NULL
         OR l.expires_at IS NULL
         OR l.expires_at < now()
     RETURNING l.owner
