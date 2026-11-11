@@ -2043,6 +2043,25 @@ def build_erp_seed(cfg: Scenario, data: dict[str, list[dict]], rng: random.Rando
                 "updated_at": approved_at.isoformat(),
             }
         )
+        if ticket_no == "DEMO-W2-WRITE-9001":
+            # 现场演示只差最后一票：reviewer 记录由种子真实落库到 erp.approval_record，
+            # 演示用户 dddddddd 以 approver 身份补第二票后 satisfied 即为真。
+            seed["approval_records"].append(
+                {
+                    "id": uid("approval", cfg.code, ticket_no, "reviewer"),
+                    "tenant_id": tenant,
+                    "ticket_id": demo_ticket_id,
+                    "step_id": None,
+                    "role": "reviewer",
+                    "approver_id": USERS["reviewer"],
+                    "initiator_id": USERS["initiator"],
+                    "approver_roles": ["reviewer"],
+                    "decision": "approved",
+                    "comment": "复核通过：差异凭证与金额已核对，同意进入审批",
+                    "exception_reason": None,
+                    "decided_at": (approved_at + timedelta(minutes=10)).isoformat(),
+                }
+            )
     return seed
 
 

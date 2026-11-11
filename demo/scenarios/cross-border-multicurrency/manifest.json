@@ -79,7 +79,7 @@
     "ticket_steps": 20,
     "ticket_events": 65,
     "audit_images": 18,
-    "approval_records": 25,
+    "approval_records": 26,
     "recon_line_links": 16,
     "price_book": 1
   },
@@ -145,6 +145,6 @@
     "fx_rate.csv": "a2ad2370fff4bd6804ec5e621eb06eb756226aab72f5930e3bc3478b54e29a88",
     "customs_declaration.csv": "732cb4fc5709cd3d708b25d746c34a702188e0b31249cc7ee775d35dad76fa9a",
     "intercompany_settlement.csv": "fa5f4be0849557e152a5e3c44acf575b198123cf1dc095a59c043744b5d75bbf",
-    "erp_seed.json": "9a813e5cd4e572d9736a3d0b89c3bab6a314f02c8b93b0122caff595e5f14fd6"
+    "erp_seed.json": "baa5be4c33e20ba86984b05fd195ac7639eb1092c24805f7a428dc7a524d44d2"
   }
 }

@@ -58347,6 +58347,22 @@
       "comment": "证据链完整，同意处理",
       "exception_reason": null,
       "decided_at": "2026-09-12T00:20:00+08:00"
+    },
+    {
+      "id": "514bb5a5-39ff-5de6-b591-16b16fa5fc83",
+      "tenant_id": "a927f664-796d-5a6c-bb43-c052cd4a0e2e",
+      "ticket_id": "e6645441-ffaa-5bab-a2f9-84665bd68eb4",
+      "step_id": null,
+      "role": "reviewer",
+      "approver_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "initiator_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "approver_roles": [
+        "reviewer"
+      ],
+      "decision": "approved",
+      "comment": "复核通过：差异凭证与金额已核对，同意进入审批",
+      "exception_reason": null,
+      "decided_at": "2026-11-11T12:15:00+08:00"
     }
   ],
   "recon_line_links": [
