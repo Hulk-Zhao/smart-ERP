@@ -786,7 +786,12 @@ class ArtifactsTest(unittest.TestCase):
         self.assertIn("CREATE ROLE erp_migrator", sql)
         self.assertIn("CONNECTION LIMIT 20", sql)
         self.assertIn("alembic_version_erp", sql)
-        self.assertIn("CREATE EXTENSION IF NOT EXISTS vector   SCHEMA erp", sql)
+        # vector 是可选前置：缺失时只告警跳过，不能阻断开通（demo 库无 pgvector）
+        self.assertIn("CREATE EXTENSION IF NOT EXISTS vector SCHEMA erp", sql)
+        self.assertIn("EXCEPTION WHEN OTHERS THEN", sql)
+        self.assertIn("pgvector 不可用，已跳过", sql)
+        self.assertIn("CREATE EXTENSION IF NOT EXISTS pg_trgm", sql)
+        self.assertIn("CREATE EXTENSION IF NOT EXISTS pgcrypto", sql)
         # 只收回本项目角色对 public 的权限；不许动全局 PUBLIC
         self.assertIn("REVOKE ALL ON SCHEMA public FROM erp_app", sql)
         self.assertNotRegex(

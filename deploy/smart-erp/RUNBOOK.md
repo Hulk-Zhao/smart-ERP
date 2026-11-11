@@ -24,6 +24,13 @@
 但应用对 `ticket` / `job_queue` / `compensation_task` 等表没有写权限，直到第一次写入
 才报 `permission denied for table ...`——排查方向容易被带到业务代码上。
 
+**扩展是可选前置（vector 缺失不阻断）**：`00-provision.sql` 对 `pg_trgm` / `pgcrypto`
+是硬要求；对 `pgvector` 只在实例可用时创建，缺失时 `RAISE WARNING` 跳过，脚本继续。
+没有 vector 时**不受影响**：对账、工单、审批、补偿、审计、计量、批次列表；
+**不可用**：向量检索 / 相似度匹配（当前代码没有任何依赖，`grep -r "vector"` 只命中建库脚本）。
+后续若要启用向量能力，需实例 owner 以 SUPERUSER 手工执行
+`CREATE EXTENSION vector SCHEMA erp;` 后重启服务，再按功能开关上线。
+
 **迁移完成后自检**（`psql` 直接粘贴；grantee 用应用角色：生产 `erp_app`，CI 改 `erp_test`）：
 
 ```sql
