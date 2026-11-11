@@ -20,7 +20,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from apps.audit.image_link import images_sql
+from apps.audit.image_link import images_count_sql, images_sql
 from apps.audit.models import AuditAnchorRow, AuditImageRow
 from apps.platform.contracts.audit import AuditImage, format_hash_datetime
 
@@ -67,6 +67,10 @@ class AuditStore(Protocol):
 
     async def list_images(self, query: AuditQuery) -> list[AuditImage]: ...
 
+    async def count_images(self, query: AuditQuery) -> int:
+        """满足同一谓词的影像行数（忽略 offset/limit，与 ``list_images`` 同源）。"""
+        ...
+
     async def chain(self, tenant_id: UUID) -> list[AuditImage]: ...
 
     async def chain_page(
@@ -111,6 +115,10 @@ class InMemoryAuditStore:
         rows = self._rows.get(query.tenant_id, [])
         hits = [image for image in rows if self._matches(image, query)]
         return hits[query.offset : query.offset + query.limit]
+
+    async def count_images(self, query: AuditQuery) -> int:
+        rows = self._rows.get(query.tenant_id, [])
+        return sum(1 for image in rows if self._matches(image, query))
 
     async def chain(self, tenant_id: UUID) -> list[AuditImage]:
         return list(self._rows.get(tenant_id, []))
@@ -201,25 +209,32 @@ class SqlAuditStore:
             by_until=query.until is not None,
         )
         params: dict[str, Any] = {
-            "tenant_id": query.tenant_id,
+            **_filter_params(query),
             "offset": query.offset,
             "limit": query.limit,
         }
-        if query.ticket_id is not None:
-            params["ticket_id"] = query.ticket_id
-        if query.step_id is not None:
-            params["step_id"] = query.step_id
-        if query.system is not None:
-            params["system"] = query.system
-        if query.object_id is not None:
-            params["object_id"] = query.object_id
-        if query.since is not None:
-            params["since"] = query.since
-        if query.until is not None:
-            params["until"] = query.until
         async with self._session_factory() as session:
             rows = (await session.execute(stmt, params)).mappings().all()
         return [_image_from_mapping(row) for row in rows]
+
+    async def count_images(self, query: AuditQuery) -> int:
+        """与 :meth:`list_images` 同一个 WHERE，只取 ``count(*)``。
+
+        详情页拿一个整数即可，不必物化 ``field_diff``；两处谓词由
+        ``apps.audit.image_link`` 同时生成，避免「显示 N 张、点开 M 张」。
+        """
+
+        stmt = images_count_sql(
+            by_ticket=query.ticket_id is not None,
+            by_step=query.step_id is not None,
+            by_system=query.system is not None,
+            by_object=query.object_id is not None,
+            by_since=query.since is not None,
+            by_until=query.until is not None,
+        )
+        params = _filter_params(query)
+        async with self._session_factory() as session:
+            return int((await session.execute(stmt, params)).scalar_one())
 
     async def chain(self, tenant_id: UUID) -> list[AuditImage]:
         stmt = (
@@ -295,6 +310,25 @@ class SqlAuditStore:
             last_hash=row.last_hash,
             record_count=row.record_count,
         )
+
+
+def _filter_params(query: AuditQuery) -> dict[str, Any]:
+    """列表与计数共用的绑定参数：两边必须送同一组条件。"""
+
+    params: dict[str, Any] = {"tenant_id": query.tenant_id}
+    if query.ticket_id is not None:
+        params["ticket_id"] = query.ticket_id
+    if query.step_id is not None:
+        params["step_id"] = query.step_id
+    if query.system is not None:
+        params["system"] = query.system
+    if query.object_id is not None:
+        params["object_id"] = query.object_id
+    if query.since is not None:
+        params["since"] = query.since
+    if query.until is not None:
+        params["until"] = query.until
+    return params
 
 
 def _image_from_mapping(row: Mapping[str, Any]) -> AuditImage:

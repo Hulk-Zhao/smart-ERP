@@ -48,7 +48,7 @@ _IMAGE_COLUMNS = """
 """
 
 
-def images_sql(
+def _image_where(
     *,
     by_ticket: bool,
     by_step: bool,
@@ -56,8 +56,8 @@ def images_sql(
     by_object: bool,
     by_since: bool,
     by_until: bool,
-) -> TextClause:
-    """按可选条件生成工单影像查询；条件片段是常量，参数一律走绑定。"""
+) -> str:
+    """按可选条件拼 WHERE；条件片段是常量，参数一律走绑定。"""
 
     step_filter = "AND s.id = :step_id" if by_step else ""
     clauses = [
@@ -81,8 +81,28 @@ def images_sql(
         clauses.append("i.created_at >= :since")
     if by_until:
         clauses.append("i.created_at <= :until")
+    return "\n          AND ".join(clauses)
 
-    where = "\n          AND ".join(clauses)
+
+def images_sql(
+    *,
+    by_ticket: bool,
+    by_step: bool,
+    by_system: bool,
+    by_object: bool,
+    by_since: bool,
+    by_until: bool,
+) -> TextClause:
+    """按可选条件生成工单影像查询；条件片段是常量，参数一律走绑定。"""
+
+    where = _image_where(
+        by_ticket=by_ticket,
+        by_step=by_step,
+        by_system=by_system,
+        by_object=by_object,
+        by_since=by_since,
+        by_until=by_until,
+    )
     return text(
         f"""
         SELECT {_IMAGE_COLUMNS}
@@ -94,4 +114,36 @@ def images_sql(
     )
 
 
-__all__ = ["ORPHAN_SQL", "STEP_IMAGE_PREDICATE", "images_sql"]
+def images_count_sql(
+    *,
+    by_ticket: bool,
+    by_step: bool,
+    by_system: bool,
+    by_object: bool,
+    by_since: bool,
+    by_until: bool,
+) -> TextClause:
+    """与 :func:`images_sql` 共用同一 WHERE，只取行数。
+
+    工单详情只展示张数，不应为了一个整数把全部 ``field_diff`` 物化一遍；
+    计数与列表必须同源，否则「显示 N 张」和「点开只有 M 张」会再次分叉。
+    """
+
+    where = _image_where(
+        by_ticket=by_ticket,
+        by_step=by_step,
+        by_system=by_system,
+        by_object=by_object,
+        by_since=by_since,
+        by_until=by_until,
+    )
+    return text(
+        f"""
+        SELECT count(*)
+          FROM erp.audit_image AS i
+         WHERE {where}
+        """
+    )
+
+
+__all__ = ["ORPHAN_SQL", "STEP_IMAGE_PREDICATE", "images_count_sql", "images_sql"]
