@@ -100,6 +100,8 @@ class Scheduler:
     scope: str = DEFAULT_SCOPE
     lease_seconds: float = DEFAULT_LEASE_SECONDS
     tick_seconds: float = DEFAULT_TICK_SECONDS
+    # tick 的来源（cli/env/default），只用于启动日志对账，不参与调度决策。
+    tick_source: str = "default"
     audit_verify: bool = False
     audit_image_scan: bool = True
     audit_image_rows: int = DEFAULT_AUDIT_IMAGE_ROWS
@@ -238,10 +240,14 @@ class Scheduler:
                     signal.signal(sig, lambda *_: self.stop())
 
         interval = max(0.05, min(self.tick_seconds, self.lease_seconds / 2))
+        # 三个数一起打：配置值 / 租约 / 实际生效间隔。注释会腐烂，这行日志不会——
+        # 「我设了 60 为什么 15 秒一跳」的答案必须在 docker logs 里。
         logger.info(
-            "scheduler %s 启动 scope=%s lease=%ss tick=%ss",
+            "scheduler %s 启动 scope=%s tick_seconds=%s source=%s lease=%ss effective=%ss",
             self.owner,
             self.scope,
+            self.tick_seconds,
+            self.tick_source,
             self.lease_seconds,
             interval,
         )
@@ -277,6 +283,30 @@ class Scheduler:
         return self.stats
 
 
+_TICK_ENV = "ERP_SCHEDULER_TICK_SECONDS"
+
+
+def _tick_seconds_from_env() -> tuple[float, str]:
+    """未给 --tick-seconds 时读环境变量，返回 (秒数, 来源)。
+
+    空值回落默认 5s；非数字或 ≤0 直接抛 SystemExit 并带上键名，不静默回落——
+    compose 里写着一个看似生效的值而实际不生效，比没有这个变量更危险。
+    """
+    raw = os.environ.get(_TICK_ENV)
+    if raw is None or not raw.strip():
+        return DEFAULT_TICK_SECONDS, "default"
+    try:
+        value = float(raw)
+    except ValueError:
+        raise SystemExit(
+            f"{_TICK_ENV}={raw!r} 不是数字；留空或删除该变量则使用默认 "
+            f"{DEFAULT_TICK_SECONDS}s"
+        ) from None
+    if value <= 0:
+        raise SystemExit(f"{_TICK_ENV}={raw!r} 必须 > 0")
+    return value, "env"
+
+
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="C15 scheduler：库内租约单点调度")
     parser.add_argument("--scope", default=DEFAULT_SCOPE)
@@ -284,7 +314,15 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--owner", default=f"{socket.gethostname()}:{os.getpid()}:scheduler"
     )
     parser.add_argument("--lease-seconds", type=float, default=DEFAULT_LEASE_SECONDS)
-    parser.add_argument("--tick-seconds", type=float, default=DEFAULT_TICK_SECONDS)
+    parser.add_argument(
+        "--tick-seconds",
+        type=float,
+        default=None,
+        help=(
+            f"tick 间隔秒数；未指定时依次取 {_TICK_ENV}、默认 {DEFAULT_TICK_SECONDS}s"
+            "（实际循环间隔另有 min(tick, lease/2) 上限）"
+        ),
+    )
     parser.add_argument(
         "--audit-verify", action="store_true", help="每次 tick 跑全链审计巡检"
     )
@@ -309,7 +347,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--once", action="store_true", help="等价于 --ticks 1（冒烟/复验用）"
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.tick_seconds is None:
+        args.tick_seconds, args.tick_source = _tick_seconds_from_env()
+    else:
+        args.tick_source = "cli"
+    return args
 
 
 async def _amain(args: argparse.Namespace) -> SchedulerStats:
@@ -321,6 +364,7 @@ async def _amain(args: argparse.Namespace) -> SchedulerStats:
             scope=args.scope,
             lease_seconds=args.lease_seconds,
             tick_seconds=args.tick_seconds,
+            tick_source=args.tick_source,
             audit_verify=args.audit_verify,
             audit_image_scan=not args.no_audit_image_scan,
             audit_image_rows=args.audit_image_rows,
