@@ -1,0 +1,2110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>并发开发看板｜聚合型 AI ERP · Phase 1 MVP</title>
+<style>
+:root{
+  --bg:#f5f6f8; --panel:#fff; --line:#e3e6eb; --line2:#eef0f3;
+  --ink:#1c2126; --ink2:#4b5563; --ink3:#8a929c;
+  --accent:#2b5f8f;
+  --st-todo:#8a929c; --st-doing:#2f6fb5; --st-block:#c0392b;
+  --st-review:#b8860b; --st-done:#2e7d52; --st-cancel:#9aa0a6;
+  --warn-bg:#fdf3f2; --warn-line:#e6b3ad;
+  --radius:6px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg);color:var(--ink);
+  font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+button{font:inherit;cursor:pointer}
+input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3,h4{margin:0;font-weight:600}
+a{color:var(--accent)}
+.wrap{max-width:1360px;margin:0 auto;padding:0 16px 56px}
+
+/* ---------- 顶栏 ---------- */
+.top{background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:40}
+.top-in{max-width:1360px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.brand{display:flex;flex-direction:column;gap:1px;min-width:0}
+.brand b{font-size:15px;letter-spacing:.2px}
+.brand span{font-size:11px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top-actions{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.btn{
+  border:1px solid var(--line);background:#fff;color:var(--ink2);
+  padding:5px 10px;border-radius:var(--radius);font-size:12px;line-height:1.4;
+  transition:background .12s,border-color .12s;
+}
+.btn:hover{background:#f2f4f7;border-color:#ccd2da}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:#24507a}
+.btn.danger{color:var(--st-block);border-color:#e0c0bb}
+.btn.danger:hover{background:#fbf0ee}
+.btn.sm{padding:3px 7px;font-size:11px}
+.tabs{display:flex;gap:2px;border:1px solid var(--line);border-radius:var(--radius);padding:2px;background:#fafbfc}
+.tab{border:0;background:transparent;padding:4px 11px;border-radius:4px;font-size:12px;color:var(--ink2)}
+.tab.on{background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.08);color:var(--ink);font-weight:600}
+.sync{display:flex;gap:10px;flex-wrap:wrap;font-size:10.5px;color:var(--ink3);align-items:center;margin-top:1px}
+.sync b{color:var(--ink2);font-family:var(--mono);font-weight:600}
+.sync-bar{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--ink2);background:#f7f9fa;border:1px solid var(--line);border-radius:4px;padding:6px 9px;margin-bottom:10px;line-height:1.5}
+.sync-bar.warn{background:#fffaf0;border-color:#e8d9ad}
+.sync-bar code{font:10.5px var(--mono);color:var(--ink2)}
+.seed-notice{display:flex;gap:6px;align-items:center;flex-wrap:wrap;background:#fffaf0;border:1px solid #e8d9ad;color:#8a5a2b;border-radius:var(--radius);padding:7px 10px;margin:12px 0 0;font-size:12px;line-height:1.5}
+.seed-notice[hidden]{display:none}
+.seed-notice code{font:11px var(--mono)}
+tr.conflict td{background:#fdf3f2}
+tr.conflict td.t{color:#8f2f22}
+
+/* ---------- 概览 ---------- */
+.ov{display:grid;grid-template-columns:1fr 1fr 1.5fr;gap:12px;margin:14px 0 12px}
+.ov>.card{min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius)}
+.card-h{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line2)}
+.card-h h3{font-size:12px;letter-spacing:.4px;color:var(--ink2);text-transform:none}
+.card-h .hint{margin-left:auto;font-size:11px;color:var(--ink3)}
+.card-b{padding:10px 12px}
+
+.kpi-row{display:flex;gap:18px;align-items:flex-end;margin-bottom:8px;flex-wrap:wrap}
+.kpi{display:flex;flex-direction:column}
+.kpi b{font:600 22px/1.1 var(--mono);letter-spacing:-.5px}
+.kpi span{font-size:11px;color:var(--ink3)}
+.bar{height:8px;background:#eef0f3;border-radius:4px;overflow:hidden;display:flex}
+.bar i{display:block;height:100%}
+.seg-legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+.seg-legend div{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ink2)}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+
+.para{display:flex;flex-direction:column;gap:8px}
+.para-line{display:flex;align-items:center;gap:8px;font-size:12px;min-width:0}
+.para-line .lbl{width:78px;color:var(--ink3);flex:none}
+.mini{display:flex;gap:3px;flex:1;min-width:0;overflow:hidden}
+.mini i{flex:1 1 0;min-width:3px;height:16px;border-radius:2px;background:#eef0f3;display:block}
+.mini i.on{background:var(--st-doing)}
+.mini i.ov{background:var(--st-block)}
+.para-num{font:600 12px var(--mono);color:var(--ink2);width:52px;text-align:right;flex:none}
+.limit-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
+.chip{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid var(--line);color:var(--ink2);background:#fafbfc}
+.chip.ok{color:var(--st-done);border-color:#bcd8c8;background:#f2f9f5}
+.chip.bad{color:var(--st-block);border-color:var(--warn-line);background:var(--warn-bg)}
+
+/* ---------- 甘特 ---------- */
+.gantt-scroll{overflow-x:auto;overflow-y:hidden}
+.gantt{min-width:1100px;font-size:11px}
+.g-head,.g-row{display:grid;grid-template-columns:170px 1fr;align-items:stretch}
+.g-head{border-bottom:1px solid var(--line);background:#fbfcfd}
+.g-label{padding:5px 10px;color:var(--ink3);font-size:11px;display:flex;align-items:center;border-right:1px solid var(--line2)}
+.g-weeks{position:relative;display:grid;grid-template-columns:repeat(12,1fr)}
+.g-weeks span{text-align:center;padding:4px 0;font:11px var(--mono);color:var(--ink3);border-right:1px solid var(--line2)}
+.g-weeks span:last-child{border-right:0}
+.g-gate-row{display:grid;grid-template-columns:170px 1fr;border-bottom:1px solid var(--line)}
+.g-gate{position:relative;height:22px;border-right:1px solid var(--line2)}
+.g-gate .ph{position:absolute;top:0;height:100%;font-size:10px;color:var(--ink3);display:flex;align-items:center;justify-content:center;border-right:1px solid var(--line2);background:#fbfcfd}
+.g-gate .gate{position:absolute;top:3px;font:600 10px var(--mono);color:#fff;background:#5a6572;border-radius:3px;padding:0 4px;line-height:16px}
+.g-row{border-bottom:1px solid var(--line2)}
+.g-row:hover{background:#fafbfc}
+.g-name{padding:6px 10px;border-right:1px solid var(--line2);display:flex;flex-direction:column;gap:1px;justify-content:center}
+.g-name b{font-size:12px;font-weight:600}
+.g-name span{font-size:10px;color:var(--ink3)}
+.g-track{position:relative;display:grid;grid-template-columns:repeat(12,1fr)}
+.g-track .cell{border-right:1px solid #f3f5f7}
+.g-track .cell:nth-child(12){border-right:0}
+.barfill{position:absolute;inset:0;height:16px;top:50%;transform:translateY(-50%)}
+.barfill .p{position:absolute;top:0;height:100%;border-radius:2px}
+.barfill .p.h{opacity:.45}
+.barfill.serial{outline:1px dashed #8a5a2b;outline-offset:2px;border-radius:3px}
+.gantt-note{padding:6px 12px;font-size:11px;color:var(--ink3);border-top:1px solid var(--line2)}
+.serial-pin{position:absolute;top:0;bottom:0;border-left:1px dashed #b0b7c0;pointer-events:none}
+.serial-pin b{position:absolute;top:2px;left:3px;font:600 9px var(--mono);color:#6b7481;white-space:nowrap}
+
+/* ---------- 串行段 ---------- */
+.serial-head{grid-column:1/-1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--ink2);padding:2px 2px 0}
+.serial-head b{font-size:13px}
+.serial-head span{font-size:11px;color:var(--ink3)}
+.serial-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}
+.serial-item{border:1px solid var(--line);border-left:3px solid #5a6572;border-radius:var(--radius);padding:8px 10px;background:var(--panel);display:flex;flex-direction:column;gap:4px}
+.serial-item .sid{font:600 11px var(--mono);color:#5a6572}
+.serial-item b{font-size:12.5px}
+.serial-item p{margin:0;font-size:11.5px;color:var(--ink2)}
+.serial-item .wait{font-size:11px;color:var(--st-block);margin-top:2px}
+.serial-item .win{font-size:11px;color:var(--ink3);font-family:var(--mono)}
+
+/* ---------- 并入时点 ---------- */
+.merge-band{display:grid;grid-template-columns:170px 1fr;border-bottom:1px solid var(--line);background:#fcfcfd}
+.merge-band .g-label{font-size:11px;color:var(--ink2)}
+.merge-track{position:relative;height:40px}
+.merge-mark{position:absolute;top:5px;height:22px;border-radius:3px;font:600 10px var(--mono);color:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;white-space:nowrap}
+.merge-mark.no{background:#8a929c}
+.merge-mark.cloud{background:#2f6fb5}
+.merge-mark.open{background:#2e7d52}
+.merge-mark.cust{background:#7a5aa0}
+.merge-note{position:absolute;bottom:2px;font-size:9.5px;color:var(--ink3);white-space:nowrap;transform:translateX(-50%)}
+.merge-legend{display:flex;gap:12px;flex-wrap:wrap;padding:7px 12px;font-size:11px;color:var(--ink2);border-top:1px solid var(--line2)}
+.merge-legend div{display:flex;align-items:center;gap:4px}
+
+/* ---------- 外部依赖 ---------- */
+.extdep{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.ext-item{border:1px solid var(--line);border-radius:var(--radius);padding:8px 10px;display:flex;flex-direction:column;gap:5px;background:#fff}
+.ext-item.pending{border-color:var(--warn-line);background:#fffafa}
+.ext-item h4{font-size:12.5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ext-item p{margin:0;font-size:11.5px;color:var(--ink2)}
+.ext-item .who{font:11px var(--mono);color:var(--ink3)}
+.ext-item .state{font-size:11px;font-weight:600}
+.ext-item .state.p{color:var(--st-block)}
+.ext-item .state.d{color:var(--st-done)}
+.ext-actions{display:flex;gap:5px;margin-top:auto}
+.ext-actions button{border:1px solid var(--line);background:#fff;border-radius:4px;padding:2px 8px;font-size:11px;color:var(--ink2)}
+.ext-actions button.on{border-color:var(--accent);background:#eef4fa;color:var(--accent);font-weight:600}
+.release-gate{border:1px solid var(--warn-line);background:var(--warn-bg);border-radius:var(--radius);padding:7px 11px;margin-bottom:9px;font-size:12px;color:#8f2f22;display:flex;gap:8px;align-items:flex-start}
+.release-gate.ok{border-color:#bcd8c8;background:#f2f9f5;color:#2e7d52}
+
+/* ---------- 契约清单 ---------- */
+.contracts{display:flex;flex-wrap:wrap;gap:5px}
+.contract{display:flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:4px;padding:2px 6px;font-size:11px;background:#fff}
+.contract b{font:600 10.5px var(--mono);color:#fff;background:#6b7481;border-radius:2px;padding:0 4px}
+.contract.g0 b{background:#8a5a2b}
+.contract.g1 b{background:#2f6fb5}
+.contract.g2 b{background:#2e7d52}
+.contract .own{font:10px var(--mono);color:var(--ink3)}
+
+/* ---------- 依赖图 ---------- */
+.graph-wrap{overflow-x:auto}
+.graph-wrap svg{display:block;min-width:760px;width:100%;height:auto}
+.graph-note{font-size:11px;color:var(--ink3);margin-top:4px}
+
+/* ---------- 流分组 ---------- */
+.lanes{display:flex;flex-direction:column;gap:10px}
+.lane{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;min-width:0}
+.tbl-scroll{overflow-x:auto;max-width:100%}
+.lane.serial-dir{border-color:#cfd5dd}
+.lane-h{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#fafbfc;border-bottom:1px solid var(--line2);flex-wrap:wrap}
+.lane-h .sid{font:600 12px var(--mono);color:#fff;background:#6b7481;border-radius:3px;padding:1px 6px;flex:none}
+.lane-h b{font-size:13px}
+.lane-h .dep{font-size:11px;color:var(--ink3)}
+.lane-h .stats{margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.lane-b{padding:8px 12px 10px}
+.own{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.own code{font:11px var(--mono);background:#f4f6f8;border:1px solid var(--line2);border-radius:3px;padding:1px 5px;color:var(--ink2)}
+.own .shared{background:#fff8e8;border-color:#e8d9ad;color:#7a6216}
+.tbl-scroll{overflow-x:auto}
+table.tasks{width:100%;border-collapse:collapse;font-size:12px;min-width:720px}
+table.tasks th{text-align:left;font-weight:500;color:var(--ink3);font-size:11px;padding:4px 6px;border-bottom:1px solid var(--line2);white-space:nowrap}
+table.tasks td{padding:5px 6px;border-bottom:1px solid #f3f5f7;vertical-align:top}
+table.tasks tr:last-child td{border-bottom:0}
+table.tasks tbody tr:hover{background:#fafbfc}
+.tid{font:11px var(--mono);color:var(--ink3);white-space:nowrap}
+.ttitle{font-weight:500}
+.tmeta{display:flex;gap:4px;flex-wrap:wrap;margin-top:2px}
+.tag{font:10px var(--mono);border:1px solid var(--line2);background:#fbfcfd;border-radius:3px;padding:0 4px;color:var(--ink2);white-space:nowrap}
+.tag.fr{color:#2b5f8f;border-color:#d3e2f0;background:#f4f9fd}
+.tag.path{color:#5d4a7a;border-color:#e2d8ee;background:#f9f5fd}
+.tag.ms{color:#7a6216;border-color:#e8d9ad;background:#fffaf0}
+.tag.shared{color:#8a4b12;border-color:#f0d3b5;background:#fdf5ee}
+.tag.serial{color:#fff;background:#8a5a2b;border-color:#8a5a2b}
+.st{display:inline-flex;align-items:center;gap:4px;font-size:11px;white-space:nowrap;font-weight:500}
+.st::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;display:block}
+.st.todo{color:var(--st-todo)} .st.doing{color:var(--st-doing)} .st.block{color:var(--st-block)}
+.st.review{color:var(--st-review)} .st.done{color:var(--st-done)} .st.cancel{color:var(--st-cancel)}
+.owner{font-size:11px;color:var(--ink2);white-space:nowrap}
+.due{font:11px var(--mono);color:var(--ink3);white-space:nowrap}
+.row-actions{display:flex;gap:3px;flex-wrap:wrap}
+.conflict-flag{font-size:10px;color:#fff;background:var(--st-block);border-radius:3px;padding:0 4px;margin-left:3px}
+
+/* ---------- 告警 ---------- */
+.alert{border:1px solid var(--warn-line);background:var(--warn-bg);border-radius:var(--radius);padding:8px 12px;margin-bottom:10px}
+.alert-h{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:#8f2f22}
+.alert-b{margin-top:6px;display:flex;flex-direction:column;gap:5px}
+.alert-it{font-size:12px;color:#6d3b34;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.alert-it code{font:11px var(--mono);background:#fff;border:1px solid #eed5d1;border-radius:3px;padding:0 4px;color:#8f2f22}
+
+/* ---------- 规约 ---------- */
+.covenant{display:grid;grid-template-columns:repeat(auto-fit,minmax(228px,1fr));gap:6px}
+.covenant div{background:#fafbfc;border:1px solid var(--line2);border-radius:4px;padding:6px 8px;font-size:11.5px;color:var(--ink2);line-height:1.45}
+.covenant div b{display:block;font-size:11px;color:var(--ink3);font-weight:500;margin-bottom:2px}
+
+/* ---------- 留底 ---------- */
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.filters label{font-size:11px;color:var(--ink3);display:flex;align-items:center;gap:4px}
+.filters input,.filters select,.filters textarea{border:1px solid var(--line);border-radius:4px;padding:3px 6px;background:#fff;font-size:12px}
+.filters input[type=text]{width:130px}
+table.log{width:100%;border-collapse:collapse;font-size:12px}
+table.log th{text-align:left;font-weight:500;color:var(--ink3);font-size:11px;padding:5px 6px;border-bottom:1px solid var(--line);white-space:nowrap;position:sticky;top:0;background:#fff}
+table.log td{padding:5px 6px;border-bottom:1px solid #f3f5f7;vertical-align:top}
+table.log td.t{font:11px var(--mono);color:var(--ink3);white-space:nowrap}
+table.log tr.locked td{background:#fcfcfd}
+.arrow{color:var(--ink3);font-family:var(--mono);font-size:11px}
+.empty{padding:28px 12px;text-align:center;color:var(--ink3);font-size:12px}
+.tabs-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0 10px}
+.tabs-bar h2{font-size:13px}
+.tabs-bar .spacer{flex:1}
+
+/* ---------- 弹窗 ---------- */
+.mask{position:fixed;inset:0;background:rgba(20,24,28,.42);display:flex;align-items:flex-start;justify-content:center;z-index:100;padding:24px 12px;overflow:auto}
+.mask[hidden]{display:none}
+.modal{background:#fff;border-radius:8px;width:100%;max-width:620px;box-shadow:0 10px 40px rgba(0,0,0,.22);overflow:hidden}
+.modal-h{padding:11px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.modal-h h3{font-size:14px}
+.modal-h .sub{font-size:11px;color:var(--ink3)}
+.modal-h .x{margin-left:auto;border:0;background:transparent;font-size:17px;color:var(--ink3);line-height:1;padding:2px 4px}
+.modal-b{padding:14px 16px;max-height:min(68vh,640px);overflow:auto}
+.modal-f{padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;background:#fafbfc}
+.fld{display:flex;flex-direction:column;gap:3px;margin-bottom:10px}
+.fld>label{font-size:11.5px;color:var(--ink2);display:flex;gap:4px;align-items:center}
+.fld>label .req{color:var(--st-block)}
+.fld>label .why{color:var(--ink3);font-size:10.5px}
+.fld input[type=text],.fld input[type=date],.fld input[type=datetime-local],.fld select,.fld textarea{
+  border:1px solid var(--line);border-radius:4px;padding:5px 7px;font-size:12.5px;background:#fff;width:100%
+}
+.fld textarea{resize:vertical;min-height:52px;font-family:inherit}
+.fld textarea.mono{font:12px/1.5 var(--mono)}
+.fld.err input,.fld.err select,.fld.err textarea{border-color:var(--st-block);background:#fffafa}
+.fld-err{font-size:11px;color:var(--st-block);display:none}
+.fld.err .fld-err{display:block}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.state-pick{display:flex;gap:6px;flex-wrap:wrap}
+.state-pick button{border:1px solid var(--line);background:#fff;border-radius:14px;padding:3px 10px;font-size:12px;color:var(--ink2)}
+.state-pick button.on{border-color:var(--accent);background:#eef4fa;color:var(--accent);font-weight:600}
+.state-pick button:disabled{opacity:.35;cursor:not-allowed}
+.form-alert{background:var(--warn-bg);border:1px solid var(--warn-line);color:#8f2f22;border-radius:4px;padding:7px 9px;font-size:12px;margin-bottom:10px;display:none}
+.form-alert.on{display:block}
+.form-alert ul{margin:4px 0 0 16px;padding:0}
+.hist{border-top:1px dashed var(--line);margin-top:4px;padding-top:8px}
+.hist h4{font-size:11px;color:var(--ink3);font-weight:500;margin-bottom:5px}
+.hist ol{margin:0;padding-left:16px;font-size:11.5px;color:var(--ink2)}
+.hist li{margin-bottom:3px}
+.hist .t{font:10.5px var(--mono);color:var(--ink3)}
+.lock-note{font-size:11px;color:var(--st-done);background:#f2f9f5;border:1px solid #cfe6da;border-radius:4px;padding:5px 8px;margin-bottom:10px}
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#23282e;color:#fff;font-size:12.5px;padding:8px 14px;border-radius:6px;z-index:200;box-shadow:0 6px 24px rgba(0,0,0,.25);max-width:88vw}
+.toast[hidden]{display:none}
+.toast.bad{background:#8f2f22}
+.foot{margin-top:22px;font-size:11px;color:var(--ink3);line-height:1.7}
+.foot code{font:11px var(--mono);color:var(--ink2)}
+.muted{color:var(--ink3)}
+.nowrap{white-space:nowrap}
+
+@media (max-width:1100px){
+  .ov{grid-template-columns:1fr 1fr}
+  .ov .ov-gantt{grid-column:1/-1}
+  .serial-grid{grid-template-columns:repeat(2,1fr)}
+  .extdep{grid-template-columns:1fr}
+  .covenant{grid-template-columns:repeat(2,1fr)}
+  .merge-note{display:none}
+}
+@media (max-width:760px){
+  .wrap{padding:0 10px 40px}
+  .ov{grid-template-columns:1fr}
+  .serial-grid{grid-template-columns:1fr}
+  .covenant{grid-template-columns:1fr 1fr}
+  .top-in{padding:8px 10px;gap:8px}
+  .top-actions{width:100%;margin-left:0}
+  .brand span{white-space:normal}
+  .grid2{grid-template-columns:1fr}
+  .modal{max-width:100%}
+  .kpi b{font-size:19px}
+  .tabs{order:3;width:100%}
+  .tab{flex:1;text-align:center}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <div class="brand">
+      <b>并发开发看板</b>
+      <span>聚合型 AI ERP · Phase 1 / MVP · 10 条流（S0–S9）· 契约 C1–C16 · 里程碑 M0–M6 · 业务并行 6 条 / 7–10 人</span>
+      <div class="sync" id="ledgerStatusTop"></div>
+      <div class="sync" id="lastUpdateTop"></div>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="tab on" data-view="board" role="tab">开发看板</button>
+      <button class="tab" data-view="audit" role="tab">留底记录</button>
+    </div>
+    <div class="top-actions">
+      <button class="btn primary" id="btnExportLedger">导出 dev-ledger.json</button>
+      <button class="btn" id="btnImportLedger">导入留底</button>
+      <input type="file" id="fileLedger" accept=".json,application/json" hidden>
+      <button class="btn" id="btnExportCsv">导出 CSV</button>
+      <button class="btn" id="btnExportJson">导出快照</button>
+      <button class="btn" id="btnImport">导入快照</button>
+      <button class="btn" id="btnSnapshots">旧快照</button>
+      <input type="file" id="fileImport" accept=".json,application/json" hidden>
+      <button class="btn danger" id="btnReset">重置种子数据</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="seed-notice" id="seedNotice" hidden></div>
+  <div id="boardView">
+    <section class="ov" id="overview"></section>
+    <section class="card" id="blockPin" style="margin-bottom:12px"></section>
+    <section class="card" id="mainGap" style="margin-bottom:12px"></section>
+    <section class="card" id="debtCard" style="margin-bottom:12px">
+      <div class="card-h"><h3>风险 / 技术债 · 配置面与契约面说谎</h3>
+        <span class="hint">同一类问题：声明与实现不一致，而系统不会报错</span></div>
+      <div class="card-b" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+        <div class="ext-item pending">
+          <h4>8011 死键 <span class="state d">已消除</span></h4>
+          <p>compose 声明 expose 8011，但容器内无进程监听；探针与 CI 都不会报错。已随 PR #39 / #40 删除。</p>
+          <div class="who">S8 · 2026-11-10</div>
+        </div>
+        <div class="ext-item pending">
+          <h4>.env.example 缺 ERP_METRICS_* <span class="state p">随 T803 收口</span></h4>
+          <p>示例缺键，运维照抄即静默丢配置；schema 58→62 键、示例与校验器三面对齐见 PR #50。</p>
+          <div class="who">S8 · T803</div>
+        </div>
+        <div class="ext-item pending">
+          <h4>statement vs supplier_statement <span class="state p">待办</span></h4>
+          <p>docparse 与 canonical 的六个 DocType 里五个同名、一个不同名；当前零 import。直传 kind 不报错，只会把供应商对账单记成不存在的类型。见 T506。</p>
+          <div class="who">S5 / 契约 owner S0 · 2026-11-11</div>
+        </div>
+        <div class="ext-item pending">
+          <h4>/metrics 三进程已挂载 <span class="state d">已消除</span></h4>
+          <p>曾全仓 <code>apps/</code> 零命中、端点实际 404，而 RUNBOOK §5.2 把「403/404」当验收通过——deny 保护的是一个不存在的端点。<b>#65</b> 补齐接线，<b>#120</b> 补齐抓取面：api:8010 / scheduler:8011 / compensation:8013 <b>三个</b>进程各自 serve <code>/metrics</code>，Prometheus 逐一抓取；<code>/erp/api/metrics</code> 在 nginx 显式 404，避免指标随预览入口暴露。</p>
+          <div class="who">S7 指标 + #65 接线 + #120 告警 · 见 B-METRICS / B-OBS</div>
+        </div>
+        <div class="ext-item pending">
+          <h4>按结果计费 <span class="state p">不可演示完整链路</span></h4>
+          <p><b>可算钱、可跨重启，但不可演示完整链路、不可按合同价结算。</b>SqlReconStore 零自动化测试；<code>runs/{batch_id}</code> 与 <code>/diffs</code> 重启后 404；<code>AUTO_RELEASED</code> 桶永不产出，单价取环境变量而非合同价。</p>
+          <div class="who">API · 见 BILLING（措辞可直接支撑商务口径）</div>
+        </div>
+        <div class="ext-item pending">
+          <h4>备份/恢复/升级脚本 <span class="state d">已进 main</span></h4>
+          <p>三个脚本已随 <b>#60</b>（main `0d313a1`）入库，`tests/deploy` 对应用例首次在主干真跑；#58 合入后为 <b>58 passed / 87 subtests</b>。<br>
+          <b>但仍不能对外宣称「具备备份恢复能力」</b>：尚无一次真实备份→恢复演练（脚本在、演练记录不在）。</p>
+          <div class="who">S8 · 见 B-BACKUP</div>
+        </div>
+        <div class="ext-item pending">
+          <h4>迁移链在 CI 从未真跑 <span class="state p">发布前必解</span></h4>
+          <p><code>tests/platform/test_migrations_live.py</code> 需本地 docker + <code>postgres:15-alpine</code>，<b>CI 恒 skip</b>（日志 <code>93 passed, 1 skipped</code>）。今晚所有迁移坑（0006/0007 顺序、revision id ≤32、<code>alembic_version_erp</code> 为 <code>VARCHAR(32)</code>）都只在本地跑过。<br>
+          方案：复用 PG service，或加一条仅在 <code>db/migrations/**</code> 变更时触发的 job，断言 <code>upgrade head</code> + <code>downgrade -1</code> + <code>upgrade head</code>，且 version_num 长度 ≤32。</p>
+          <div class="who">S4 出方案 · 2026-11-11</div>
+        </div>
+        <div class="ext-item pending">
+          <h4>pyproject.toml 陈旧手改 <span class="state d">已清除</span></h4>
+          <p>比 HEAD 还旧、且不匹配任何历史提交：缺 #36 的依赖上界（<code>fastapi&lt;0.163</code>、<code>uvicorn&lt;0.55</code>、<code>starlette</code> 区间）与 #35 的 <code>setuptools</code>。若被提交会悄悄拆掉钉住 <code>root_path</code> 弃用警告到期点的那道上界。已还原，禁止提交。</p>
+          <div class="who">S0 判定 / 集成会话执行 · 2026-11-11 05:0x</div>
+        </div>
+      </div>
+      <div class="card-b" style="border-top:1px solid var(--line2);font-size:11.5px;color:var(--ink2)">
+        判据：新增配置/契约键时，schema、示例文件、校验器三面必须同时更新，并配一条负向用例；不接受「文档有、代码无」或「代码有、文档无」的单边修改。<br>
+        <b>队列积压</b>：main 已到 `8830ea7`，<b>已合 10 条</b>（#54 #55 #56 #59 #61 #62 #60 #58 #64 #63），<b>在审 10 条未合</b>：<code>#65</code> metrics 接线（2755a54，CI 红：导入边界）、<code>#66</code> metering 文案（69de53d，补契约生成物后重跑）、<code>#67</code> RUNBOOK metrics（2d46288，暂挂：等 nginx 前缀修复）、<code>#68</code> 8010 卡口（132b5a0）、<code>#69</code> web 体积口径（1632321）、<code>#70</code> GO-LIVE 入库（c9a2969）、<code>#71</code> scope 反向约束（d5bb00b）、<code>#72</code> 角色词边界（bb81670，待 CI 首跑）、<code>#73</code> U8 地址下发（f05d2b8）、<code>#57</code> image-bundle（7d27be1，单独一轮合）。<b>不写死脏条目总数</b>——各流按逐文件判定，口径含/不含 untracked、是否跳 CRLF 均不同，数量不一致属正常。
+      </div>
+    </section>
+    <section class="card" id="extdepCard" style="margin-bottom:12px"></section>
+    <section class="card" id="ganttCard" style="margin-bottom:12px"></section>
+    <section class="serial-grid" id="serialGrid"></section>
+    <section class="card" id="contractCard" style="margin-bottom:12px"></section>
+    <section class="card" id="graphCard" style="margin-bottom:12px"></section>
+    <section class="card" style="margin-bottom:12px">
+      <div class="card-h"><h3>协作规约</h3><span class="hint">Agent 必须遵守，三项强制校验已在状态流转中生效</span></div>
+      <div class="card-b"><div class="covenant" id="covenant"></div></div>
+    </section>
+    <section id="conflictZone"></section>
+    <div class="tabs-bar">
+      <h2>开发流与任务</h2>
+      <span class="muted" id="laneSummary"></span>
+      <span class="spacer"></span>
+      <label class="muted" style="font-size:11px;display:flex;align-items:center;gap:4px">
+        仅看我可认领（按负责人筛选）
+        <input type="text" id="ownerFilter" placeholder="如 dev-al-01" style="border:1px solid var(--line);border-radius:4px;padding:3px 6px;font-size:12px;width:120px">
+      </label>
+    </div>
+    <section class="lanes" id="lanes"></section>
+    <p class="foot">
+      数据来源：<code>docs/product/tech/02-并发开发路线.md</code>（流拆分 §2、串行段 §3.1、防冲突 §4、里程碑 §5、并行度 §6）、
+      <code>docs/product/tech/01-技术架构.md</code>、<code>docs/product/PRD.md</code> §10.1；
+      协作纪律见同目录 <code>00-协作规约.md</code>，留底真源为同目录 <code>dev-ledger.json</code>。
+      流编号沿用路线文档的 S0–S8；<b>阶段 1 业务并行 6 条流 = S1–S6</b>，S0 / S7 / S8 为横切流（S8 自 W3 起全职），不计入 6 条业务并行流；总人力 7–10。
+      状态与流水保存在本机浏览器 localStorage，不联网、不上传。
+    </p>
+  </div>
+
+  <div id="auditView" hidden>
+    <div class="tabs-bar">
+      <h2>留底记录</h2>
+      <span class="muted" id="auditSummary"></span>
+    </div>
+    <div id="auditSync"></div>
+    <section class="card">
+      <div class="card-b">
+        <div class="filters">
+          <label>任务 <input type="text" id="fTask" placeholder="任务 ID 或标题"></label>
+          <label>流 <select id="fStream"></select></label>
+          <label>操作人 <input type="text" id="fActor" placeholder="开发者标识"></label>
+          <label>从 <input type="date" id="fFrom"></label>
+          <label>到 <input type="date" id="fTo"></label>
+          <button class="btn sm" id="fClear">清空筛选</button>
+          <span class="spacer" style="flex:1"></span>
+          <button class="btn sm" id="btnAuditJson">导出筛选结果 JSON</button>
+          <button class="btn sm" id="btnAuditCsv">导出筛选结果 CSV</button>
+        </div>
+        <div class="tbl-scroll" id="auditTable"></div>
+      </div>
+    </section>
+    <p class="foot">流水只追加、不提供编辑与删除入口；负责人变更单独记一条「负责人变更」留底，旧负责人字段保留在记录中。</p>
+    <details class="card" style="margin-top:12px">
+      <summary style="padding:9px 12px;cursor:pointer;font-size:12px;color:var(--ink2)">dev-ledger.json 字段说明与导入合并策略</summary>
+      <div class="card-b" style="font-size:11.5px;color:var(--ink2);line-height:1.7">
+        <div><code>seq</code> 单调递增整数（排序与「谁覆盖谁」的唯一依据）· <code>ts</code> ISO 时间（本地时区，仅展示与时钟异常检测）·
+        <code>task_id</code> 任务 ID · <code>from</code>/<code>to</code> 状态标签 · <code>actor</code> 开发者标识 ·
+        <code>evidence</code> 分支/提交/PR/产物 · <code>note</code> 备注/验收结论 · <code>payload_before</code>/<code>payload_after</code> 状态快照（可选）·
+        <code>type</code> 状态流转 / 负责人变更 / 补充记录 · <code>stream</code> 流编号 · <code>task_title</code> 标题。</div>
+        <div style="margin-top:6px">文件结构：<code>{schema_version, generated_by, updated_at, fields, entries[]}</code>，<b>entries 只追加</b>，不重写历史。</div>
+        <div style="margin-top:6px">导入合并策略（<code>seq</code> 为准）：
+          ① 按 <code>seq</code> 升序合并，重复条目（seq 相同且内容一致）自动去重；
+          ② 同一任务取 <b>seq 最大</b> 的状态作为当前状态，<code>ts</code> 不参与排序；
+          ③ 导入条目 seq 大于本地该任务最大 seq 时才回放任务字段，更旧的只并入历史、不改当前状态；
+          ④ 同一 seq 指向不同记录 → 保留本地、导入方顺延新 seq 并标红，人工裁定；
+          ⑤ 旧格式无 seq 的条目按 ts 升序接在本地最大 seq 之后，回放时以 ts 兜底；
+          ⑥ <code>ts</code> 倒退或未来 ts 只在状态栏告警「时钟异常」，不改变排序、不阻断操作。
+          导出文件即下次可直接导入的格式。</div>
+      </div>
+    </details>
+  </div>
+</main>
+
+<div class="mask" id="mask" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-h"><h3 id="mTitle"></h3><span class="sub" id="mSub"></span><button class="x" id="mClose" aria-label="关闭">×</button></div>
+    <div class="modal-b" id="mBody"></div>
+    <div class="modal-f" id="mFoot"></div>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+<script>
+/* ========== 1. 静态数据（全部来自 02-并发开发路线.md / 01-技术架构.md / PRD §10.1） ========== */
+const STREAMS = [
+  {id:'S0', name:'平台底座（Kernel & Policy）', dirs:['core/policy/','core/kernel/','apps/api/main.py','apps/api/deps.py','db/migrations/（合并权）','contracts/openapi.json','.github/'],
+   deps:'无（唯一无上游的流）', role:'串行源头 · 阶段 0 只做最小可运行', serial:true,
+   load:['f','f','f','f','h','h','h','h','h','h','h','·']},
+  {id:'S1', name:'连接器与统一数据模型', dirs:['connectors/','shared/','apps/api/routers/connectors.py'],
+   deps:'C1/C2/C4（S0 冻结）；不依赖 S2/S3', role:'6 个连接器可再拆 2–3 人', serial:false,
+   load:['h','f','f','f','f','f','f','f','f','f','h','·']},
+  {id:'S2', name:'对账与指标引擎', dirs:['domain/recon/','domain/metrics/','apps/api/routers/recon.py','apps/api/routers/metrics.py'],
+   deps:'C1、C3（只读）；输入是 Canonical 样本夹具，不等真实连接器', role:'最适合离线可测', serial:false,
+   load:['h','h','f','f','f','f','f','h','h','h','·','·']},
+  {id:'S3', name:'Agent 运行时', dirs:['core/runtime/','agents/','apps/api/routers/tickets.py'],
+   deps:'C3/C4（S0）、C2（S1）、C7、OTel 埋点规范（S7，W2 末）', role:'等埋点规范才能写第一行业务代码', serial:false,
+   load:['·','h','f','f','f','f','f','f','f','h','h','·']},
+  {id:'S4', name:'审计与权限', dirs:['core/audit/','core/iam/','apps/api/routers/audit.py','apps/api/routers/approval.py','apps/api/routers/iam.py'],
+   deps:'C3/C4/C8（S0/S1）；与 S3 的 audit.write_image() / rollback_plan() 在 G0 一起定', role:'等 WriteGateway 才能接写路径', serial:false,
+   load:['·','h','f','f','f','f','f','f','f','h','h','·']},
+  {id:'S5', name:'文档解析（录入）', dirs:['domain/docparse/','apps/api/routers/documents.py','worker-doc entrypoint'],
+   deps:'C1（主数据匹配）、C8（坐标契约）；与 S1 只在 read(entity) 耦合', role:'解析算法与坐标回链可分两人', serial:false,
+   load:['·','·','h','f','f','f','f','h','h','·','·','·']},
+  {id:'S6', name:'前端工作台与触达', dirs:['web/','integrations/im/','apps/api/routers/im.py'],
+   deps:'C6（OpenAPI）、C7/C8/C9；不依赖后端实现，用 mock server 并行', role:'7 个页面 + IM 卡片', serial:false,
+   load:['·','h','h','f','f','f','f','f','f','f','h','·']},
+  {id:'S7', name:'观测 + 测试（E2E 验收）', dirs:['observability/','tests/e2e/','tests/perf/'],
+   deps:'只依赖 G0 冻结的工单/审计契约；埋点规范 W2 末给 S3；/metrics 端口由 S8 在 compose 开放', role:'横切；不再负责离线包/compose/CI（已移交 S8）', serial:false,
+   load:['·','h','h','h','f','f','f','f','f','f','f','f']},
+  {id:'S8', name:'基础设施与部署（新增 · 横切）', dirs:['deploy/smart-erp/','scripts/','projects/smart-ERP/docker/','.github/workflows/smart-erp.yml','tests/deploy/'],
+   deps:'上游：C11/C12/C13/C14（自持，G0 前定稿）、C3/C5；下游：S0 启动参数、S1 gw 依赖集、S3 队列参数、S5 doc 镜像、S7 /metrics。W1 起半投入，W3 起全职', role:'唯一会被所有流同时触碰又必须单点一致的资产；不含业务功能，不计入 6 条业务并行流', serial:false,
+   load:['h','f','f','h','h','h','h','h','f','f','f','f']},
+  {id:'S9', name:'主数据体检（新增 · 只读）', dirs:['apps/masterdata/','tests/masterdata/','fixtures/masterdata/'],
+   deps:'C1（S0 只读）、C2（S1 连接器 read）；不写库、不依赖 S3', role:'只读差异清单；单位换算异常检测需 C1 单位字典；可完全离线跑', serial:false,
+   load:['·','·','·','·','h','h','h','h','f','f','·','·']}
+];
+
+// 六段必须串行（路线 §3.1）：不是人力问题，是物理约束
+const SERIAL = [
+  {id:'X1', name:'契约冻结（C1–C5/C10/C11/C12/C14/C15）→ 任何业务代码', win:'W1–W2 · G0',
+   why:'契约未定，业务代码要写两遍（qty/quantity、状态枚举、等级语义各自漂移）', wait:'S1–S6 等 S0 的 G0（S8 自持 C11–C15，等自己的 G0）'},
+  {id:'X2', name:'迁移链（单库单线性）', win:'W1–W12 · 每日两窗口',
+   why:'两个迁移同时合并必然冲突；已合并迁移永不修改，只允许 append', wait:'全部流等 S0 的合并窗口（10:00 / 16:00）'},
+  {id:'X3', name:'WriteGateway → 任何写路径', win:'W1–W3 · G1',
+   why:'写路径唯一出口，早于它写的代码都要重写；等级取严与 W3 硬禁止在此收口', wait:'S3 / S4 等 S0 的 core/policy'},
+  {id:'X4', name:'埋点规范 → S3 第一行业务代码', win:'W2 末',
+   why:'事后补 trace 会把状态机代码翻一遍，成本 5–10 倍', wait:'S3 等 S7 的 OTel 规范'},
+  {id:'X5', name:'镜像 tag（C12）→ 任何一次云上演示', win:'每次发布 · W2 起',
+   why:'演示必须能指名「跑的是哪个 sha」；tag 不可变是回滚的前提', wait:'全部流等 S8 的 tag 登记（§4.7）'},
+  {id:'X6', name:'共用实例开通（C14）→ 第一次连真库', win:'W1–W2 · 外部窗口',
+   why:'erp_app / erp schema / vector 扩展由实例 owner 执行，属外部依赖', wait:'S0 / S8 等实例 owner（01 §1A.7.1）'}
+];
+
+// 契约清单 C1–C15（路线 §1.2），gate = 冻结时点
+const CONTRACTS = [
+  {id:'C1', name:'统一数据模型 v1', gate:'G0', owner:'S1'},
+  {id:'C2', name:'连接器 ActionSpec', gate:'G0', owner:'S1'},
+  {id:'C3', name:'工单/事件/审计 DDL', gate:'G0', owner:'S3'},
+  {id:'C4', name:'策略契约 WriteLevel', gate:'G0', owner:'S0'},
+  {id:'C5', name:'库表基线与迁移规范', gate:'G0', owner:'S0'},
+  {id:'C6', name:'HTTP API 契约', gate:'G1', owner:'S0'},
+  {id:'C7', name:'Agent 输入输出 Schema', gate:'G1', owner:'S3'},
+  {id:'C8', name:'证据/坐标/对象存储', gate:'G1', owner:'S4'},
+  {id:'C9', name:'IM 卡片/深链', gate:'G1', owner:'S6'},
+  {id:'C10', name:'错误码与 F 码映射', gate:'G0', owner:'S0'},
+  {id:'C11', name:'环境变量与配置（demo 项 G0 / full 项 G2）', gate:'G0', owner:'S8'},
+  {id:'C12', name:'镜像与发布（tag/tar）', gate:'G0', owner:'S8'},
+  {id:'C13', name:'健康检查与就绪', gate:'G1', owner:'S8'},
+  {id:'C14', name:'数据层契约（共用实例）', gate:'G0', owner:'S0'},
+  {id:'C15', name:'队列与调度契约', gate:'G0', owner:'S3'},
+  {id:'C16', name:'API 层契约（16 条 /v1 路由 + 可达性）', gate:'G2', owner:'S0'}
+];
+
+// 并入 hulkai 的四个时点（路线 §3.2）；external = 是否依赖外部变更
+const MERGE_POINTS = [
+  {from:1, to:2, cls:'no', label:'W2 不并入', note:'本机 127.0.0.1:8010', detail:'5 容器 healthy；compose config 通过；RSS ≤1.5G'},
+  {from:6, to:6, cls:'cloud', label:'W6 云上并存', note:'name: smart-erp', detail:'preflight 通过；两栈零重名；/api/ 行为不变；OOM 0'},
+  {from:8, to:9, cls:'open', label:'W8–W9 对外', note:'依赖 Nginx 变更合入', detail:'/erp/api/healthz 200；子路径 404=0；切 sha 回滚可访问'},
+  {from:11, to:12, cls:'cust', label:'W11–W12 交付', note:'full profile + 离线包', detail:'干净机器一次安装成功；恢复演练 RTO 达标'}
+];
+
+// 三项外部依赖（不属于我们的迁移/代码）：未完成时不可宣称上线
+const EXTERNAL_DEPS = [
+  {id:'E1', title:'实例 owner 执行 db/00-provision.sql', owner:'APS 实例 owner（外部）',
+   detail:'建 database smart_erp、role erp_app/erp_migrator、schema erp、vector/pg_trgm/pgcrypto；未执行时 preflight 报 missing extension vector'},
+  {id:'E2', title:'hk-web Nginx 增加 /erp/api/ 与 /demo/smart-erp/', owner:'hulkai 维护方（外部变更单）',
+   detail:'独立变更单、由 hulkai 维护方执行；未合入前只能算「云端可运行」，不能宣称「已上线」'},
+  {id:'E3', title:'APS PG 的 mem_limit 是否上调', owner:'APS / 运维（外部）',
+   detail:'demo 栈 1.2G 预算 + 共用 PG15 的数据增长；需确认现机余量约 2.3G 是否够，以及是否上调容器限额'}
+];
+
+const GATES = [
+  {id:'G0', at:2, label:'G0', note:'C1–C5、C10 + C11(demo)/C12/C14/C15 冻结；一条命令起 demo 栈'},
+  {id:'G1', at:3, label:'G1', note:'C6 读接口 / C7 / C8 / C9 / C13'},
+  {id:'G2', at:6, label:'G2', note:'C6 写接口 / C11 full 项；云上 demo 上线'},
+  {id:'G3', at:12, label:'G3', note:'发布门'}
+];
+
+const PHASES = [
+  {from:1,to:2,label:'阶段 0 骨架与契约'},
+  {from:3,to:8,label:'阶段 1 并行开发（6 条流）'},
+  {from:9,to:11,label:'阶段 2 集成/影子/交付'},
+  {from:12,to:12,label:'发布门'}
+];
+
+const COVENANT = [
+  ['① 主动更新','开工即置「开发中」，不等人问；停手即置「阻塞」并写清等谁'],
+  ['② 必填不可省','开发中＝负责人＋开始时间；待评审＝提交/分支或产物链接'],
+  ['③ 不得跳步','待评审不可跳过：未经评审直接关闭的流转会被拒绝'],
+  ['④ 关闭即定责','关闭必须写验收结论＋关闭人，之后字段锁定，只能追加补充记录'],
+  ['⑤ 只动自己的目录','改他人独占路径须停下说明、提 PR 由 Owner 合，不许顺手改'],
+  ['⑥ 部署面只归 S8','deploy/smart-erp/、scripts/、docker/、smart-erp.yml 只有 S8 owner 能改，其他人提 PR 说明理由']
+];
+
+const STATUS = {
+  todo:   {label:'待开始', cls:'todo',   color:'#8a929c'},
+  doing:  {label:'开发中', cls:'doing',  color:'#2f6fb5'},
+  block:  {label:'阻塞',   cls:'block',  color:'#c0392b'},
+  review: {label:'待评审', cls:'review', color:'#b8860b'},
+  done:   {label:'已关闭', cls:'done',   color:'#2e7d52'},
+  cancel: {label:'已取消', cls:'cancel', color:'#9aa0a6'}
+};
+
+// 种子任务：全部映射 PRD 真实模块/FR 与路线文档的独占目录
+// 字段：id, s(流), t(标题), ms(里程碑), fr, p(独占路径), st(状态), o(负责人), s0(开始), due, ev(证据), note(验收结论/阻塞原因), by(关闭人), at(关闭时间)
+const SEED_TASKS = [
+  {id:'T001',s:'S0',t:'仓库骨架、基础镜像与 CI 骨架',ms:'M0-M1',fr:'—',p:['.github/','apps/api/main.py'],st:'done',o:'dev-be-01',s0:'2026-10-26 09:00',due:'W2',ev:'commit c35532b (#9) · apps/main.py · tests/platform 84 passed',note:'验收通过：uvicorn:8010 起服务，GET /healthz 200；全 ERP_ 前缀配置且启动校验 asyncpg 与 image_tag≠latest',by:'集成会话',at:'2026-11-10 23:38'},
+  {id:'T002',s:'S0',t:'C4 策略契约：WriteLevel 枚举与 effective_level 取严公式',ms:'M0-M1',fr:'FR-1406',p:['core/policy/','contracts/policy/'],st:'done',o:'dev-be-01',s0:'2026-10-27 09:30',due:'W2',ev:'contracts/policy/write_levels.v1.json · tests/platform/test_levels.py （main 3f4e9c0 含该契约与用例；契约首版 c35532b）',note:'min(场景,连接器,动作,熔断) 六条单测全绿；W3 注册被拒',by:'集成会话',at:'2026-11-10 23:50',shared:'契约冻结 C4'},
+  {id:'T003',s:'S0',t:'C5 核心库表基线与迁移链规范',ms:'M0-M1',fr:'—',p:['db/migrations/','db/README'],st:'done',o:'dev-be-02',s0:'2026-10-28 10:00',due:'W2',ev:'db/migrations/versions/{0001_s0_baseline,0002_s1s3s4_merge}.py · tests/platform/test_migrations.py （main 3f4e9c0 含 0001/0002）',note:'空库与旧库均可升降；0002 已把 S1/S3/S4 合并窗口并入单线性链；命名规范写进 README',by:'集成会话',at:'2026-11-10 23:50',shared:'契约冻结 C5 · 迁移链'},
+  {id:'T004',s:'S0',t:'C10 错误码表与 F1–F8 映射',ms:'M0-M1',fr:'FR-1503',p:['contracts/errors/'],st:'done',o:'dev-be-02',s0:'2026-11-05 09:10',due:'W2',ev:'contracts/errors/codes.v1.json · tests/platform/test_errors.py （main 3f4e9c0 含 contracts/errors/codes.v1.json）',note:'验收通过：6 份冻结件 + --check 双重校验，错误码与 F1–F8 映射逐条断言',by:'S0-平台',at:'2026-11-11 03:48',shared:'契约冻结 C10'},
+  {id:'T005',s:'S0',t:'WriteGateway 执行入口与字段 scope 校验',ms:'M0-M1',fr:'FR-1102, FR-1406',p:['core/policy/gate.py','core/policy/levels.py'],st:'done',o:'dev-be-01',s0:'2026-11-06 14:00',due:'W3',ev:'apps/platform/policy/gateway.py · tests/platform/test_gateway.py （main 3f4e9c0 含 apps/platform/policy/gateway.py；#45 11a6df9）',note:'验收通过：W3 拒绝、effective_level 取严、execute 无 bypass 参数、import-linter 全绿',by:'S0-平台',at:'2026-11-11 03:48',serial:'X3'},
+  {id:'T006',s:'S0',t:'ScopeGuard 与 RLS 落库（ScopeGuard 编译 SQL 条件）',ms:'M0-M1',fr:'G-05',p:['core/kernel/','core/policy/scope.py'],st:'done',o:'dev-be-02',s0:'2026-11-06 15:30',due:'W3',ev:'db/migrations/versions/0002_s1s3s4_merge.py · tests/security/test_scope.py （main 3f4e9c0 含 0002 与 tests/security）',note:'验收通过：PG15 实跑 upgrade head → downgrade base → upgrade head；erp schema 五表与 write_level CHECK 实测',by:'S0-平台',at:'2026-11-11 03:48'},
+  {id:'T007',s:'S0',t:'最小纵向切片：fake 连接器 → AG-1 → 审计 → 界面',ms:'M0-M1',fr:'G0 判据',p:['tests/contract/','.github/'],st:'todo',due:'W2',note:'阻塞=缺人：G0 强制交付物（fake 连接器→AG-1→审计→界面）无负责人；未跑通不得开 6 条流，因此排在所有流之前。'},
+  {id:'T008',s:'S0',t:'API 层装配：C16 冻结 + 16 条 /v1 路由 + 可达性测试',ms:'M2',fr:'FR-1501',p:['apps/api/','contracts/api/'],st:'todo',o:'S0-平台底座',due:'W3',note:'阻塞=缺决策（C16 未冻结）+缺人（16 条 /v1 路由与可达性测试未认领）；现状 api 实测 23 passed / 2 failed（等 S0 接线）。',shared:'契约冻结 C16'},
+
+  {id:'T101',s:'S1',t:'C1 统一数据模型 v1（5 主对象 + Money + 溯源）',ms:'M0-M1',fr:'FR-1203',p:['apps/platform/contracts/canonical.py'],st:'done',o:'dev-be-02',s0:'2026-10-26 09:00',due:'W2',ev:'apps/platform/contracts/canonical.py · tests/platform/test_contracts_frozen.py · （main 3f4e9c0）',note:'验收通过（S0，2026-11-11 03:48）：缺失≠零（Optional + missing_reason）与 Money(str,18,4) 有冻结断言；canonical.py 与用例在 47b0c33 且工作树无差异',shared:'契约冻结 C1',by:'S0-平台',at:'2026-11-11 03:48'},
+  {id:'T102',s:'S1',t:'C2 ActionSpec 与连接器能力清单（describe 六能力）',ms:'M0-M1',fr:'FR-1201, FR-1202',p:['contracts/connector/','connectors/sdk/'],st:'done',o:'dev-be-02',s0:'2026-10-27 09:00',due:'W2',ev:'contracts/connector/action_spec.v1.json · tests/platform/test_connector_sdk.py （main 3f4e9c0）',note:'缺 verify 或 level>=W1 无补偿 → 注册期断言失败',by:'集成会话',at:'2026-11-10 23:50',shared:'契约冻结 C2'},
+  {id:'T103',s:'S1',t:'连接器 SDK 六能力骨架与 transport 私有化',ms:'M0-M1',fr:'FR-1201',p:['connectors/sdk/'],st:'done',o:'dev-be-02',s0:'2026-11-04 09:00',due:'W3',ev:'apps/connectors/sdk/ · tests/platform/test_connector_sdk.py · （main 3f4e9c0）',note:'验收通过（S1，2026-11-11 03:48）：S0 侧 SDK 与 transport 隔离有测试；S1 侧限流/重试/幂等/熔断已并入 tests/connectors（82 passed）；实际落地路径 apps/platform/connectors/sdk.py',by:'S1-连接器',at:'2026-11-11 03:48'},
+  {id:'T104',s:'S1',t:'通用 REST（MES）连接器：读/预演/写/补偿/校验',ms:'M0-M1',fr:'FR-1204',p:['apps/connectors/'],st:'doing',o:'dev-be-02',s0:'2026-11-05 09:40',due:'W5',ev:'apps/connectors/ · tests/connectors 82 passed',note:'正在做：通用 REST（MES）连接器读/预演/写/补偿/校验，负责人 dev-be-02；SDK/限流/重试/幂等/熔断已并入 apps/connectors（main 3f4e9c0，tests/connectors 82 passed）。下一道门：真实 MES 沙箱联调；无可用端点前不标待评审。'},
+  {id:'T105',s:'S1',t:'文件通道连接器（对账单/送货单文件）',ms:'M0-M1',fr:'FR-1204',p:['connectors/file/'],st:'done',due:'W4',ev:'#52 167d095（apps/connectors/file 7 文件：connector/csvsource/factory/mapping/spec/transport）+ #53 5ade300（ERP_FILE_INBOX 登记 schema）；main 3f4e9c0 含该目录',note:'验收通过（集成核对 main 3f4e9c0）：文件通道连接器（对账单/送货单 CSV）已随 #52 进主干，变量登记随 #53；本卡原为 todo，属看板滞后，现按代码事实关闭。'},
+  {id:'T106',s:'S1',t:'connector-gw：MCP Server + 限流 + 拦截记录 + 沙箱',ms:'M5',fr:'FR-1205, FR-1207',p:['connectors/gw/'],st:'doing',o:'dev-be-02',s0:'2026-11-09 10:00',due:'W6',note:'正在做：connector-gw（MCP Server + 限流 + 拦截记录 + 沙箱），负责人 dev-be-02；apps/connectors/gateway.py 已在 main（#13 起、#53 最新）。下一道门：拦截记录与沙箱的行为验收（现无独立用例），未过不标待评审。'},
+  {id:'B-GW-NOCALLER',s:'S1',t:'connector-gw 独立进程仍无调用方；U8 连接器已在进程内装配（PR #130 待评审）',ms:'M5',fr:'FR-1205, FR-1207',p:['apps/connectors/gateway.py','apps/api/container.py','core/runtime/worker.py'],st:'todo',by:'集成会话（口径更新）',at:'2026-11-11 18:12',ev:'2026-11-11 复核：PR #130（`feat/s1-demo-write-path @ 455c0ed`）在 `apps/api/container.py` 装配 U8 连接器，CI 全绿（mergeable_state=clean）、按 S4 复核前置未合并；main `8f6afb1` 未含该装配。`connector-gw`（8012）运行期调用方仍为零。',note:'**2026-11-11 口径更新：原结论只对 8012 成立，本卡不关闭。**\n\n① **U8 这一个连接器：已有调用方（分支上）**。PR #130（`feat/s1-demo-write-path @ 455c0ed`）在 `ApiContainer` 装配了 U8 连接器，写路径经进程内 `WriteGateway` 到连接器执行；因此「写路径完全不经过连接器」这一句不再成立。两点限定：外部系统是仓库内模拟桩 `apps/connectors/u8/stub_server.py`，不是真实 U8；该 PR 因 S4 复核「有无越权」未合并，main `8f6afb1` 上仍为零调用方。\n\n② **`connector-gw` 独立进程：仍然没有任何调用方**。8012 端口的运行期调用方为零这一事实未变：应用代码零处拼接或请求该端口，网关只注册 `/healthz` 与 `/readyz`，写只能经进程内 `WriteGateway.execute()`。装配 U8 连接器不等于接上了网关进程。\n\n**记录纪律**：①说的是「一个连接器有了调用方」，②说的是「网关进程没有调用方」，两件事分开写；不要合并成一句「运行期零调用方已不成立」，也不要据此关闭本卡。'},
+  {id:'T107',s:'S1',t:'运行时三表 ORM 模型（幂等/限流/熔断）与 0002 迁移对齐',ms:'M0-M1',fr:'FR-1205',p:['apps/connectors/db/'],st:'done',o:'S1-连接器',s0:'2026-11-10 22:10',due:'W3',ev:'apps/connectors/db/models.py · tests/connectors/test_connectors_db_models.py · pytest tests/connectors 82 passed · （main 3f4e9c0）',note:'验收通过（S1，2026-11-11 03:48）：三表注册进 Base.metadata，约束与 0002 迁移一致；命名/类型有断言；apps/connectors/db 与对应用例在 47b0c33 无差异',by:'S1-连接器',at:'2026-11-11 03:48'},
+
+  {id:'T201',s:'S2',t:'金标准样本 500 行夹具与标注口径',ms:'M3',fr:'FR-103',p:['tests/golden/'],st:'done',o:'dev-al-01',s0:'2026-10-26 09:00',due:'W2',ev:'PR #32 merged（main 9543438，CI success）· 1bea1ac 新增 tests/recon/file_digest.py 归一化换行并重记 sha · worktree LF 检出 tests/recon 63 passed',note:'已关闭（开发总监，2026-11-11 02:09）：验收通过。训练 375 / 留出 163 / 对抗 10/10 口径未变，夹具样本行未改，仅 sha 改 LF 归一化；1d759af 的 4 红由 1bea1ac 修复。'},
+  {id:'T202',s:'S2',t:'三层匹配（精确/模糊/候选）与歧义标记',ms:'M3',fr:'FR-103',p:['apps/recon/matching.py'],st:'done',o:'dev-al-01',s0:'2026-11-03 09:20',due:'W5',ev:'commit e6a18ab (#10) · tests/recon/test_matching.py',note:'验收通过：三层匹配与歧义标记随 S2 合并入 main，合并后全量 110 passed',by:'集成会话',at:'2026-11-10 23:39'},
+  {id:'T203',s:'S2',t:'七类归因规则（单价/数量/报废/单位/税率/缺单/重复）',ms:'M3',fr:'FR-104',p:['apps/recon/attribution.py'],st:'done',o:'dev-al-02',s0:'2026-11-04 10:00',due:'W6',ev:'commit e6a18ab (#10) · apps/recon/attribution.py',note:'验收通过并合并入 main；S2 台账自称覆盖 7 类中的 5 类，剩余类须在补充记录中逐类核对',by:'集成会话',at:'2026-11-10 23:39'},
+  {id:'T204',s:'S2',t:'批次生命周期与状态机（生成/关闭/重开）',ms:'M3',fr:'FR-101, FR-102, FR-108',p:['domain/recon/batch.py'],st:'todo',due:'W5',note:'阻塞=缺人：批次生命周期/状态机（domain/recon/batch.py）未认领；依赖 C1 canonical 批次模型（已冻结）与 T201 夹具。'},
+  {id:'T205',s:'S2',t:'三单匹配（订单/入库/发票）',ms:'M5',fr:'FR-301~303',p:['domain/recon/three_way.py'],st:'todo',due:'W8',note:'阻塞=依赖卡：三单匹配依赖 T204 批次状态机与订单/入库/发票三类数据模型，M5 排期，未认领。'},
+  {id:'T206',s:'S2',t:'委外加工费对账（含暂估联动）',ms:'M5',fr:'FR-203, FR-204',p:['domain/recon/outsourcing.py'],st:'block',note:'等 C1 增加委外工单字段的可选扩展（走契约窗口，不自行加）'},
+
+  {id:'B-COMP-RETRY',s:'S3',t:'P0：补偿重试在真实路径上从未工作——退避中的 queued 被当成「无活可干」直接转人工',ms:'M2',fr:'FR-1105',p:['apps/agents/runtime.py','apps/agents/compensation.py','tests/agents/'],st:'done',o:'S3',by:'S3（提交）/集成（合并 #101）',at:'2026-11-11 11:14',ev:'PR #101（head f27ee6c）run 42949868340 success；main push run 42950887571 success（sha 1f26966）；PR 含 2 提交（52173a0 + f27ee6c），head 提交 3 文件 +112/−14；tests/agents 108 passed（分支证据，含 test_compensation_retry_survives_backoff_and_finishes）。',note:'**2026-11-11 已合入（#101 `1f26966`，PR run 42949868340 / main run 42950887571 均 success）**：退避中保持「补偿中」，跨轮重试有端到端用例（失败一次 → 状态不变 → 闸门置 NULL 后第二轮成功 → 全部行 done + 工单回滚）；`failed=max(1,…)` 只留在 `TransitionContext`，报告/指标只取 `counts.failed`。\n\n**2026-11-11 建卡（P0，比 `B-LEASE-FLAKE` 更严重；S3 已在 `fix/b-comp-stop-reason @52173a0` 开工，本卡只定验收口径，不重复改代码）**。事实链：① `TicketRuntime.compensate()` 的循环里 `claim_next()` 返回 `None` 就 `break`（`apps/agents/runtime.py:522-524`）；② 循环结束后只要 `counts.failed or counts.running or counts.queued` 成立就立即 `transition(MANUAL_REQUIRED)`（同文件 555-563）——而 `None` 的正常语义只是「此刻无可领取」，**任何任务处在退避（默认 8s）中都会命中**；③ 后果：第一次补偿失败 → 退避 → 下一轮被判人工 → 工单已离开「补偿中」，之后每秒 `RuntimeGuardError`（同文件 500-503），系统不会自愈；④ 报告里 `failed = max(1, counts.failed)`（同文件 556），库里 failed 实际是 0，**报告与库不一致**。**PR #101（`f27ee6c`）已按本卡口径修**：结束态由停止原因决定（`queued+running>0` 保持「补偿中」），`max(1,…)` 只留在 `TransitionContext`（状态机 guard 要求非零），报告/指标只取 `counts.failed`。S3 的 `fix/b-comp-stop-reason` 先让「退避跳过 vs 队列空」可区分（`52173a0`），再让结束态由停止原因决定（`f27ee6c` / PR #101）——本卡验收以 PR #101 的端到端用例为准。\n\n**今晚所有「补偿执行器已上线」的证据都是首轮成功样例，没有一条覆盖「失败一次再重试成功」——执行器存在 ≠ 重试可用。**\n\n**验收只认这条端到端用例**：失败一次 → 状态不变 → 退避到期 → 重试成功 → 全部补偿行 done（S3 用例 fixture 当前两行；要求是「所有入队行」而非固定行数）+ 工单已回滚；并断言退避期间不得转 `MANUAL_REQUIRED`、报告 `failed` 与库内 counts 一致。pytest 单测通过不算，必须有真实队列 + 真实 store 的路径证据。'},
+  {id:'B-LEASE-SILENT',s:'S3',t:'租约丢失后的三处沉默：落账失败无留痕、回收误伤自己、丢弃算 done',ms:'M2',fr:'FR-1105',p:['core/runtime/worker.py','core/runtime/queue.py','core/runtime/scheduler.py'],st:'done',o:'S3',by:'S3（提交）/集成（合并 #102）',at:'2026-11-11 11:25',ev:'PR #102（head 07ad26d）run 42951721416 success；main push run 42952133449 success（sha 3f4e9c0）；PR 含 2 提交（089f469 + 07ad26d）；4 文件 +363/−14；tests/agents 120 passed；ruff 阻断档通过。',note:'**2026-11-11 已合入（#102 `3f4e9c0`，PR run 42951721416 / main run 42952133449 均 success）**：① `complete()` / `heartbeat_lease()` 返回 False 时读回真实 `state` / `lease_owner`，日志给「预期 vs 实际」并按实际状态写明去向——`queued` / `running` → 会重跑（at-least-once，handler 必须幂等）；`dead` → 不重跑、结果永久丢失、需人工重放；② `reclaim_stale` 增加 `exclude_owner`（`lease_owner IS DISTINCT FROM :self`，NULL 安全；`<>` 在 NULL 上会静默漏行）与 `grace_seconds = lease/3`（默认 20s，依据是在跑任务每 20s 续一次租 + 实测秒级前跳）；代价是真死 worker 多等一个续租间隔；③ `WorkerStats.discarded`：完成落账失败时 `done` 不增、`discarded+1`，关停汇总「跑完 N、丢弃 M、失败 K」。**这不是「加了点日志」**：结果被丢弃会说出来、回收不会误伤自己、报告数字不再美化。与 `B-LEASE-FLAKE` 的分工——那张是租约丢失本身（#99），这张是丢失之后的三处沉默。'},
+  {id:'T301',s:'S3',t:'工单 12 态状态机与迁移表白名单',ms:'M0-M1',fr:'FR-1101, FR-1103',p:['apps/agents/state_machine.py'],st:'done',o:'dev-be-03',s0:'2026-11-04 09:00',due:'W4',ev:'apps/agents/state_machine.py + contracts/ticket/state_machine.v1.json（c35532b #9）；#35 01f2a10 引入 runtime 与迁移；tests/agents/test_state_machine.py 在 main 3f4e9c0',by:'S3-智能体',at:'2026-11-11 03:48',note:'验收通过（集成核对 main 3f4e9c0）：12 态状态机与迁移表白名单在 apps/agents/state_machine.py（原路径 core/runtime/transitions.py 在 main 不存在，已按实际更正）；单测在 tests/agents/test_state_machine.py。'},
+  {id:'T302',s:'S3',t:'C3 工单/事件/步骤/审计 DDL 与唯一约束',ms:'M0-M1',fr:'FR-1101',p:['contracts/ticket/','db/migrations/'],st:'done',o:'dev-be-03',s0:'2026-11-05 09:00',due:'W3',ev:'contracts/ticket/state_machine.v1.json（c35532b #9）· 0004_audit_chain_anchor + 0005_worker_runtime（#35 01f2a10）· 影像同父唯一约束（#63 8830ea7，提交信息含「T302 必改 1/2/3」）；main 3f4e9c0',serial:'X1',shared:'契约冻结 C3 · 需与 S0/S4 共审',note:'验收通过（集成核对 main 3f4e9c0）：C3 工单/事件/步骤/审计 DDL 与唯一约束已全部在 main；#63 已处理 T302 评审必改 3 项。原「待评审」缺 PR 号（§9.1.1 视为未提交），但代码事实已在 main，故按事实置 done 并补 PR 证据。'},
+  {id:'T303',s:'S3',t:'intent → verify 写入协议与未知结果收敛',ms:'M0-M1',fr:'FR-1104',p:['core/runtime/step.py'],st:'todo',due:'W5',serial:'X3',note:'阻塞=缺人+依赖卡：intent→verify 协议无独立实现与用例（main 只有 apps/agents/runtime.py 内联逻辑与 tests/agents/test_step_events.py 间接覆盖）；X3 串行门，需 C3 定版后由 S3 认领。'},
+  {id:'T304',s:'S3',t:'Saga 补偿队列与逆序补偿约束',ms:'M2',fr:'FR-1105',p:['core/runtime/compensation.py'],st:'done',due:'W6',ev:'apps/agents/compensation.py + tests/agents/test_compensation_queue.py（main 3f4e9c0）· #35 01f2a10 引入 · #101 1f26966 端到端重试',note:'验收通过（集成核对 main 3f4e9c0）：Saga 补偿队列与逆序约束已实现，test_enqueue_is_idempotent_and_orders_desc 断言 [3,2,1]，test_saga_compensates_in_reverse_and_rolls_back 断言逆序回滚；跨轮重试由 #101 补齐。'},
+  {id:'T305',s:'S3',t:'租约、断点续跑与调度器扫描',ms:'M5',fr:'FR-109',p:['apps/agents/lease.py','core/runtime/scheduler.py','tests/agents/test_lease.py'],st:'review',o:'S3-续跑',due:'W9',ev:'PR #126 已合入 main 54c8dae（2026-11-11）；main 上复验：4 条 PG 用例全过（fresh 库 + ERP_TEST_DATABASE_URL，非 skip）、tests/agents 139 用例 exit=0、审计链 54/0。结论「部分成立」：运行时级成立（不重放已完成步骤、不丢单、哈希链连续、version 不回退）；系统级自动续跑不成立（无扫描执行中工单的入口、计划不持久化）。',note:'**验收结论（2026-11-11，main c8935dc）：部分成立，不关闭。** ✅ 证住了什么：进程被杀 / 租约过期后不重放已完成步骤、不丢单、哈希链连续、version 不回退（fresh 库 4 条 PG 用例实跑通过、非 skip；tests/agents 139 用例 exit=0；审计链 54/0）。❌ 没证住什么：系统级自动续跑不成立——HANDLERS 只有 echo/sleep，没有扫描「执行中」工单的调度入口；执行计划不持久化（ticket_step 只存 request_snapshot），重启后必须由调用方重新提供同样的 steps。未证住部分单开 B-RESUME-NO-PLAN-STORE（技术缺口）；入口形态见 B-RESUME-NO-ENTRY（待决策）。**不因「已合入」关整张卡。**'},
+  {id:'T306',s:'S3',t:'OTel 埋点接入状态机（首个 span：ticket.step）',ms:'M0-M1',fr:'NFR-S-07',p:['core/runtime/tracing.py'],st:'todo',note:'X4 埋点规范已随 T701 验收（main 3f4e9c0：KNOWN_SPANS 冻结枚举、W3C trace_id、JSONL 导出），阻塞条件消失；等 S3 认领首个 span（ticket.step）后开工。'},
+
+  {id:'T401',s:'S4',t:'审计影像表与哈希链（prev_hash + 每日锚点）',ms:'M0-M1',fr:'FR-1301, FR-1307',p:['apps/audit/'],st:'done',o:'dev-be-04',s0:'2026-11-06 09:00',due:'W5',ev:'tests/audit 18 passed（main 3f4e9c0；apps/audit/ledger.py 最新 #63 8830ea7，原路径 core/audit/ 已不存在）',shared:'契约冻结 C8 相关 · 与 S3 共审 C3',by:'S4-审计权限',at:'2026-11-11 03:48',note:'路径更正（2026-11-11 核对 main 3f4e9c0）：审计实现在 apps/audit/，卡内 core/audit/ 为旧规划路径。'},
+  {id:'T402',s:'S4',t:'前像/后像采集与字段级 diff',ms:'M0-M1',fr:'FR-1301',p:['core/audit/image.py'],st:'todo',due:'W5',note:'阻塞=缺人：前像/后像采集与字段级 diff 无独立实现（main 的 apps/audit 只有 ledger/models/monitor/rollback/store，无 image.py）；需 S4 认领。'},
+  {id:'T403',s:'S4',t:'审批满足性判定与自审 CHECK 约束',ms:'M0-M1',fr:'FR-1403',p:['apps/security/approvals.py','contracts/ticket/approval.ddl.sql'],st:'done',o:'dev-be-04',s0:'2026-11-06 10:30',due:'W4',ev:'apps/security/approvals.py · tests/security/test_approvals.py （main 3f4e9c0）',note:'验收通过（S4，2026-11-11 03:48）：自审被拒、同人多角色被拒、金额分级有断言；approvals.py 在 47b0c33 无差异，security 236 + audit 18 = 254 passed / 0 skipped',by:'S4-审计权限',at:'2026-11-11 03:48'},
+  {id:'T404',s:'S4',t:'三级回滚流程与回滚影响评估',ms:'M5',fr:'FR-1302~1305',p:['core/audit/rollback.py'],st:'todo',due:'W8',note:'阻塞=依赖卡 B-ROLLBACK-TRACE：apps/audit/rollback.py 只有同步回滚，三级回滚与影响评估未做；目标态（持久化→入队→202→轮询）未闭合前不开工。'},
+  {id:'T405',s:'S4',t:'权限变更审计（config_change + 哈希链）',ms:'M5',fr:'FR-1408',p:['apps/security/config_access.py','apps/security/config_change_chain.py'],st:'done',by:'开发总监（代项目负责人）',at:'2026-11-11 17:41',ev:'关闭依据（main c8935dc）：alembic heads 单头 0012_config_change_chain，全仓仅一个 0012 且 down_revision=0011_job_lease_gen；fresh 库跑 tests/security/test_config_change_pg.py → 9 passed；tests/security 245 passed / 9 skipped（PG 用例无 DSN）。#125（head 1827bec）已 squash 合入 d837541。',note:'**关闭（2026-11-11，开发总监代项目负责人）**：真实根因不是缺路由，而是没有权限配置存储、没有运行期读取方；本期权限配置为静态，验收口径（总监 2026-11-11 裁 B）= 服务层用例 + 直接调用 ConfigChangeService 落真 PG 链并验链，验的是能力底座，不是「管理界面能改权限」。'},
+  {id:'T406',s:'S4',t:'审计台账检索与异步导出（10 万条 ≤10 分钟）',ms:'M5',fr:'FR-1306, FR-1108',p:['core/audit/search.py'],st:'todo',due:'W9',note:'阻塞=缺人：审计检索与异步导出未认领；依赖 T401 审计表与 T405 的审计能力底座（config_access + config_change 链，不是运行时入口）。'},
+  {id:'T408',s:'S4',t:'C6 管理 API（A 方案，下期）',ms:'M5',fr:'FR-1408',p:['apps/security/config_access.py'],st:'todo',due:'W10',o:'S6（契约 owner S0）',ev:'2026-11-11 总监裁定本期不做：无可写配置目标（无权限配置表、无运行期读取方）；环境变量契约 contracts/config.schema.json 是部署契约（79 键中 78 个 phase=startup，运行时只读一次），按「键取自 schema + 落 audit_image」实现只会得到不改变状态的假入口',note:'下期 A 方案：先建权限配置存储（role_assignment/scope/threshold/mapping/whitelist 表 + 运行期读取方），再开管理 API；审计落 config_change 自己的链（不是 audit_image）。本期能力底座已由 T405 B 方案（1827bec）交付。'},
+
+  {id:'T501',s:'S5',t:'版面分析与三类单据分类（对账单/送货单/发票）',ms:'M2',fr:'FR-401',p:['apps/docparse/layout.py'],st:'done',o:'dev-al-03',s0:'2026-11-03 09:00',due:'W6',ev:'tests/docparse 90 passed · （main 3f4e9c0）',note:'验收通过（S5，2026-11-11 03:48）：apps/docparse 20 文件与 tests/docparse 15 文件在 47b0c33 无差异；docparse 90 passed / 0 skipped',by:'S5-单据解析',at:'2026-11-11 03:48'},
+  {id:'T502',s:'S5',t:'字段抽取 + 置信度 + bbox 坐标回链',ms:'M2',fr:'FR-402',p:['apps/docparse/extract.py'],st:'done',o:'dev-al-03',s0:'2026-11-04 09:00',due:'W6',ev:'tests/docparse 90 passed · （main 3f4e9c0）',note:'验收通过（S5，2026-11-11 03:48）：docparse 90 passed / 0 skipped（含空缺字段 null 断言）；相关文件均在 47b0c33 且无差异',by:'S5-单据解析',at:'2026-11-11 03:48'},
+  {id:'T503',s:'S5',t:'主数据匹配 Top3 与首次出现人工绑定',ms:'M2',fr:'FR-403, FR-1404',p:['domain/docparse/master_match.py'],st:'todo',due:'W7',note:'阻塞=缺人：主数据匹配 Top3 与首次绑定未认领；依赖 T501/T502 抽取结果与 masterdata 只读接口（T901 已 done）。'},
+  {id:'T504',s:'S5',t:'解析失败转补录与重复上传检测',ms:'M2',fr:'FR-404, FR-406',p:['domain/docparse/fallback.py'],st:'todo',due:'W8',note:'阻塞=缺人：解析失败转补录与重复上传检测未认领；依赖 T503 匹配结果。'},
+  {id:'T505',s:'S5',t:'worker-doc entrypoint 与资源限额',ms:'M2',fr:'NFR-P-03',p:['domain/docparse/worker.py'],st:'todo',due:'W7',note:'阻塞=缺人：worker-doc entrypoint 与资源限额未认领；compose 已有 doc 服务与限额（full 档 3G），缺独立入口与验收。'},
+  {id:'T506',s:'S5',t:'docparse → canonical 的 DocType 桥接必须显式映射',ms:'M2',fr:'FR-403',p:['apps/docparse/models.py','apps/connectors/canonical/models.py'],st:'todo',due:'W9',ev:'待开始：DocType 六值中五个同名，statement vs supplier_statement 不同名；docparse 与 connectors 当前零 import（S0 核，2026-11-11 03:53）',note:'要求显式映射表 + 一条映射测试，禁止 doc_type 直传 kind；风险形态：直传不报错，只把供应商对账单记成一个不存在的类型，将来要从对账差异倒查。契约 owner 为 S0'},
+
+  {id:'T601',s:'S6',t:'前端骨架 + OpenAPI 生成客户端 + mock server 联调',ms:'M2',fr:'FR-1501',p:['web/'],st:'done',o:'dev-fe-01',s0:'2026-10-27 09:00',due:'W3',ev:'web/ · tests（2 个前端用例） · （main 3f4e9c0；#34 f131dbc 入主干）',note:'验收通过（S6，2026-11-11 03:48）：web/src 28 文件、tests/web 11 文件在 47b0c33 无差异（#34 已把骨架与 OpenAPI 客户端并入主干）',by:'S6-前端',at:'2026-11-11 03:48'},
+  {id:'T602',s:'S6',t:'P3 任务详情：状态机进度条 + 时间线 + 字段级 diff',ms:'M2',fr:'FR-1503',p:['web/pages/ticket/'],st:'doing',o:'dev-fe-01',s0:'2026-11-05 09:00',due:'W7',note:'正在做：P3 任务详情（状态机进度条 + 时间线 + 字段级 diff），负责人 dev-fe-01；web/ 已进 main（T607/T608）。下一道门：接真实 /v1 工单读路径并过 web-checks，未过不标待评审。'},
+  {id:'T603',s:'S6',t:'P4 复核审批：三方并排 + 证据面板 + 双人互不可见',ms:'M2',fr:'FR-1504',p:['web/src/pages/'],st:'doing',o:'dev-fe-02',s0:'2026-11-05 10:00',due:'W7',note:'正在做：P4 复核审批（三方并排 + 证据面板 + 双人互不可见），负责人 dev-fe-02；下一道门：审批接口真实契约（后端仅事件化写路径 #96/#97，无对外审批端点）——缺接口，门未开。'},
+  {id:'T604',s:'S6',t:'空态/错误态全表（F1–F8 各自下一步）',ms:'M2',fr:'FR-1503',p:['web/states/'],st:'doing',o:'dev-fe-01',s0:'2026-11-08 09:30',due:'W6',ev:'web/ · 错误文案与状态映射工具 · T607 已落 8 页×6 类统一错误/空态',note:'S6 已在 T607 覆盖 8 页 × 6 类错误/空态（48 格 / 48 条新用例 / 74 tests passed，PR #34）；本条余量为跨页 F1–F8 验收与 owner 关闭'},
+  {id:'T607',s:'S6',t:'前端工作台补交付（S6 独立会话）',ms:'M2',fr:'FR-1501',p:['web/'],st:'done',o:'S6-前端工作台',s0:'2026-11-10 11:20',due:'W3',ev:'PR #34 已 squash 合并 → main f131dbc（git ls-remote 实测）· 合并前分支已 merge origin/main e2a9233 · 合并后 main push run 42876227447 四 job 全绿 · 新 sha 干净 worktree 复跑 npm ci / gen:api -- --check / 74 tests / build 全 exit 0 · 负向证明：红 42874629213 → 绿 42875059839',note:'验收结论：web/ 首次进主干。错误态/空态 48 格（8 页 × 6 类）、billing_bucket 下钻、两处字符串兜底已删（404 走 E-RESOURCE-NOTFOUND，503 走 E-DATA-MISSING+503）。门禁为结构性做法：pytest 跳过 tests/web 且其余目录零容忍、新增 web-checks 四步；负向证明已实测（临时失败断言 → 前端 job 第 6 步红 → 删除后绿）。纪律两条：异步双请求断言必须等确定性条件，不得依赖到达顺序（ticket-w3-403 已修）；web-checks 缓存键绑 web/package-lock.json，npm ci 在 lock 与 package.json 不一致时硬失败属预期。关闭人：开发总监（批准 squash 合并），S6-前端工作台执行。'},
+  {id:'T608',s:'S6',t:'工作台接真实契约（替换 mock，接 /v1）',ms:'M2',fr:'FR-1501',p:['web/'],st:'done',o:'S6-前端工作台',due:'W4',ev:'随 PR #34 合并进 main f131dbc（/v1 真实调用、mock 默认关）· npm test 8 files / 74 tests passed · npm run build exit 0 · main push run 42876227447 全绿',note:'已关闭：交付并入 T607；验收结论同 T607（48 格矩阵 + 前端门禁 + 负向证明）。关闭人：开发总监（批准 squash 合并），S6-前端工作台执行。'},
+  {id:'T609',s:'S6',t:'高端竞品交互调研 + 工作台 UI 改造（P0+P1 已进 main）',ms:'M2',fr:'FR-1501',p:['web/','tests/web/','docs/design/'],st:'done',o:'S6-UI改造',s0:'2026-11-11 10:00',due:'W4',ev:'PR #105 已 squash 合并 → main 694b682（head a81df79）· main push run 42957785326 success · 分支证据：gen:api --check / tsc / npm test 85 passed / build 全过 · 截图 15 张 + MANIFEST：2026-11-11/ui-redesign/outputs/screenshots/',note:'验收结论：P0 九项 + 路径防漂移守卫随 #105 入 main（设计 token、左导航/顶栏/助手壳/⌘K、决策队列工作台、工单高密度表与详情决策栏、审批队列+固定决策条、批次差异表、并排字段 diff+证据链、计量账本、表格密度开关、mock 路由防漂移用例 9 条）；P2 按原口径暂缓、不属本卡交付。切真实接口三前提仍记录（会话角色/viewer、batch_id 直连、证据区已执行工单）。原「无 assistant 端点」的契约缺口已被 #116 补上，但**LLM 未接前端**，工作台助手仍是规则式建议（见 A-ASSISTANT）。关闭人：集成会话（合并 #105）。'},
+  {id:'T610',s:'S6',t:'前端接入会话身份与真实批次列表（#107/#108）',ms:'M2',fr:'FR-1501',p:['web/','tests/web/'],st:'done',o:'S6-会话批次',s0:'2026-11-11 13:00',due:'W4',ev:'PR #110 已 squash 合并 → main 5ef1df9（head 553a90f）· main push run 42964352374 success · 分支证据：gen:api --check / tsc / npm test 11 files 97 passed / build exit 0（387.37 kB js）· mock 守卫 9→13 条',note:'验收结论：GET /v1/auth/session 取代 VITE_SESSION_ROLES/VITE_VIEWER_ID，401 显式提示「当前未启用演示会话」且不把 401 当 0 条待办；GET /v1/recon/batches 取代 localStorage 手贴 batch_id，三态齐全，null 渲染「—」并标注「未投影（非 0）」，403 走错误面板不当空数组。demo 会话下工作台读数：待你决策 8 / 涉及资金 511,115.50（分支实测；后续 default_scope 改造见 T611）。关闭人：集成会话（合并 #110）。'},
+  {id:'T611',s:'S6',t:'连接设置由会话 default_scope 自动带出（三条分支）',ms:'M2',fr:'FR-1501',p:['web/','tests/web/'],st:'review',o:'S6-默认范围',s0:'2026-11-11 13:35',due:'W4',ev:'PR #113 已合 → main fa5de4f（head 3ef993f）；PR #114 已合 → main 10b5447（head aee7a30，含未确认旧 ORG-1 不发请求的边界修正与 S8 两项前端修复）· PR #114 的 main push run 42973544189 success · 分支证据：gen:api --check / tsc --noEmit / npm test 13 files 109 passed / build exit 0 · 新增 4 条分支用例 + 2 条 S8 回归',note:'代码已全部进 main，状态仍是「待评审」而不是「待合并」：卡内声明的验收条件「S8 镜像端到端」只做到回环四类健康检查 + `/v1/auth/session` 返回 default_scope（见 #117 的 CLOUD-HULKAI-GZ-ORDER.md 附录 A），**未走 UI 流程**（粘贴令牌 → 保存 → 查询），缺这一条验收结论，不得标 done。已交付行为：default_scope 齐全时 org/period/system_ids 自动带出（可见可改）；org_id=null 进入选择态（org 留空、保存被拦、不用占位 ORG-1 发请求）；default_scope=null 或 401 提示「当前无法获取默认范围」并保留手填入口；scope 来源 pending/session/manual/unresolved；令牌去抖探测 + 保存前取会话，不依赖 blur 时序。'},
+  {id:'T612',s:'S6',t:'助手面板接真实助手建议端点（source/降级原因可见）',ms:'M2',fr:'FR-1502',p:['web/','tests/web/'],st:'done',o:'S6-助手接口',s0:'2026-11-11 14:40',due:'W4',by:'集成（验收 T612）',at:'2026-11-11 15:51',ev:'PR #118 已 squash 合并 → main d5daa6a9379ad8d1a4bcdf12323df26b154a6630（head 43cb3adaafd66b900d167d269833d499d23f5ebd）· PR run 42978578195 success · main push run 42979123610 success · 净差异 7 files 仅 web/ 与 tests/web/（+497/−90）· gen:api --check / tsc --noEmit / npm test 14 files 118 passed / build exit 0 · 验收：main d5daa6a 四镜像内真实页面（web 产物 assets/index-CfdrHKOW.js）',note:'验收通过并关闭。验收方式是 **镜像内真实页面**，不是接口返回、也不是 mock 预览：main d5daa6a 的四镜像起栈后两条路径都有页面原文。① source=rule：页面显示「规则建议（模型未参与）」+「降级原因：未配置模型」，**整页无 rule/next_action-v1、无任何模型名**——这一条比「显示了降级原因」更能说明前端没把降级伪装成模型建议。② source=llm：页面显示「模型建议」+ 模型名 stub-model + 生成时间。复验注意：必须用含新包的镜像，`assets/index-CfdrHKOW.js` 内含「规则建议（模型未参与）」，旧镜像复验会得出相反结论。关闭人：集成会话。'},
+  {id:'T613',s:'S6',t:'计量口径三个行数文案与后端 d19ada8 对齐（补「有效 ≠ 计费」用例）',ms:'M2',fr:'FR-1501',p:['web/src/api/mock.ts','web/src/pages/MeteringPage.tsx','tests/web/metering.test.tsx'],st:'done',by:'开发总监（代项目负责人）',at:'2026-11-11 17:41',ev:'关闭依据（main c8935dc）：PR #127 已 squash 合入 c8935dc（head 01b3dbe）；main push run c8935dc「前端契约 / 测试 / 构建」success；main 树上旧错写公式命中 0，新增「有效 2 ≠ 计费 1」用例在 CI 内通过。分支侧：gen:api --check / tsc --noEmit exit 0 / vitest 14 files 119 passed / npm run build exit 0。',note:'**关闭（2026-11-11，开发总监代项目负责人）**：三处文案与断言都改成「有效对账行 = billable + auto_released、计费行数 = billable 且为上界」，并用默认参数之外的数据（有效 2 / 计费 1）证明两者不再互相当代称；只改文案与断言，金额算法未动。'},
+  {id:'T605',s:'S6',t:'IM 卡片与深链、频控、邮件兜底',ms:'M5',fr:'FR-1506',p:['integrations/im/','apps/api/routers/im.py'],st:'todo',due:'W9',note:'阻塞=缺人：IM 卡片/深链/频控/邮件兜底未认领；依赖对外入口与 C13 healthz 契约（T805 未做）。'},
+
+  {id:'T701',s:'S7',t:'OTel 埋点规范与 SDK 封装（四跳同一 trace）',ms:'M0-M1',fr:'NFR-S-07',p:['observability/'],st:'done',o:'dev-be-02',s0:'2026-11-02 09:00',due:'W2',ev:'observability/trace.py · observability/README.md · tests/observability 18 passed（main 3f4e9c0）',serial:'X4',note:'验收通过（S7，2026-11-11 03:48）：标准库实现（KNOWN_SPANS 冻结枚举、W3C trace_id、JSONL 导出），未引入 OTel SDK；主干 exporter.py / render.py / test_chain.py 为 ruff 清理后版本，observability 52 passed',by:'S7-可观测',at:'2026-11-11 03:48'},
+  {id:'T702',s:'S7',t:'指标口径与 OTel→Prometheus 映射（四跳同 trace）',ms:'M5',fr:'NFR-O-01',p:['observability/metrics/'],st:'doing',o:'dev-be-02',s0:'2026-11-07 09:00',due:'W5',ev:'observability/ · tests/observability/test_chain.py',note:'部分完成：链路/成本/渲染有实现与用例；Prometheus 映射与告警未做，已拆出 T708；负责人 dev-be-02；下一道门：告警评估器缺部署（B-OBS），Prometheus 映射已拆到 T708（done），本卡余量只剩接入评估器，未过不标待评审。'},
+  {id:'T703',s:'S7',t:'六条主链路 E2E（用 C12 镜像跑，非 mock）',ms:'M5',fr:'NFR-S-07',p:['tests/e2e/'],st:'doing',o:'dev-be-02',s0:'2026-11-08 09:00',due:'W6',ev:'tests/e2e 11 passed（observability+e2e 合计 29）· tests/deploy/check_image_contents.py',note:'部分完成：11 条冒烟通过，/_e2e 已收口；缺六条主链路与 C12 镜像实跑；负责人 dev-be-02；下一道门：六条主链路 E2E 用 C12 镜像实跑（现 11 条冒烟 + /_e2e 已收口），缺 C12 镜像跑批。'},
+  {id:'T704',s:'S7',t:'性能基线 NFR-P-06/P-08 与压测脚本',ms:'M5',fr:'NFR-P-06',p:['tests/perf/'],st:'todo',due:'W10',note:'阻塞=缺人：性能基线 NFR-P-06/P-08 与压测脚本未认领；M5/W10 排期。'},
+  {id:'T705',s:'S7',t:'告警分级 P0/P1 与 Grafana 看板',ms:'M5',fr:'NFR-O-01',p:['observability/dashboards/'],st:'todo',due:'W6',note:'阻塞=缺决策：B-OBS 已定案「本期不做 Prometheus/Grafana 接入」，告警分级与看板无落地载体；需产品重新拍板才启动。'},
+  {id:'T706',s:'S7',t:'Go/No-Go 十条核对与验收报告（M6 收口）',ms:'M6',fr:'§10.2',p:['tests/e2e/report.md'],st:'todo',due:'W12',note:'阻塞=依赖卡：M6 Go/No-Go 收口依赖 T703 六条 E2E 与 T704 性能基线，二者未完成前不能出报告。'},
+  {id:'T707',s:'S7',t:'llm_usage 成本归因（按工单/客户/模型）',ms:'M5',fr:'NFR-O-02',p:['observability/cost/'],st:'todo',due:'W9',note:'阻塞=缺人：llm_usage 成本归因未认领；依赖 LLM 客户端落地（ERP_LLM_* 仍在例外表）。'},
+  {id:'T708',s:'S7',t:'补 Prometheus 映射与告警规则（原 T702 拆分）',ms:'M5',fr:'NFR-O-01',p:['observability/metrics/','observability/alerts/'],st:'done',o:'S7-观测测试',due:'W6',ev:'observability/metrics/ · observability/alerts/（6 条含 P0 审计链断链）· tests/observability 30 passed · （main 3f4e9c0；#43 1b1fdea）',note:'验收通过（S7，2026-11-11 03:48）：Prometheus 0.0.4 格式指标端点（工单/WriteGateway/业务三维度，禁高基数标签）+ 6 条告警规则 + SLO 草案；干净检出 47b0c33 复跑 tests/observability 52 passed / 0 skipped + ruff 通过（#43 → 1b1fdea）；**2026-11-11 07:00 更正（#83）**：该 6 条规则均无生产采集点，已全部注释，生效仅 2 条对账规则；「6 条告警规则」不得再当作已生效能力引用，见 B-OBS',by:'S7-可观测',at:'2026-11-11 03:48'},
+
+  {id:'T801',s:'S8',t:'4 个 Dockerfile（多阶段 + slim + 非 root + read_only）',ms:'M0-M1',fr:'NFR-D-03',p:['projects/smart-ERP/docker/'],st:'done',o:'dev-ops-01',s0:'2026-10-29 09:00',due:'W1',ev:'tests/deploy 30 passed · main fb3a5fe 含 PR #13/#19',note:'验收通过（S8 自出结论）：connector-gw 入口 PR #13、doc 镜像/full 档/许可证门禁 PR #19 均已合入；四 Dockerfile 整体复核由 S8 收口。关闭人 S8-部署，集成会话照录不代签',by:'S8-部署',at:'2026-11-11 04:40'},
+  {id:'T802',s:'S8',t:'compose 单文件 + 6 个 profile + dev 覆盖（demo 可起）',ms:'M0-M1',fr:'NFR-D-03',p:['deploy/smart-erp/'],st:'done',o:'dev-ops-01',s0:'2026-11-04 09:00',due:'W2',ev:'tests/deploy 30 passed · deploy/smart-erp/docker-compose.yml （main 3f4e9c0 含 deploy/smart-erp/docker-compose.yml；最新改动 #73 47766ad）',note:'验收通过（S8 自出结论）：demo 档 5 服务可渲染、deploy 30 passed；full/ops 档随 #61 的预拉步骤与后续 ops 分支收口。关闭人 S8-部署',by:'S8-部署',at:'2026-11-11 04:40',serial:'X1',shared:'C11/C13 承载物'},
+  {id:'T803',s:'S8',t:'C11 .env.example 全量清单 + config schema + 三套环境矩阵',ms:'M0-M1',fr:'FR-1502',p:['deploy/smart-erp/.env.example','contracts/config.schema.json'],st:'done',o:'dev-ops-01',s0:'2026-11-05 09:00',due:'W2',ev:'commit cbf89a5 (#12) · deploy/smart-erp/.env.example；run 42891323573 红 → #53 恢复',note:'验收通过（S8 原话照录）：不是「62 键通过」，而是「新键未登记就红」——#52 引入 ERP_FILE_INBOX，run 42891323573 当场红，#53 补登记后恢复。这是今夜唯一一次门禁真的拦住东西。关闭人 S8-部署',by:'S8-部署',at:'2026-11-11 04:40',shared:'契约冻结 C11（demo 项 G0）'},
+  {id:'T804',s:'S8',t:'C12 镜像 tag 规则、tar 清单与 RELEASES.md 首登记',ms:'M0-M1',fr:'NFR-D-03',p:['contracts/release/','deploy/smart-erp/RELEASES.md'],st:'done',o:'dev-ops-01',s0:'2026-11-06 10:00',due:'W2',ev:'commit cbf89a5 (#12) · scripts/build-images.sh',note:'验收通过：ERP_IMAGE_TAG 必须完整 40 位 sha，非 40 位拒绝；docker save + sha256sum.txt；RELEASES.md 首登记未做（无真实发布 sha）',by:'集成会话',at:'2026-11-10 23:41',serial:'X5',shared:'契约冻结 C12'},
+  {id:'T805',s:'S8',t:'C13 /healthz、/readyz 与 worker_heartbeat 基线',ms:'M2',fr:'FR-1503',p:['contracts/health/','deploy/smart-erp/compose.health.yml'],st:'todo',due:'W3',shared:'契约冻结 C13',note:'阻塞=缺决策+缺人：C13 契约未冻结，deploy/smart-erp/compose.health.yml 在 main 不存在；healthz 只有 apps/main 与 tools/health.py，无 worker_heartbeat 基线。'},
+  {id:'T806',s:'S8',t:'smart-erp.yml CI：compose config 校验 + 镜像构建 + tar 产物',ms:'M0-M1',fr:'NFR-D-03',p:['.github/workflows/smart-erp.yml'],st:'done',o:'dev-ops-01',s0:'2026-11-07 10:30',due:'W2',ev:'PR #46 已合 → main 9bdc75e；PR #57 已合 → main c3c662b（head 7d27be1）· main push run 42911377900 success · workflow_dispatch run 42911917137 success',note:'验收结论：image-bundle job 已在 main push 真跑（build-images.sh、tar.gz + sha256sum.txt、docker load 计数=4、artifact 留 7 天、不 push）；PR 上 SKIPPED 属设计（只在 main push / workflow_dispatch 跑）。原「job 正确性只能在合入 main 后证明」的风险已由 run 42911377900 关闭。关闭人：集成会话（合并 #57 后核对 run）。'},
+  {id:'T807',s:'S8',t:'tests/deploy 断言：demo 配置不含 pg/redis/doc/minio、缺变量必失败',ms:'M2',fr:'G0 判据',p:['tests/deploy/'],st:'done',due:'W3',ev:'tests/deploy/test_compose_deploy.py（main 3f4e9c0）：demo 档服务清单固定 5 个、FORBIDDEN_SERVICES={pg,postgres,redis,cache,minio}、缺 ERP_IMAGE_TAG 必失败（有 docker 时执行 compose config 正/负向）；#61 e34ac1b 统一 pytest 入口',note:'验收通过（集成核对 main 3f4e9c0）：本卡要求的三类断言均已存在并有真实用例；compose config 两条在有 docker 时执行、无 docker 时静态断言仍生效。原 todo 属滞后。'},
+  {id:'T808',s:'S8',t:'首次并入云上（与 hulkai 并存，W6 验收）',ms:'M2',fr:'M2 验收',p:['deploy/smart-erp/'],st:'todo',due:'W6',note:'门：preflight 通过、两栈零重名、/api/ 行为不变、erp schema 只增不减、OOM 0'},
+  {id:'T809',s:'S8',t:'Nginx /erp/api/ 与 /demo/smart-erp/ 合入后对外验证（W8–W9）',ms:'M3',fr:'M3 验收',p:['tests/deploy/'],st:'block',note:'本地不可用：8088 容器 nginx 不带 /demo/smart-erp/ 前缀（只有香港边缘 hk-web rewrite），该前缀本机 200 只是 SPA 兜底重定向；对外验证依赖 hk-web 变更单，未验（#117 的云上线执行单已把该依赖拆到第 9.2 / 11 节，见 main `6a6b939`）。'},
+  {id:'T810',s:'S8',t:'客户侧 full profile + 离线 tar 包与一次安装（W11–W12）',ms:'M5',fr:'NFR-D-03',p:['scripts/bundle.sh','deploy/smart-erp/'],st:'todo',due:'W11',note:'阻塞=缺人：客户侧 full profile + 离线 tar 包与一次安装未认领；依赖 T811 发布脚本（scripts/bundle.sh 不在 main）。'},
+  {id:'T811',s:'S8',t:'M6 发布执行与共用实例恢复演练',ms:'M6',fr:'M6 验收',p:['scripts/release.sh','scripts/backup-restore.sh'],st:'todo',due:'W12',note:'阻塞=缺人：M6 发布执行与共用实例恢复演练未认领；依赖 T810 离线包与 T808 云上并入。'},
+
+  {id:'T207',s:'S2',t:'基线快照冻结与导出（对账结论不再漂移）',ms:'M4',fr:'FR-1601',p:['domain/recon/baseline.py'],st:'todo',due:'W8',note:'阻塞=缺人：基线快照冻结与导出未认领；依赖 T204 批次状态机（未做）。'},
+  {id:'T407',s:'S4',t:'CFO 审批链与金额阈值（level × amount × action_risk）',ms:'M4',fr:'FR-1403',p:['core/iam/approval_chain.py'],st:'todo',due:'W8',note:'阻塞=缺人+依赖卡：CFO 审批链依赖 T403 审批满足性（已 done）与金额分级字段，chain 模块（core/iam/approval_chain.py）不在 main。'},
+  {id:'T606',s:'S6',t:'P2 对话入口：自然语言建单 + 澄清反问',ms:'M4',fr:'FR-1502',p:['web/pages/assistant/'],st:'todo',due:'W8',note:'阻塞=缺人+缺接口：P2 对话入口依赖建单生产者（B-TICKET-PRODUCER 未拍板），无 POST /v1/tickets 时无法提交。'},
+
+  {id:'T901',s:'S9',t:'主数据体检：只读差异清单 + 单位换算异常检测',ms:'M2',fr:'FR-403',p:['apps/masterdata/'],st:'done',o:'S9-主数据体检',due:'W5',ev:'apps/masterdata/ · tests/masterdata 73 passed · 规则 15 条 · 写回接口 0 个（main 3f4e9c0）',note:'验收通过：只读不写库；输出差异清单供人工确认。路径修正：原登记 domain/masterdata/ + apps/api/routers/masterdata.py 与实际落地不符，以工作树为准改为 apps/masterdata/',by:'开发总监',at:'2026-11-11 00:58'},
+  {id:'T902',s:'S9',t:'CLI 暴露 --duplicate-name-window',ms:'M2',fr:'FR-403',p:['apps/masterdata/'],st:'done',o:'S9-主数据体检',s0:'2026-11-11 03:43',due:'W9',ev:'#47 已合 → main 5ade300；干净检出 3.12.12：tests/masterdata 199 passed、ruff 全绿；CLI 默认回显 128、传 256 回显 256，findings 与 InspectionOptions(256) 逐字节相同',note:'验收通过：clean 5ade300 复核 199 passed；CLI 值与报告 options 回显一致；未改算法与默认值（仍 128）。验收人/关闭人：S9-主数据体检（集成会话指派）',by:'S9-主数据体检',at:'2026-11-11 04:29'},
+
+  {id:'BILLING',s:'API',t:'按结果计费',ms:'M5',fr:'FR-1601',p:['apps/api/','apps/recon/'],st:'doing',o:'API',note:'状态口径（不标已完成）：可算钱、可跨重启，但不可演示完整链路、不可按合同价结算。三项里两项已随 #77 合入（e0bf544）：① SqlReconStore 现有 6 条真实 PG 集成用例，且 CI 有 DSN 所以真跑（api 49 passed / 0 skipped，不再是「41 passed 验 JSON 适配器」）；② runs/{batch_id}、runs/{batch_id}/diffs 已改走持久化投影 0007，重启后不再 404。③ 仍完全未闭合：AUTO_RELEASED 桶在 classify_billing_bucket 里永不产出、billable_lines 实际等于「已匹配行数」、单价来自 ERP_METERING_UNIT_PRICE 而非租户合同价（0008 合同价表被驳回，不入队）。因此「可演示完整链路」仍不成立——② 修的是读路径，不是桶语义。'},
+  {id:'B-METRICS',s:'S7/API',t:'/metrics 挂载（#65 已修：install_metrics 在 apps/ 零命中）',ms:'M5',fr:'NFR-O-01',p:['observability/','apps/api/service.py'],st:'done',by:'集成（合并 #65）',at:'2026-11-11 10:47',note:'#65 已合（36bab07，head fc25141）：`install_metrics` 在 apps/ 接线完成，端点可挂载；冲突解在 `run_recon`，stage 埋点/失败计数与 #77 的持久化投影共存（新增用例 `test_projection_persists_and_persist_failure_is_counted`：丢 `view=` 会 503，冲突 store 触发 409 + `recon_runs_failed_total{stage="persist",code="E-IDEM-CONFLICT"}=1`）。**限定**：`ERP_METRICS_ENABLED` 在 compose 里默认仍为空（关闭），默认起服务时 `/erp/api/metrics` 仍非 200；验收矩阵第 2 行要等 `#67` 按新口径 rebase 合入后才谈得上可执行。告警侧见 B-OBS：11 条规则已进 Alertmanager，receiver=erp-unrouted，无人接收（#120，2026-11-11）。',ev:'#65 36bab07（head fc25141）· main 3f4e9c0 含 install_metrics 接线'},
+  {id:'B-OBS',s:'S7',t:'告警：11 条规则已进 Alertmanager，无人接收（2 条仍注释）',ms:'M5',fr:'NFR-O-01',p:['observability/alerts.rules.yaml'],st:'done',by:'集成（合并 #120）',at:'2026-11-11 15:51',ev:'#120 squash 7ba8bd4cb591b6b4ceaf84f05b4ad11db62c7166 入 main（head f10c988fa97eb88b1f51c99e1700d2acf5a13340）· PR run 42981433166 success · main push run 42982010195 success · 14 files 仅 deploy/、observability/、tests/、core/runtime/scheduler.py 与必要配置',note:'口径（2026-11-11 15:51 起）：**告警已进入 Alertmanager、无人接收**——这条链路到此为止，不得升格为「告警完成」或「通知已送达」。 落地面：full 档新增 prom/prometheus:v2.53.0 与 prom/alertmanager:v0.27.0，规则文件直挂 observability/alerts.rules.yaml；Prometheus 只抓三个「自己 serve /metrics」的进程——api:8010、scheduler:8011、compensation:8013（**是三个，不是四个**）。 结果：**11 条规则真实生效**（新增 SmartErpScrapeTargetDown），另有 **2 条仍是注释**：写失败率、对账运行失败率——理由已从「无采集点」更正为「阈值无基线」，采集点有了，缺的是可依据的基线，不要再按「补采集点」去修。 实测时序 t+0s inactive → t+11s pending → t+83s firing，receiver=erp-unrouted：**告警能响，但没有任何人被通知**；本期不接外部通知渠道（邮件/飞书/短信均未开通），值班靠人看 firing 面板（Prometheus /alerts 或 Alertmanager UI）。「送到 Alertmanager」的证据是 GET /api/v2/alerts 的实际条目，不是 YAML，也不是 Alertmanager 的 sent 状态。 口径更正：原「本期不做 Prometheus 接入」作废；B-SCHED-METRICS 的「scheduler 无抓取面」同时解除。判据保留：写入点存在 ≠ 可观测，解锁新规则仍须回答「哪个进程写指标（文件:行）」与「该进程是否 serve /metrics（挂载点文件:行）」。'},
+  {id:'B-SCHED-METRICS',s:'S7/S8',t:'scheduler 已自行 serve /metrics（8011）',ms:'M5',fr:'NFR-O-01',p:['core/runtime/scheduler.py'],st:'done',by:'集成（合并 #120）',at:'2026-11-11 15:51',ev:'#120 squash 7ba8bd4cb591b6b4ceaf84f05b4ad11db62c7166 入 main · PR run 42981433166 success · main push run 42982010195 success · 新增 core/runtime/metrics_server.py',note:'已随 #120 修复：scheduler 复用 `install_metrics` 在 8011 暴露 `/metrics`（新文件 `core/runtime/metrics_server.py`），compose 给 scheduler `expose: "8011"` 并注入 `ERP_METRICS_ENABLED/PORT/PATH`；Prometheus 以 job `erp-scheduler` 抓 `scheduler:8011`。判读纪律不变：「有采集点」≠「有抓取面」，本条只证明 scheduler 自己有面；另外两个是 api:8010 与 compensation:8013（共三个进程，不是四个）。关闭人：集成会话（合并 #120）。'},
+  {id:'B-ANCHOR',s:'S4',t:'锚点已接线：full/demo 两侧验收门已过，锚点写与不写均实测（已关闭）',ms:'M5',fr:'—',p:['apps/audit/','core/runtime/scheduler.py'],st:'done',by:'集成（关闭 B-ANCHOR）',at:'2026-11-11 16:46',ev:'PR #119 squash 9502d832f0f9082717f2e1ce7f6e100ac48d6343（head 3f086b0）· PR run 42985330162 success · main push run 42985785641 success · 24 files · 验收 9502d83 四镜像（tag 同 sha）：full 3 行 + demo 不写 + 54/0 EXIT=0',note:'**接线已完成**（#119，squash 9502d83 入 main）：`Scheduler.tick` 默认每租户每日固化一条**链位置**锚点（`record_count` / `chain_seq` 前缀，`anchor_date` 仅标签，判据随 #115 `c17939f` 改，跨日时钟回拨不会再误判）；开关 `ERP_AUDIT_ANCHOR`（默认 `1`）、`--no-audit-anchor` / `--audit-anchor`，空值回落默认、非法值直接 `SystemExit`。compose 注入 `${ERP_AUDIT_ANCHOR:-1}`，`.env.example=1`，demo 档 `.env.demo=0` 与 `deploy/smart-erp/env/demo.env=0`，schema 已登记。证据：PG 用例 `test_scheduler_tick_writes_real_anchor_and_survives_append`（锚点 5→6 行、`record_count=2`、`last_hash` 与同租户 `chain_seq` 末行一致、同日重跑幂等、**锚点后继续追加仍判对**）与单测 `test_anchor_after_append_still_verifies`；PR run 42985330162 success、main push run 42985785641 success（10 作业全绿）。**验收结论（main 9502d83 现场构建四镜像，容器 tag 同 sha）**：① 页面侧工单 `TK-202609-0010` 详情显示「审计影像 2 张」「field_diff 齐全」，审计链徽标「完整」，无「审计链校验失败 / 内容与 hash 不一致」；② 锚点**两侧都实测**——full 档（日志 `audit_anchor=True anchor_source=env`）写入 3 行，三租户 `last_hash` 与各自 `chain_seq` 末行 hash 逐条相等（`hash_match=t`、`count_match=t`），后续 tick 行数不变；demo 档（`audit_anchor=False`）在已有 3 行基线上跑多个 tick 行数不变、无锚点日志；③ 验链 `54/0`、`EXIT=0`。**只验 full 会因锚点一定写而看起来必然通过，只验 demo 又会因「不写也对」什么都没证明；同一条开关的两种状态都验过，这条接线才算可信。** 诚实记录：这次验链第一次跑是 `18/2`（另外两套场景没灌），补灌后才是 `54/0`——不是一次就过，以后看到 `18/2` 不要误判成代码回归。云端实机仍未执行，本卡关闭只覆盖演示栈验收，云端另计。'},
+  {id:'B-ANCHOR-TAIL',s:'S4',t:'独立缺陷：锚点校验拿全链尾比对——锚点之后一有追加就必挂（与时钟无关）',ms:'M5',fr:'FR-1307',p:['apps/audit/ledger.py'],st:'done',by:'集成（合并 #115）',at:'2026-11-11 15:13',ev:'#115 squash c17939fa8be9b2f8597098ed373bc88492dc8d13 入 main（head 37ad585）· PR run 42971496267 success · main push run 42976201205 success · 新增 tests/audit/test_chain_monitor.py 与 test_chain_monitor_pg.py，补充 tests/audit/test_ledger.py',note:'原 `verify_against_anchor` 拿**全链尾**与 `anchor.last_hash` 比较：锚点之后只要追加过任何行，比较对象就不再是锚点范围内的末行，**无篡改也会失败**——与时钟回拨无关，是拿错了比较对象（此前锚点校验在真实使用里从未正确过）。现在单独跟踪锚点范围内的末行 `anchored_tail`，只与它比较；锚点之后的行仅要求自身自洽（`prev_hash`/`hash` 连续）。关闭人：集成会话（合并 #115）。'},
+  {id:'A-ASSISTANT',s:'S0/API',t:'助手建议端点 POST /v1/assistant/suggest：LLM + 规则降级已进 main（LLM 未接前端）',ms:'M5',fr:'FR-1502',p:['apps/api/','apps/platform/config.py','contracts/api/'],st:'done',by:'集成（合并 #116）',at:'2026-11-11 15:13',ev:'#116 squash 6fb7b51b2f128fe1c1dd6fd460cdfa30970f5ed9 入 main（head 831cf37）· PR run 42975200340 success · main push run 42976214779 cancelled（被 #117 并发 push 取消，非失败）· tests/api/test_assistant_suggest.py 11 条通过',note:'范围只做「这张工单下一步该怎么处理」。出参 `suggestion` / `reasons[]` / `source`（`llm`/`rule`）/ `model` / `generated_at` / `fallback_reason`。**降级链不返回 5xx**：无密钥 `llm_not_configured`、超时 8s `llm_timeout`、连接失败不重试 `llm_connect_failed`、5xx 重试 1 次 `llm_http_<code>`、输出不可解析 `llm_output_invalid`。**限流**：单实例内存令牌桶，默认每租户 10 次/分钟（`ERP_ASSISTANT_RATE_LIMIT_PER_MINUTE` 可配），超限 429 `E-CONN-RATE_LIMIT`。**字段白名单**：只发本工单本租户的 `ticket_no`/`scene_code`/`state`/`write_level`/`amount`/`touches_fund`/`period`/`systems`/`version`/时间、步骤与待写动作；不发会话令牌、`tenant_id`/`initiator_id`/`business_key`/`org_id`/`object_id`/`idem_key`、审计影像、他人工单。密钥 `repr=False`，日志只打主机名与模型名。实测：`source=llm`、模型 `deepseek-flash`、3153ms。**限定：LLM 未接前端**——`web/` 无业务改动（仅机械重生成 `contract.ts`），工作台助手仍是规则式建议，UI 接入已由 S6 完成并验收（T612，main d5daa6a）。关闭人：集成会话（合并 #116）。'},
+  {id:'L-SILENT-FALLBACK',s:'S0/API',t:'教训（静默降级）：兜底断言把装配缺陷伪装成「上游故障」',ms:'M5',fr:'—',p:['apps/api/assistant.py'],st:'done',by:'集成（合并 #116）',at:'2026-11-11 15:13',ev:'#116 squash 6fb7b51b2f128fe1c1dd6fd460cdfa30970f5ed9 入 main · 回归用例 test_configured_service_builds_http_client',note:'`AssistantService.from_env()` 不创建 `httpx.Client`，`_call` 的 `assert self.client is not None` 失败后被 `except Exception` 兜底成 `llm_error`——表现为「有密钥也永远降级」。首次真实调用 35ms 返回 `source=rule` 才暴露。**教训不是「有个 bug」，而是降级链把装配错误与上游失败压成同一个出口**：① 凡 `except Exception` 兜底，必须把「未装配 / 配置不全」与「上游失败」分开记 outcome；② 必须有一条「已配置却降级」的反向断言（本次补 `test_configured_service_builds_http_client`）；③ 看到 `source=rule` 且密钥齐全，先查装配，不要当网络或模型问题。'},
+  {id:'B-COMP-RUNTIME',s:'S3',t:'P0：补偿执行器（选 B：独立 compensation 容器）——执行器与持久化已交付（#89 / P1–P4），生产者仍未接',ms:'M2',fr:'FR-1105',p:['apps/agents/runtime.py','apps/agents/shell.py','core/runtime/','deploy/smart-erp/docker-compose.yml'],st:'block',note:'**2026-11-11 四段收口（P1 0010 迁移 `fb5e804` → P2 读库 `#95 c0fa577` → P3 写路径事件化 `#96 7fe19aa` → P4 审批落库 + 孤儿巡检 `#97 7517b5d`，每段各自 main push run 绿）**：**现在能做的（执行器 #89、持久化 0010、审批落库 #97、补偿重试 #101、孤儿巡检 #97 均已进主干）**——真实 PostgreSQL 上建单→待审批→审批意见落 `erp.approval_record`→发起人推进执行→换新容器实例读同一库仍能还原 approvals/missing_roles/state/version；工单读写走同一条事件化路径（版本号在端口边界偏移一次：对外 1 / DB 原始 0）。**还不能做的**——只剩一件：**生产者不存在**：没有任何进程把工单写入 `compensation_task`（执行器空转），API 也没有 `POST /v1/tickets`，库里不会自己长出新工单。**总监原话：持久化做完了，但库里依然不会有新工单，因为没有生产者。`B-TICKET-PRODUCER` 仍是这张卡真正的下一步。**\\\\n\\\\n**2026-11-11 口径拆分（#89 合入后）**：`#89`（`0f597b3`）只交付了**执行器**（独立 `compensation` 容器、租约/心跳/attempts/stale 回收/轮询）；**没有任何生产者把工单写入 `compensation_task`**（`TicketRuntime`/`AgentShell` 在生产代码仍零构造）。因此本卡继续 block，**不得读成「补偿已完成」**。持久化侧：P1（0010 迁移）`fb5e804`、P2 读库 `c0fa577`、P3 写路径 `7fe19aa`、P4 审批落库 `7517b5d` 均已入主干——**但都只是前提，生产者仍未接**。事实（基线 45572f7，独立复核）：`TicketRuntime` / `AgentShell` 在生产代码零构造（`git grep "TicketRuntime("` 仅命中 `tests/agents/support.py:201`，`AgentShell(` 仅命中测试）；compose 的 worker/worker-agent/worker-io 全跑 `core.runtime.worker`（`HANDLERS` 仅 `echo`/`sleep`），scheduler 只回收 `erp.job_queue` 过期 running + 可选审计巡检。因此补偿任务的**认领、重试、`compensation_seq`、失败回收当前没有任何进程执行**，租约续期、未解决工单、时钟偏移同属未运行。**方案 B（定案）**：独立 `compensation` 容器（可自 serve `/metrics`、故障域隔离、可独立扩缩；A 无 HTTP 且与 agent/io 混跑，C 在 tick 内跑长任务会丢 scheduler 租约且无 `/metrics`）。卡内三条硬约束：① **生产者口径统一属第二张 PR**——API 补偿按钮现在是 `RollbackService` 同步回滚且不回写 `ticket_step.state`，目标态「入队 + 202 + 轮询」不要塞进本卡；② discovery 必须以 `compensation_task` 有行为准，**不得按 `ticket.state=补偿中` 扫描**（同步回滚不回写步骤状态，按状态扫会把已回滚的工单再补一遍）；③ 上线前必须补两处续期：补偿执行期间续 `heartbeat_at`（现只写一次、stale 60s）、循环中续 `erp.ticket` 租约（现 30s 不续），否则真实 HTTP 时延一过 60 秒行会被别的实例判死重认领。**验收只认容器外证据**：真实容器 + 真实 connector-gw 的 `:undo` 日志条数、外部 psql 观察 seq 3→2→1、`docker kill -9` 后重认领、容器外 curl `/metrics` 有变化；**pytest 通过不算验收**。 **2026-11-11 复核 main bb253a30**：迁移 `0011_job_lease_gen` 已随 #103 合入（rebase 前 head `886081e` → rebase 后 `3c15b44`，squash 合并 `bb253a30`；PR run `42954463860` success，`tests/agents` 129 passed / 0 skipped，`tests/platform` 迁移往返真跑）；「还不能做的」只剩生产者不存在一件。'},
+  {id:'B-COMPOSE-METRICS',s:'S8',t:'compose 环境变量必须被代码读取：门禁已进主干，15 条存量已归零（待评审）',ms:'M5',fr:'NFR-O-01',p:['deploy/smart-erp/docker-compose.yml','contracts/compose_env_exceptions.json','core/runtime/scheduler.py'],st:'review',note:'**2026-11-11 17:07 归零（待评审）**：15 条例外全部处置（4 接线 / 11 删除 + 3 条 env-only 预留），MAX_COMPOSE_ENV_EXCEPTIONS=15→0；证据见 ledger/S8.jsonl seq 113-115。标题里的「15 条装饰」是建卡时读数。\n\n新规矩：**compose 里出现的每个环境变量，代码必须真的读取；读不到的删掉。** 现状（2026-11-11）：① `ERP_METRICS_ENABLED`/`ERP_METRICS_PATH` 已由 #67（`1ef609c`）在 compose 下发、schema 改 `scope: compose`、`services: ["api"]`——**转发 = 开关可达；不转发 = 开关是假的**；`prod.env` 不登记该键，默认不挂一个没人抓的端点。② `ERP_SCHEDULER_TICK_SECONDS` 已由 #94 接线并合入 `ffe5f35`（head `85416ab`）：命令行 > 环境变量 > 默认 5s，非法值启动即失败并带键名，启动日志打 `tick_seconds=… source=… lease=…s effective=…s`。③ 一致性用例与例外表进主干（`MAX_COMPOSE_ENV_EXCEPTIONS=15`，必须**恰好等于**，修一条同步下调）。**读数：compose 环境变量 39 → 37（删掉 `ERP_WORKER_QUEUES`/`ERP_WORKER_CONCURRENCY` 两份无读取点的环境副本），未读数 19 → 16 → 15，仍有 41%（15/37）是装饰。** 例外归属：`ERP_CONNECTOR_GW_URL`（S1）、`ERP_DOC_SERVICE_URL`、`ERP_LLM_*` 四条、`ERP_GW_*` 两条、`ERP_CONFIG_DIR` 归对应模块落地时的流接线；`ERP_OBJECT_STORE_*` 与 `ERP_S3_*` 共 6 条见 `B-OBJECT-STORE` 待决；`ERP_HEARTBEAT_INTERVAL_SECONDS` 已由 #98（`c778687`）接线并从例外表删除（见 `B-HEARTBEAT-ENV`）。**例外表只装「将来会接」，不装「也许某天会想要」。**'},
+  {id:'B-HEARTBEAT-ENV',s:'S8/core.runtime',t:'ERP_HEARTBEAT_INTERVAL_SECONDS：已接线（命令行 > 环境变量 > 默认 10s），并加 heartbeat ≤ lease/2 硬闸',ms:'M5',fr:'NFR-O-01',p:['deploy/smart-erp/docker-compose.yml','core/runtime/worker.py'],st:'done',by:'S8（提交）/集成（合并 #98）',at:'2026-11-11 10:41',ev:'PR #98（head 8505535，run 42946785729 success）；main push run 42947226854 success（sha c778687）；用例 10 条（含边界 30/60 放行、300/60 拒绝、租约调小后报错指向 lease/2、启动日志三值对账）；本地 tests/agents/test_worker_heartbeat_env.py 10 passed。',note:'**2026-11-11 已合入（#98 `c778687`）**：命令行 > `ERP_HEARTBEAT_INTERVAL_SECONDS` > 默认 10s；空值/未设置回落默认，非数字/≤0 启动即失败并带键名。硬闸 `heartbeat_seconds > lease/2` 拒绝启动（30/60 放行、300/60 起不来）；闸门报错写全两侧来源与算术（上限来自 lease×0.5、heartbeat 来自哪个键/参数），并明说「调小租约也会让原合法的 heartbeat 变非法」。例外表删除该键，`MAX_COMPOSE_ENV_EXCEPTIONS` 16→15。\n\n**口径（勿再把两件事合成一件）**：任务租约 60s、续约固定 `lease/3 = 20s`，与心跳值**无关**；心跳只控制存活记录鲜度与 `reclaim_stale` 触发频率，**不续任务租约**。因此调大心跳不会让活着的 worker 被判死或任务二次认领（那是续约的职责）；心跳的真实含义是**故障恢复延迟**——死掉的 worker 手上的任务最多等一个心跳间隔才被回收。\n\n**纠正留底（谁纠正了谁）**：2026-11-11，总监上一轮把「心跳间隔」与「任务租约判活」合成了一件事，**S8 用代码驳回**：`core/runtime/worker.py` 续约是 `asyncio.wait(..., timeout=lease_seconds/3)`，与心跳无关。以后同类判断先读续约逻辑，再谈心跳。\n\n**原始问题（保留）**：compose 默认 30，而 `_parse_args` 只认 `--heartbeat-seconds`（默认 10s），该变量从未被读取——#98 已接线并从例外表删除。'},
+  {id:'B-OBJECT-STORE',s:'产品/S8',t:'待决：本产品要不要对象存储/S3 后端？不要则 6 条 ERP_OBJECT_STORE_*/ERP_S3_* 应从 compose 删除',ms:'M5',fr:'—',p:['deploy/smart-erp/docker-compose.yml','contracts/compose_env_exceptions.json'],st:'todo',note:'`ERP_OBJECT_STORE_DRIVER` / `ERP_OBJECT_STORE_PATH` / `ERP_S3_ENDPOINT` / `ERP_S3_BUCKET` / `ERP_S3_ACCESS_KEY` / `ERP_S3_SECRET_KEY` 共 6 条，当前只在例外表里、owner 记为「未认领/apps.platform」。**这是产品决策，不是接线排期**：① 若要对象存储/S3 后端——归 S4，并写清用途（审计影像落盘？连接器产物？备份？）与部署边界；② **若不要——这 6 条从 compose 删除，而不是留在例外表里**。例外表只装「将来会接」，不装「也许某天会想要」。未决期间不得把它们当作已规划能力对外描述。  阻塞=缺决策（产品/总监）：要或不要对象存储未拍板；未决期间 6 条仍在例外表。'},
+  {id:'B-AUDIT-ORPHAN',s:'S3',t:'孤儿 audit_image_id：步骤指向不存在的审计影像——PR4 已补巡检并入主干',ms:'M2',fr:'FR-1105',p:['apps/api/service.py','apps/api/ticket_sql.py','db/migrations/versions/0010_ticket_api_persistence.py'],st:'done',by:'集成（合并 #97）',at:'2026-11-11 10:19',ev:'PR #97 run 42944169015 success（head 9a6470b）；main push run 42944651429 success（sha 7517b5d）；用例 test_orphan_audit_image_scan_reports_count_samples_metric_and_log 断言孤儿数、样本（最小 step_id）、指标渲染与 WARNING 调用参数。',note:'**2026-11-11 已合入（#97 `7517b5d`）**：`apps/api/audit_integrity.py` 默认 900s、启动 5s 先跑一次；一条 SQL 用 CTE 同时给孤儿数与样本（上限 20）；指标 `smart_erp_audit_orphan_steps` 进 `/metrics`，孤儿存在时打 `WARNING`（`erp.audit.integrity`，无 handler 时经 lastResort 写 stderr，`docker logs` 可见）。**已知读数提醒：API 侧审计影像仍在进程内，`ticket_step.audit_image_id` 出生即悬空，因此巡检第一次运行不会是 0——那是真实缺陷，不是误报。**\n\n**2026-11-11 历史核**：`ticket_step.audit_image_id` 无外键（两段提交第一段可能先写步骤、影像后落）；仓库内**没有任何巡检读取该列去比对 `audit_image`**——`grep audit_image_id` 只有写入点 `apps/api/service.py:477`、读路径 `apps/api/ticket_sql.py` 的输出与模型/迁移定义；`grep orphan` 无相关实现。后果：影像未落或被清理后，工单详情与审计链仍显示一个 id，**链路看起来完整、实际指向不存在的外部证据**——与今晚「链只在纸面上连通」是同一族缺陷，不是「少一个外键」这种形式问题。判定口径（总监定，非二选一）：S3 在 PR3 补巡检——① 判定 SQL：`ticket_step.audit_image_id` 指向不存在的 `audit_image` 行（含跨租户指向）；② 巡检频率；③ 告警落点（指标/日志/告警）。在补上之前，不得对外声称「审计影像可追溯」。'},
+  {id:'B-LEASE-FLAKE',s:'S3',t:'test_scheduler_lease_is_single_point_and_takeover 在负载下会抖：要做确定，不接受 rerun',ms:'M2',fr:'NFR-R-02',p:['core/runtime/scheduler.py','tests/agents/test_worker_runtime.py'],st:'done',by:'S3（提交）/集成（合并 #99）',at:'2026-11-11 10:53',ev:'PR #99（head 7dab58f）run 42948221900 success；main push run 42948597687 success（sha dd7b29a）；2 文件 +23/−6；目标用例 30 次 0 失败、tests/agents 连跑 3 次 105 passed（S3 证据，已抄进 PR 描述）。',note:'**严重度（2026-11-11 总监标注）：今晚发现的最严重行为缺陷之一**——不是单纯的用例抖动：一次时钟回拨就能让已释放的租约失去可接管性（`release()` 写 `owner=NULL, expires_at=now()`，而接管判定没把 `owner IS NULL` 当作可接管）。\n\n**2026-11-11 已合入（#99 `dd7b29a`）**：200ms 是测试加速参数、不是产品行为（生产 lease 30s / tick 5s）；测试改 lease 300s + 显式 expires_at=infinity / -infinity，不靠真实等待；产品 _ACQUIRE_SQL 补 OR l.owner IS NULL——release 后接管不要求 now() 越过 expires_at。与补偿 retry_in<=0 同族（都把时钟当判据），是系统性问题不是两条独立 flake。验证：目标用例 30 次 0 失败、全量 tests/agents 连跑 3 次 105 passed、0.5s 间隔 + 1.4s 回拨模拟全过。原记录：全量套件里挂、单跑与复跑都过，理由是 200ms 租约在容器负载下抖动。**卡的要求是「把它做确定」**：注入可控时钟（或把判定改成不依赖真实 wall-clock 的竞态顺序），**不接受 retry / rerun / 加大超时作为解法**。理由写进本卡：这条用例测的是**租约这个安全机制**，随机红会训练所有人忽略红，等于把安全网变成噪声源。档期不插队：P0 之后再做。'},
+  {id:'B-S8-EVIDENCE-FLAKE',s:'S3',t:'两张时钟用例已固定：连跑 25 轮 0 失败（已关闭）；logger 类已源头根治，不属此家族',ms:'M5',fr:'NFR-O-01',p:['tests/agents/test_s8_evidence.py','tests/agents/test_worker_runtime.py'],st:'done',by:'集成（关闭 B-S8-EVIDENCE-FLAKE）',at:'2026-11-11 16:38',note:'**验收通过并关闭（main 9502d83 复核）**：`tests/agents/test_s8_evidence.py` 与 `tests/agents/test_worker_runtime.py` 两张时钟类用例已改为显式状态 / 可控时钟（不再用真实 sleep 表达「未过期 / 已过期」），squash `6a6b939` 入 main，main push run `42976227305` success。**关闭依据：两张用例连跑 25 轮、失败 0（提交 6a6b939 记录，未加重试）**；main 9502d83 复核：`test_worker_runtime` 健康检查用例已改用「infinity / -infinity」，`s8_evidence` 的 `scheduler_single_point` 已删 `sleep(3)/sleep(6)` 改为轮询 + 60s 租约。口径是「连跑 25 轮 0 失败」，不是「已修复」的无限期承诺。另记：该分支 head `07bbc691` 此前无 workflow run——**没开 PR 就是没跑过 CI，不能拿「推送成功」当验证**，本次 PR 才是首跑。A 类两处已多轮复跑（25 轮 0 失败）并出验收结论，已关闭。  **2026-11-11 观测**：在基线 `7517b5d` 上 **3 次运行复现 1 次**（与 `fix/b-lease-flake` 的改动无关）。形态是 4s 租约 + `sleep(3)` + `sleep(6)` 的子进程时序——用真实时间表达「未过期 / 已过期」，机器一慢或时钟一跳就翻。\\n\\n**本卡收拢清单（按类分开，别混）**\\n\\n**A. 时钟 / 真实时间（同一个根，仍挂着）**\\n1. `tests/agents/test_s8_evidence.py::test_s8_evidence_scenarios`（`scenario=scheduler_single_point`）：基线 `7517b5d` 上 **3 次运行复现 1 次**；形态是 4s 租约 + `sleep(3)` + `sleep(6)` 的子进程时序。\\n2. `tests/agents/test_worker_runtime.py::test_health_scheduler_reports_expired_lease`（0.1s 租约 + `sleep(0.15)`）：三轮全量里抖红 1 次，单文件 9 passed。这是同一根的**第四个落点**——按「同一根、第四个落点」记录，**不单独建卡**。\\n\\n同族另三处已修：补偿 `retry_in <= 0`（#101 `1f26966`，退避中保持「补偿中」）、`compensation_task` 的 `clock_timestamp()` 回拨（见台账家族事实）、租约「释放后立即接管」（#99 `dd7b29a`：`OR l.owner IS NULL` + 测试写 `infinity` / `-infinity`）。A 类两处均已按上述方式固定并复跑（25 轮 0 失败），故关闭本卡。另：`test_job_queue_fence.py` 的时序抖动与本卡改动无关，单独连跑 5 次、全量 2 次均通过，不要再当新问题重查。\\n\\n**B. logger 类（已源头根治，不属时钟家族；列全只为不被误认成同族）**\\n`tests/agents/test_scheduler_tick_env.py`（#94）与 `tests/agents/test_worker_heartbeat_env.py`（#98）的 `no logs ...` 曾用「用例内保存/还原 `logger.disabled`」的 workaround 绕开；根因是 alembic `fileConfig(disable_existing_loggers=True)` 把导入期已存在的 `erp.*` logger 置为 disabled。已由 `fix/s8-alembic-disable-existing-loggers @362df0d` 在 `db/migrations/env.py` 源头修复并删掉两处 workaround——**这一类已经根治，不要再当成本家族的落点**。\\n\\n**判断**：A 类不是新缺陷，是「把时钟/真实时间当可信输入」家族的遗留落点。\\n\\n**为什么没在 #99 顺手修**：那个 PR 只动 `core/runtime/scheduler.py` + `tests/agents/test_worker_runtime.py`——S3 判断「别顺手改别的」是对的；本卡单独记，不搭车。\\n\\n**修法方向（同族一致）**：断言改成显式状态或注入可控时钟（库里写 `infinity` / `-infinity`），**不接受加大 `sleep` 数值或 rerun**。理由同 `B-LEASE-FLAKE`：用随机红训练大家忽略红，等于把安全网变成噪声源。'},
+  {id:'B-IMAGE-PKG',s:'S8',t:'main ≥ 45572f7 构建的 app 镜像起不来（漏 observability 包）',ms:'M5',fr:'NFR-D-01',p:['pyproject.toml','projects/smart-ERP/docker/api.Dockerfile'],st:'done',by:'集成（合并 #82）',at:'2026-11-11 07:33',ev:'漏包证据 run 42920934799 @8a96e24 exited 1；修复 157929d→2ad1e1d 已合 9079728；main push run 42923136957 全绿，app 镜像 job 构建成功并在 deploy-static 真容器用例中起容器通过（4 passed）。',note:'事实：`apps.main` 导入期经 `apps/api/container.py:34` 执行 `from observability.metrics import MetricsRegistry`，而 `[tool.setuptools.packages.find] include` 仍是手写的 `["apps*","core*","tools*"]`。镜像 `state=exited exit=1`（run 42920934799，head 8a96e24）。**任何从 main ≥ 45572f7 构建的 app 镜像都起不来**；v0.2.0 的 e1926cf 镜像不含该导入、不受影响。**旧镜像上的绿不能当新镜像的证据；新镜像起不来也不等于 nginx 缺陷。** 修复：PR #82 `157929d`（补 `observability*` + 「磁盘一等包反查 find_packages」用例 + Dockerfile 输入清单 + 失败时输出 stdout/stderr）→ `2ad1e1d`（镜像构建后立即导入入口模块，漏包在 build 阶段即红），**已合 `9079728`**。对外影响面已写入 PR #85（RELEASES.md 分条记，不合并，含「补偿/回滚无执行进程」第三条）。'},
+  {id:'B-BACKUP',s:'S8',t:'备份/恢复/升级脚本：单机文件级备份可恢复已实测（56/56 表、alembic 0011、触发器生效）——已关闭',ms:'M5',fr:'NFR-D-03',p:['scripts/backup-smart-erp.sh','scripts/restore-smart-erp.sh','scripts/upgrade-smart-erp.sh'],st:'done',by:'集成（关闭 B-BACKUP）',at:'2026-11-11 16:55',ev:'#117 squash 6a6b9392139cd2199facbeb5aaf3f8689cac7adc 入 main · 早期演练记录 deploy/smart-erp/CLOUD-HULKAI-GZ-ORDER.md 附录 A（main 可见）：对象 44=44、alembic 0011、行数 16/20/25/3/18 · 2026-11-11 销毁源库演练：隔离临时库 pg_dump -Fc → DROP DATABASE（前后库列表证实已消失）→ 新建库恢复 → 56/56 表行数一致、alembic current=0011_job_lease_gen、11 个 append-only/guard 触发器实测拒 UPDATE/DELETE、验链 54/0 EXIT=0',note:'**结论：具备单机文件级备份可恢复。** 证据（2026-11-11 隔离临时库演练）：`pg_dump -Fc` 做文件级备份 → 源库 `DROP DATABASE`（前后库列表证明确实没了）→ 新建库恢复 → 56/56 表行数一致、`alembic current = 0011_job_lease_gen`、11 个 append-only / guard 触发器生效（实测 UPDATE/DELETE 都被拒）、恢复后验链 `54/0 EXIT=0`。**未验证（逐条，缺一不可）**：① 云端/异地副本；② 备份文件损坏或丢失（含校验与重试）；③ 持续归档 / PITR；④ RPO / RTO；⑤ 对象卷；⑥ 跨大版本升级；⑦ 大规模数据量；⑧ 非超级用户完整恢复路径。**验收范围只能随证据扩大而收紧，不能因为关了卡就收窄**——后两条由 S8 主动补充。因此对外只能说「具备单机文件级备份可恢复」，不得写成「灾备已就绪」，也不得写成「已在生产/云端验证」。'},
+  {id:'B-RESTORE-NO-DB',s:'S8',t:'缺陷：目标库不存在时恢复脚本裸 FATAL、EXIT=2，与参数错误码撞车',ms:'M5',fr:'—',p:['scripts/restore-smart-erp.sh'],st:'done',by:'开发总监（代项目负责人）',at:'2026-11-11 17:41',ev:'关闭依据（main c8935dc；scripts/restore-smart-erp.sh 的 blob 10c52eba 与 72769cf 逐字节相同，故 72769cf 上的实测对 c8935dc 同样成立）：库名红线 aps_prod → EXIT=3；目标库不存在且未 --create-db → EXIT=6，提示含可照抄的 CREATE DATABASE ... OWNER ...，无裸 FATAL；空库 + --create-db --create-db-owner erp_migrator → EXIT=0（erp 表 23、alembic 0011_job_lease_gen、对象一致性 44/44）。原 #124（head 59b1c9b，base 9502d83）：隔离临时库复现 → 修复 → 同一命令复验；退出码 3=库名红线 / 4=仅非空且未 --force / 5=对象集合不一致 / 6=目标库不存在 / 7=建库失败。',note:'**关闭（2026-11-11，开发总监代项目负责人）**：目标库缺失不再以裸 FATAL/EXIT=2 撞参数错误码，退出码 3/4/5/6/7 各归其位，且可一条命令（--create-db --create-db-owner）闭环；注释与代码同步（注释写 3、代码用 4 的不一致已消除）。'},
+  {id:'B-RESTORE-CHECK-UNREACHABLE',s:'S8',t:'缺陷：一致性校验对 erp schema 残留不可达，public 残留却能抓到（EXIT=5）',ms:'M5',fr:'—',p:['scripts/restore-smart-erp.sh'],st:'done',by:'开发总监（代项目负责人）',at:'2026-11-11 17:41',ev:'关闭依据（main c8935dc，脚本 blob 与 72769cf 相同）：目标库仅残留 erp.stale_leftover、加 --force → EXIT=5，输出列出 + TABLE erp.stale_leftover 且没有 + pg_restore（在恢复动作之前拦住）；空库 + --create-db --create-db-owner → EXIT=0、对象一致性 44/44；后置校验保留为兜底。原 #124（head 59b1c9b，base 9502d83）：隔离临时库复现 → 修复 → 同一命令复验。',note:'**关闭（2026-11-11，开发总监代项目负责人）**：erp schema 残留从「不可达」变成「恢复前拦住」，同一件事不再 public 能抓、erp 抓不到。'},
+  {id:'B-METERING-LABEL',s:'API/S6',t:'计量文案不一致：页面「算式」把计费行数写成「有效对账行数」',ms:'M5',fr:'FR-1601',p:['web/src/pages/','apps/api/','contracts/api/'],st:'done',by:'开发总监（代项目负责人）',at:'2026-11-11 17:41',ev:'关闭依据（main c8935dc）：web/src 全量搜索旧错写公式「有效对账行数 = 自动放行 − 已确认错放行」命中 0；calculation 四步（总对账行 / 有效对账行 / 计费行数 / 本期金额）与页面标签一致；main push run c8935dc 的「前端契约 / 测试 / 构建」success（新增用例断言有效 2 ≠ 计费 1）。#127（head 01b3dbe，base main 54c8dae）已 squash 合入 c8935dc，4 文件 +82/−36，仅 web/ 与 tests/web/（与 #125 迁移改动无交集）。',note:'**关闭（2026-11-11，开发总监代项目负责人）**：页面把计费单元写成「计费行数（billable 桶、上界）」，不再与「有效对账行（billable + auto_released）」互相当代称，并与服务端口径一致。口径：有效对账行 = billable + auto_released；计费行数 = billable 且为上界（扣减源未接入按 0 扣减）。'},
+  {id:'B-RESUME-NO-ENTRY',s:'S3',t:'待决策：无系统级续跑入口 + 执行计划不持久化',ms:'M5',fr:'FR-1101',p:['apps/agents/runtime.py','core/runtime/scheduler.py','db/migrations/'],st:'block',by:'集成（登记，待决策）',at:'2026-11-11 17:15',ev:'PR #126 结论「部分成立」：运行时级 4 条用例通过；HANDLERS 仅 echo/sleep，无扫描「执行中」工单的调度入口；ticket_step 只存 request_snapshot',note:'**待决策，不自行开做**：这与「建单生产者」是同一类问题——生产者在运行时缺位，消费者（调度入口）也缺位。要落地自动续跑，必须先定：① 谁扫描「执行中」工单（scheduler 新 job 还是独立进程）；② 执行计划是否落库（现只存 request_snapshot，重启后必须由调用方重给 steps）；③ 重启后由谁重新提交计划。决策前不动代码。'},
+  {id:'B-LEASE-FENCE',s:'S3',t:'缺陷：runtime 忽略 renew() 的 False，且无代次围栏——存在 at-least-once 双写窗口',ms:'M5',fr:'FR-1101',p:['apps/agents/runtime.py','core/runtime/','db/migrations/versions/0011_job_lease_gen.py'],st:'todo',note:'**事实**：runtime 调用 renew() 但忽略其返回的 False，且工单租约没有代次围栏（0011 的 lease_gen 只覆盖 job_queue，不覆盖工单租约）。租约过期后旧 worker 仍可能继续执行并写入。**后果**：同一工单步骤可能被两个 worker 各写一次，外部系统可能收到两次同样的写入（at-least-once 双写窗口）。**需修**：① renew 返回 False 时立即停止执行；② 工单租约引入代次（lease_gen）并在写入时校验；③ 补一条「租约过期后旧 worker 写入被拒」的用例。**为什么现在算缺陷**：这不是理论并发，是租约过期这一必然事件下的静默双写。'},
+  {id:'B-RESUME-NO-PLAN-STORE',s:'S3',t:'执行计划已落库（#131 待评审）：重启后无 steps 也能续跑',ms:'M5',fr:'FR-1101',p:['apps/agents/runtime.py','apps/agents/store.py','db/migrations/versions/0013_ticket_plan_step.py'],st:'review',by:'集成会话（提交评审，2026-11-11 18:12）',at:'2026-11-11 18:12',ev:'PR #131（`feat/b-resume-plan-store @ 0dee8b2`）squash 合入 main `f367027`（base `8f6afb1`，CI 全绿）。合前核：分支只有单头 `0013_ticket_plan_step`、`down_revision=0012_config_change_chain`、全仓唯一 0013；真 PG（s4-pg 临时库 `smart_erp_mv_plan`）空库 `alembic upgrade head` 直上 0013；`erp_app` 实测 `SELECT=t INSERT=t UPDATE=f DELETE=f TRUNCATE=f`，`SET ROLE erp_app` 执行 UPDATE → permission denied，INSERT/SELECT 实跑成功。合并后 main：`alembic heads` 单头 0013、`tests/agents` 142 passed / 0 failed / 76 skipped、`tests/deploy` 189 passed / 4 skipped。',note:'**状态（2026-11-11）：实现已合入 main `f367027`，转待评审，不直接关闭**（按规约需验收结论与关闭人）。\n\n**缺口（原）**：执行计划（steps 本体）不落库，ticket_step 只存 request_snapshot；重启后必须由调用方重放同样的 steps。**本轮实现**：新增 `erp.ticket_plan_step`（0013），执行前整份计划按 step_no 落库；`resume()` 计划从库读、动作等级与 verify 从代码 `ActionRegistry` 取，不接收 steps。\n\n**有意取舍**：计划表只 INSERT/SELECT 且一次性定稿，换计划必须换工单（`save_plan` 比对签名，不一致直接拒绝）；`0013` 之前的存量工单没有计划行，`resume()` 显式抛 `RuntimeGuardError`，需调用方用 `execute(steps=...)` 补落一次计划。\n\n**待评审要验的**：系统级自动续跑仍不成立——本卡只解决「已知工单在无 steps 时能续跑」，扫描执行中工单并自动调度的入口仍见 `B-RESUME-NO-ENTRY`（待决策）。'},
+{id:'B-COMP-NO-EVENT',s:'S3',t:'缺陷：补偿路径不写 ticket_event，回滚在审计里查不到',ms:'M5',fr:'—',p:['apps/agents/compensation_worker.py','apps/platform/policy/gateway.py','apps/agents/store.py'],st:'todo',by:'集成（登记）',at:'2026-11-11 18:14',ev:'S4 在复核写路径 PR #130 时指出；2026-11-11 登记。同步手动补偿入口打开后，补偿动作会真实执行（删除草稿），但 `ticket_event` 里没有对应的补偿事件。',note:'**缺口一（本卡主项）**：补偿路径不写 `ticket_event`。同步手动补偿会真实执行（删除草稿），但审计链上查不到「谁、何时、为什么冲销了哪一步」。\n\n**缺口二（同一块空白，不拆开轻描淡写）**：异步补偿 worker 直接 `connector.compensate` → `transport.delete_draft`，不经 `WriteGateway`、不写审计影像，只记一行补偿。这是既有实现、非本轮引入，但和缺口一同属「补偿不进事件链 / 不进审计」这一块空白。\n\n**为什么单独立卡**：它跟「补偿能不能跑通」是两件事。动作跑得通、审计里是空的，而对外最核心的承诺是审计可回溯；不要并进写路径 PR 当作已解决。\n\n**影响**：演示里跑完「写 → 删草稿 → 桩上查到冲销」之后，不能声称回滚可审计；客户若追问「这次冲销在审计里怎么查」，目前查不到。\n\n**验证方式**：手动补偿执行后查 `ticket_event`，断言存在补偿事件且能关联到被补偿的 step 与 `fail_code`（当前必然失败）；异步 worker 侧断言 `WriteGateway` 被执行、审计影像存在。\n\n**文档口径（S4 记）**：今后「回滚只能经 `WriteGateway`」必须带范围——同步补偿才算，异步 worker 不算；S4 正在改 permission-matrix。\n\n**归属**：代码落在 `apps/agents`（补偿执行器）与 `apps/platform/policy`（网关），归 S3；审计判据由 S4 复核。'},
+  {id:'B-DB-CONN-BUDGET',s:'S8',t:'缺陷：连接预算贴着角色上限，池高水位只增不减',ms:'M5',fr:'—',p:['deploy/smart-erp/.env.demo','apps/api/','db/'],st:'todo',by:'集成（登记）',at:'2026-11-11 18:20',ev:'2026-11-11 实测（s8-demo-pg，erp_app 角色上限 20）：修前空载 19/20、负载峰值 20/20，150 次请求 42 次 500（too many connections for role "erp_app"）；修后（api ERP_DB_MAX_OVERFLOW=0）空载 10/20、峰值 14/20、150 次全 200。PR #129（`fix/s8-db-pool-budget @ 05eb1e9`）squash 合入 main `cd0d4f7`：compose 注入改回 `${ERP_DB_MAX_OVERFLOW:-0}`（键保留可调、默认 0），`contracts/config.schema.json` 的 `defaultsByService.api` 同步为 "0"，RUNBOOK 补连接预算口径。main 复验：`validate_config_schema --all` → PASS 79 个键 · compose 覆盖一致；`tests/deploy` 189 passed / 4 skipped。',note:'**残余风险（未消除，卡不关）**：连接数同进程内只增不减——压完停 14 且 30 秒不回落，重启 api 才回到 10；属池高水位，有上限但会累积到历史峰值。**理论缺口**：api 单进程 6 个引擎 × pool_size=4 = 24，仍高于角色上限 20；本轮只是把 overflow 默认改成 0，把峰值从 20 压到 14，不是把缺口补上。**影响范围**：不影响当前单 api 演示；影响多副本 / 更大并发。**验证方式**：并发压测 + 观察峰值是否随轮次单调上升（多轮后仍不回落即复现）。**合入状态（2026-11-11）**：compose 注入已改为默认 0 且键保留可调，已在 main `cd0d4f7`；本卡记录的是残余风险，合入不关闭。'},
+{id:'B-RECON-WIRING-503',s:'S2',t:'已随 #130 的连接器装配消失：对账批次入口曾 46/46 返回 503',ms:'M5',fr:'FR-0901',p:['apps/api/routes/recon.py','apps/recon/engine.py','deploy/smart-erp/'],st:'review',by:'集成（登记）',at:'2026-11-11 19:10',ev:'历史：2026-11-11 `POST /v1/recon/runs` 46 次请求 46 次 503（`code=E-CONN-UNAVAILABLE`、`stage=input`），`recon_batches_total` 三个 api 进程全 absent，demo 栈同样 503。修复：#130（main `995c344`）把连接器装配进 API 进程后消失。S2 在 `995c344` 上实测：内联 dataset 打 `POST /v1/recon/runs` 返回 201、`batch_id=3a3f8c1a-b0d2-4378-a0b1-9af7dda01eda`、`diff_count=1`、`diff_amount=5.0000`；库里 `created_by` 是 demo 用户、`created_at` 与响应一致（种子 9 条全是 `2026-10-10` / `aaaaaaaa`），证明不是种子灌入。',note:'**状态口径**：原描述的「503、引擎根本没启动」已是历史，本卡转待评审；关不关由关闭人给验收结论，合并不等于关闭。\n\n**仍成立的部分已拆出**：真正还缺的是对账输入路径只有请求内联 dataset，见 `B-RECON-INPUT-ONLY`（功能开发未做，不是 bug）。\n\n**与 `B-GW-NOCALLER` 分开记**：那条讲「`connector-gw` 独立进程没有调用方」；本条讲「对账入口拿不到输入」，两件事不合并。\n\n**口径提醒**：`ERP_CONNECTOR_GW_URL` 已作为死变量删除，不要再写成修复方法。\n\n**验证方式**：跑出一个非种子真实批次（已达成）；关闭前再由关闭人确认「上传/输入 → 批次 → 匹配/归因」整链可重复。'},
+{id:'B-RECON-PERF-N2',s:'S2',t:'性能：对账引擎 O(n²) 全量打分，十万行 2380s（数字不得外报）',ms:'M5',fr:'—',p:['apps/recon/matching.py','apps/recon/engine.py','db/'],st:'todo',by:'集成（登记）',at:'2026-11-11 18:35',ev:'2026-11-11 基线（单机、真实 PG15、单 worker，仅服务端一段，不含网络与上传）：1 万行 44.4s / 5 万行 674.3s / 10 万行 2380.1s；引擎占比 65% → 89% → 95.5%。',note:'**瓶颈**：`apps/recon/matching.py` 每行都 `enumerate(our_lines)` 全量打分，即 O(n²)；落库为逐行 INSERT。规模翻倍时耗时约 4 倍增长，与二次复杂度吻合。\n\n**⛔ 数字口径**：上述数字**不得对外引用**。单机 + 单 worker 的实验室数据，不是客户环境承诺；必须按 4C4G 目标环境重测后才可用于对外材料。对客户的标准回答是：「十万行当前不可接受，瓶颈已定位」。\n\n**验证方式**：同机、同数据、同 worker 配置做三档改前/改后对照（1 万 / 5 万 / 10 万），同时验证分桶/索引优化**不改变匹配结果**（与基线逐行 diff 一致）。'},
+  {id:'B-DEPLOY',s:'S8',t:'可起性：web→api 全 404（nginx 语义）＋ 新镜像漏包起不来',ms:'M5',fr:'NFR-D-01',p:['deploy/smart-erp/web-nginx.conf','deploy/smart-erp/compose.yaml','pyproject.toml'],st:'done',by:'集成（合并 #82）',at:'2026-11-11 07:33',ev:'main push run 42923136957 @9079728：部署面静态校验 job 130202730423 success；默认一轮 62 passed / 4 skipped（真容器默认跳过），随后同一 job 定向调用 `ERP_NGINX_E2E=1 ERP_NGINX_E2E_API_IMAGE=smart-erp/app:ci-nginx-e2e ERP_NGINX_E2E_WEB_IMAGE=smart-erp/web:ci-nginx-e2e pytest tests/deploy/test_nginx_runtime.py -q -o addopts=""` → **4 passed in 3.17s**，镜像由 CI 构建。· #117 squash 6a6b9392139cd2199facbeb5aaf3f8689cac7adc 入 main（main push run 42976227305 success）',note:'**两件事分开记，别互相掩盖**（PR #82 同时承载）：① **nginx 语义**——变量式 `proxy_pass` 带 URI 时 nginx 不做 location 前缀替换，`/erp/api/*` 被压成 `/`，全 404；自 v0.2.0（e1926cf）起存在，`#75` 只改 URI 未改变量语义。B 方案 = 保留 `resolver 127.0.0.11 valid=10s ipv6=off;` + `rewrite ^/erp/api/(.*)$ /$1 break;` + 变量式 `proxy_pass` 不带 URI。证据两层：静态 `test_proxy_pass_never_mixes_variable_and_uri` + 真容器用例（真实 conf 只读挂载、不换上游）。② **漏包**——`main ≥ 45572f7` 构建的 app 镜像导入期依赖 `observability/`，打包 include 手写清单缺该包，容器 `exited 1`（run 42920934799，head 8a96e24）；修复 157929d→2ad1e1d 已合。**验收结论**：main push run 的 `deploy-static` 真容器断言真的跑了（定向调用 4 passed，非 skipped），两因各自有证据；对外影响面见 RELEASES.md（已合 ccbcbbc，分三条：本机预览 404 / 镜像漏包 / 补偿回滚无执行进程）。  **口径（2026-11-11 #117 合入后）**：① **本地可起已验**——`fa5de4f`（= #113 合并后的 main）本机实跑四镜像构建 + compose full；② **四类健康检查已验**——回环 `api /healthz`、`web /erp/api/healthz`、`web /`、`/v1/auth/session` 全部 200，session 返回 `default_scope`；③ **备份→恢复已验**——恢复到独立库 `smart_erp_restore_check2`：对象 44=44、alembic `0011_job_lease_gen`、行数 16/20/25/3/18。①②③ 的记录随 #117 入 main `6a6b939`（`deploy/smart-erp/CLOUD-HULKAI-GZ-ORDER.md` 附录 A）。**对外入口依赖 hk-web 变更单**（第 9.2 / 11 节，未验）；**云端实机未执行**（ssh/scp、hulkai PG 内 provision、公网域名）。不得再说「云上可运行」。'},
+  {id:'B-ROLLBACK-TRACE',s:'S3/API',t:'P0：回滚走同步路径，不写 ticket_event / compensation_task、不回写 ticket_step.state——哈希链零事件',ms:'M2',fr:'FR-1105',p:['apps/api/','core/rollback/','contracts/config.schema.json'],st:'doing',by:'集成（止损）',at:'2026-11-11 09:06',note:'**2026-11-11 止损已上主干（#92 → `f709e1c`）**：`ERP_ROLLBACK_SYNC_ENABLED` 默认 false 已登记配置契约；关闭态返回 503 + `E-ROLLBACK-UNAVAILABLE`（不是 200 空结果）；开关位于 `assert_can_rollback` 之后，跨租户先 403 再谈开关；前端禁用并给可读原因；用例断言关闭态连接器零调用、状态不变。**卡保持 doing：止损不是修复，目标态（持久化 ticket/step → 入队 + 202 + 轮询 → 删同步分支）未做。** 事实（S3 已核到文件与行）：API 的 `container.tickets` 是进程内 `TicketRepository`，`apps/api` 里没有任何 `ticket_event` 写入口；用户点「回滚」走 `RollbackService` 同步路径——**不写 `ticket_event`、不写 `compensation_task`、不回写 `ticket_step.state`**。所以一次回滚在哈希链上是零事件，进程重启即失忆。另有两段无痕窗口：① connector 已写但影像未提交；② 多系统工单里 A 成功 B 抛错而无任何汇总。**短期动作（止损，不是修复）**：默认关闭同步回滚入口——开关默认 false 并登记 `contracts/config.schema.json`；关闭时返回 501/503 + `E-ROLLBACK-UNAVAILABLE`，不返回 200 空结果；前端隐藏/禁用按钮并给出可读原因；用例断言关闭时 connector 零调用。理由：本期 POC 只读，这条路径没有正当使用场景，留着就是一条会产生无痕跨系统写的通道。**目标态**：持久化 API 的 ticket/step → 入队 + `202` + 轮询 → 删同步分支。**开关关闭只是止损，不是修复。**'},
+  {id:'B-TICKET-PRODUCER',s:'S3/产品',t:'P0：工单没有生产生产者——17 条契约里 `/v1/tickets` 只有 GET，工单只由测试夹具种入',ms:'M2',fr:'—',p:['apps/api/routes/tickets.py','contracts/api/product_api.openapi.v1.json','apps/api/container.py'],st:'todo',note:'**事实（基准 main `3f4e9c0`；2026-11-11 更新：持久化 P1 `0010` 已合 `fb5e804`，P2/P3/P4 已合 `c0fa577`/`7fe19aa`/`7517b5d`——读、写、审批都进库了，但建单入口仍不存在）**：`apps/api` 没有 `POST /v1/tickets`；契约 17 条路径中工单侧只有 `GET /v1/tickets`、`GET /v1/tickets/{id}` 与四个 `actions/*`，加上 `approvals`/`audit`；唯一的建单入口是测试夹具 `container.tickets.add`（进程内 `TicketRepository`）。`POST /v1/recon/runs` 只建对账批次，不建工单。所以界面上看到的工单不是系统跑出来的。**① 候选生产者与代价（选谁是产品决策，不在持久化 PR 里顺手定）**：(a) 对账差异自动建单——由 recon run 完成/差异确认触发，幂等键建议 `recon:{run_id}:{diff_id}`，落 `business_key`，靠 `uq_ticket_business(tenant_id, scene_code, business_key)` 保证同一差异只建一单；代价是要先定「差异→场景→动作 spec」映射，否则建出的单没有可执行动作。(b) Agent 运行时建单——由 worker/scheduler 的异常或 intent 触发，幂等键用稳定的业务键（如 `agent:{run_id}:{step_no}`），重试不得换键；代价是运行时本身在生产代码仍零构造（见 B-COMP-RUNTIME），建单进程尚不可靠。(c) 外部事件建单（Webhook/定时）——由外部回调或补扫触发，幂等键用外部事件 id 或 `system:external_id`，需要去重窗口与重放策略；代价是要新增公网入口、签名校验与鉴权，POC 无此边界。**② 与 B-COMP-RUNTIME 的关系**：持久化是必要前提，但没有生产者，持久化之后库里依然是空的；B-COMP-RUNTIME 解决执行器/租约/补偿，不解决「谁建单」，两者互相依赖但不是同一件事。**③ 对演示与 POC 的影响**：若要展示真实链路，必须先有生产者；若只展示「已有工单的读写」，必须如实说明数据是导入/种入的，不能让人以为系统自己跑出来的。 **阻塞=缺决策（产品）**：三候选未拍板；决策备忘 `docs/product/tech/决策备忘-建单生产者.md`（44 行，推荐「对账差异自动建单」）已落盘，等用户确认。'},
+  {id:'B-HARDCODE-DRIFT',s:'集成',t:'写死的迁移号/键数：主干一前进就红的定时炸弹（全仓审计）',ms:'M2',fr:'—',p:['tests/','.github/workflows/smart-erp.yml','scripts/','tools/'],st:'todo',by:'集成（审计）',at:'2026-11-11 08:45',note:'判据（S3 原话）：**需要哪一代就显式 pin 哪一代；「最新版」只用来取 head（`get_current_head()`），不写成字面量。** `assert current == "0008_xxx"`、`downgrade -1` 属于「依赖当前最新」，后续每加一个迁移就会红。已撞同款三次：workflow 里 `grep -q "0006_audit_image_prev_uniq"`（0007 一合就红，已修为动态解析 `alembic heads`）、`test_config_schema` 写死 64 个键（已改 `len(schema["properties"])`）、`test_price_book_migration` 写死 `head == 0008`（已由 #87 `a786fa7` 修为 `get_current_head()` + 显式 pin `PREVIOUS_REVISION=0007`）。合理锚点保留：显式 pin 更早版本、`downgrade base`、按文件名读历史迁移 SQL。剩余观察项：`tests/api/test_recon_persistence.py` 按文件名拼接 `0003_recon_persistence.py`，重命名会红（不随主干前进而红）。完整结论表见 `流差距卡.md` §3.4。 状态回退说明：原「待评审」无 PR，按 §9.1.1 回退为 todo；剩余观察项见上。'},
+{id:'B-RECON-INPUT-ONLY',s:'S2',t:'缺口：对账输入只有请求内联 dataset，文件通道与 docparse 都要新写（不是接线）',ms:'M5',fr:'FR-0901',p:['apps/api/routes/recon.py','apps/recon/','apps/connectors/'],st:'todo',by:'集成（登记）',at:'2026-11-11 19:10',ev:'2026-11-11 在 `995c344` 上确认：`POST /v1/recon/runs` 只有请求体内联 dataset 才能跑出批次；文件通道没有 CSV→recon 行映射，`our_lines` 无来源；docparse 没有对账路由。',note:'**性质是功能开发未做**，不是 bug，不要混进 `B-RECON-WIRING-503` 的历史卡。\n\n**文件通道与 docparse 都不是「接线即可」**：文件通道需要新写 CSV→recon 行映射（且 `our_lines` 目前没有来源），docparse 需要新写适配与路由；别让人以为差一根线。\n\n**同一个缺失压着两个功能**：写路径与对账输入都依赖「连接器是否装配进 API 进程」。这是「服务跑着、功能没接上」的第三例（前两例：外部写入、`connector-gw` 无调用方）；只有真跑一次才现形。\n\n**验证方式**：从文件通道上传 CSV 跑出非种子批次；docparse 路由可用并产出 `our_lines`。'},
+{id:'B-APPROVAL-CATEGORY-BYPASS',s:'S4',t:'越权：业务类别复核闸从未生效（`scene_code` 未传，无 finance 角色也能过 finance 类别）',ms:'M5',fr:'—',p:['apps/security/approvals.py','core/policy/','apps/api/'],st:'review',by:'集成（登记）',at:'2026-11-11 19:10',ev:'S1 在 scratch 库实测：`_build_decision` 调 `ApprovalService.build(...)` 未传 `scene_code`，而 `BusinessCategoryPolicy.assert_reviewer` 对 `scene_code=None` 直接 return。角色为 `reviewer,approver,cfo`（无 `finance`）的 `dddddddd` 对 `finance` 类别场景 `ag2_processing_fee` 落 approver 票，返回 200、`satisfied=true`、`missing_roles=[]`。`apps/security/approvals.py` 注释明确写着「API 路径必须传 `scene_code`」。',note:'**这是控制项失效，不是功能缺口**：跨类别复核闸从未拦过任何人，别写成「演示配置问题」。\n\n**与锚点同类**：`verify_against_anchor` 拿全链尾比区间尾、从未判对过一次；本条是「规则写了、判据没人调」的第二次出现。**同一形态出现两次，说明不是疏忽而是缺一道检查**（见 `流差距卡.md` 教训区）。\n\n**验收方式**：① 无该业务类别角色的审批人落票必须被拒，且拒因指向类别闸（不能只看状态码）；② 修复后同类复核不能被误拦。\n\n**⛔ 关闭前不要对外演示「按业务类别分权复核」**——那是目前唯一能证明的越权点。\n\n**反例单点覆盖（API 入口）**：`tests/security/matrix_support.py` 的 approver 夹具补了 `finance`（矩阵工单全是 `ag2_processing_fee`；不加会误伤同类复核），矩阵层不再有「无该类别角色被拒」的反例。`tests/security/test_role_gates.py::test_c5_cross_category_review_is_rejected` 仍在，但它直接调 `ApprovalService.record`，**测的是策略类本身，不是 API 入口**——而本次缺陷恰恰是「策略对了、入口没传 `scene_code`」。因此 API 入口的越类反例只剩 S4 新加的一条：**改动该用例等于关掉唯一的守门人**，动它必须同时补一条等价的入口级反例。\n\n**2026-11-11 #140 已修并验收 → 待评审（未关闭）**：`_build_decision` 改为 `scene_code=ticket.scene_code`（从工单取，不接受请求体），squash 合入 main `a6ab668`。合后在 main 实测 `tests/api` 134 用例 113 passed / 21 skipped / 0 fail、`tests/security` 269 用例 236 passed / 33 skipped / 0 fail、`tests/deploy` 200 用例 196 passed / 4 skipped / 0 fail。单独复验入口：参数化 `approve`/`reject` 两例均 403 + `E-AUTHZ-001` + detail 含「不能复核 finance 类场景」与场景名，且未落审批记录、未触发外部写入；同类复核由补了 `finance` 的矩阵夹具覆盖未被误拦。**关闭前置**：对外口径仍按「审批按角色，业务类别分级复核是下一步」，待 demo 多身份合入后一并复核再关闭。'},
+{id:'B-APPROVAL-ROLES-INCONSISTENT',s:'S4',t:'同一工单在审批与执行两个入口对「还差几票」返回不同 `required_roles`',ms:'M5',fr:'—',p:['apps/api/','apps/security/approvals.py'],st:'todo',by:'集成（登记）',at:'2026-11-11 21:52',ev:'live 四步实测：同一张单 `DEMO-W2-WRITE-9001`（amount 5000、W2、无 `force_dual`），`POST /v1/approvals/{id}/approve` 返回 `required_roles=["approver"]`；执行动作返回 `required_roles=["approver","reviewer"]`（执行闸 `force_dual`）。',note:'**这不是文案差异**：同一工单在审批阶段与执行阶段对同一个问题（还差谁签字）给了两个答案，演示现场必被追问「到底几个人签」。\n\n**验收要求**：同一工单在审批入口与执行入口返回的 `required_roles` 必须能由同一份规则推出；若两阶段规则本就不同，必须显式说明差异及理由，并在响应或文档中可机械核对。**不代产品回答「以哪个为准」**——那是产品决策，卡只负责把矛盾摆到明面并给出可验收的形式。\n\n与 `B-SCENARIO-CATEGORY-DUAL-SIGN` 的关系：后者是「场景类别建模表达不了双签」（产品建模），本卡是「同一规则在两处算出不同结果」（一致性），两者不要合并处理。'},
+{id:'B-APPROVAL-SCENE-REQUIRED',s:'S4',t:'根因：`ApprovalService.build` 的 `scene_code` 可选默认 None，规则静默放行（改为必填）',ms:'M5',fr:'—',p:['apps/security/approvals.py','tests/security/test_approvals.py'],st:'review',by:'集成（登记）',at:'2026-11-11 21:22',ev:'本次越权缺陷的根因是「可选参数默认 None，然后没人传」：`build(scene_code=None)` 让 `BusinessCategoryPolicy.assert_reviewer` 静默放行；`#140` 只在 API 入口补了传参，没有消灭这一整类缺陷。分支 `fix/approval-scene-required @ 297996d`（= `39a1c65` + 1 提交）把 `scene_code` 改为必填关键字参数，并保留 `record()` 作为测试 / 无库入口、显式标注不参与生产闸门判定。',note:'**验收要求**：① 不传 `scene_code` 时构造直接失败（`TypeError`），且无审批记录落地；② `record()` 的测试 / 无库用途在文档与签名上显式标注，传 `scene_code` 时仍走类别闸；③ 不改 `BusinessCategoryPolicy` 规则本身。\n\n**反向证据（S4）**：把 `build` 改成必填后，基于尚未含 #140 的 main 跑，8 例直接 `TypeError: missing \'scene_code\'`——这是预期证据，不是测试失败，也证明不能基于未合入闸的 main 建该分支。\n\n**2026-11-11 22:42 已合入 main `fb8dffb`（PR #143，仍为待评审，未关闭）**：分支 rebase 到 `fecebe5` 得 `949152a`（只重放 1 个提交，PR 不含 #140 的闸修复）。合后 main 实测 `tests/security` 270（237 passed/33 skipped/0 fail）、`tests/api` 148（127/21/0）、`tests/agents` 142（66/76/0）、`tests/deploy` 200（196/4/0），`test_build_requires_scene_code_at_construction` 通过。'},
+{id:'B-SCENARIO-CATEGORY-DUAL-SIGN',s:'S2/S3',t:'场景类别建模表达不了双签：同一场景不同步骤需要不同类别角色签署',ms:'M5',fr:'FR-202/FR-203/FR-204',p:['apps/security/approvals.py','core/policy/','docs/product/'],st:'todo',by:'集成（登记）',at:'2026-11-11 19:25',ev:'`ag2_processing_fee` 归 `finance` 类别，对「对账结论 / 付款草稿的 W1/W2 签署」成立（PRD §2.1 财务对账岗负责复核结论与付款草稿；FR-203 双人复核针对应付金额）。但它作为**整场景唯一类别**不完整：FR-202 超损耗要采购确认、FR-204 索赔要采购+财务双签；而种子里该类工单的审批人是业务负责人。',note:'**单场景单类别无法表达「同一场景不同步骤由不同类别角色签署」**；正确方向是按步骤建模类别或拆场景，属产品改动，不是配置问题。\n\n**⛔ 不要为了让种子对得上就把类别改成 `procurement`，也不要给 CFO 硬塞 `finance`。**\n\n**对外口径**：演示里「按业务类别分权复核」这句话，要等 `B-APPROVAL-CATEGORY-BYPASS` 关闭且 demo 多身份合入后才能说；在此之前文档与对外口径一律按「审批按角色，业务类别分级复核是下一步」。'},
+{id:'B-IDEM-INMEMORY-ONLY',s:'S3',t:'幂等有表无实现：`pending_write.idem_key` 的结果缓存在进程内存，`erp.connector_idempotency` 为空',ms:'M5',fr:'—',p:['apps/connectors/','db/migrations/','apps/api/'],st:'todo',by:'集成（登记）',at:'2026-11-11 22:10',ev:'种子把 `pending_write.idem_key` 固定为 `demo-demo-w2-write-9001`；API 把上一次成功的写结果缓存在**进程内存**，`erp.connector_idempotency` 表为空。重灌种子不清内存 → 同一 `idem_key` 被判为 replay → 不发 POST → 桩 reset 后 verify 查不到 → `409 E-VERIFY-MISMATCH (F6)`。该次零写入（无 POST、无 step、无审计）。',note:'**表存在但为空，说明「幂等本应持久化」这件事有表无实现**；直接后果是「重启/重灌后同一幂等键的正确行为依赖进程寿命」，而不是依赖数据。\n\n**验收要求**：重启进程后同一 `idem_key` 重放应能从持久化状态判定，而不是靠内存缓存；或明确写出「缓存为进程内」并列出受影响的复位场景。**不替产品定方案**（持久化 vs 显式声明进程内，是产品/架构决策）。\n\n**排练硬前置**：重灌 live 种子后**必须重启 `erp_api`**，否则固定 `idem_key` 会命中旧内存缓存（见台账 seq 462）。'},
+{id:'B-STUB-RESET-SEQ',s:'S1',t:'`POST /stub/reset` 不重置 `_seq`：reset 后首单是 `PO-STUB-000002`',ms:'M5',fr:'—',p:['apps/connectors/u8/stub_server.py','demo/README.md'],st:'review',by:'集成（登记）',at:'2026-11-11 22:10',ev:'`POST /stub/reset` 清空 receipts / requests / reversals / 幂等表 / 故障开关，但**不重置 `_seq`**；所以「reset 之后重新演示」拿到的单号是 `PO-STUB-000002` 而不是 `000001`，演示文档里写死单号就会对不上。',note:'**验收要求**：reset 后桩的行为与一次干净启动等价；或文档明确「单号不保证从 1 起」且演示流程不引用固定单号。\n\n关联口径（已更正）：演示前跑 `/stub/reset` 是热身，不是必需；只有要连请求流水都回到刚启动态才 restart 桩容器。\n\n**2026-11-11 23:02 代码已合入 main `36d03b8`（PR #144）**：`reset()` 内已含 `self._seq = 0`，main 上 `tests/connectors` 4/4 通过。**live 桩仍旧镜像，待 S8 重建 `erp_u8_stub` 并实测「reset 后首单 = `PO-STUB-000001`」、回报后再关闭；在此之前文档不写「reset 后一定是 000001」。**'},
+];
+
+// 种子内容指纹：SEED_TASKS 任何变化都会改变它。localStorage 覆盖层带着旧指纹时，
+// 说明它来自更早的种子，必须丢弃——否则「文件已更新、页面还是旧的」。
+function seedMarker(){
+  const s = JSON.stringify(SEED_TASKS);
+  let h = 2166136261;
+  for(let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return 'v4-' + (h >>> 0).toString(36);
+}
+const SEED_MARKER = seedMarker();
+
+/* main 与工作树差距（2026-11-11 05:20 起改为按文件清单核对：共享工作树冻结在 9b297ef 不再写入，三数对比失去意义；missing=3 全属 S8、diff=0） */
+const MAIN_GAP = {
+  head: 'bb253a30 (#103 0011 租约代次围栏 + run_at 可空；rebase 前 886081e → 后 3c15b44) ← 3f4e9c0 (#80 2dac800 → #81 dee60be → #83 45572f7 → #82 9079728（P0 nginx + 漏包修复）→ #79 54eb65e（0008）→ #85 ccbcbbc（RELEASES 三条已知缺陷）→ #88 6585831（镜像条补「客户可用性阻断」）→ #89 0f597b3（补偿执行器方案 B + ERP_COMPENSATION_* 登记配置契约）→ #84 5d67440（审计链指标采集点）→ #87 6fb3bd3（0009 compensation_task.updated_at + 补偿观测接线）→ #86 032a3d3（告警口径三句：已定义/有采集点/无评估器）→ #90 3002153（RELEASES 回滚口径）→ #91 cf221d8（冒烟覆盖每个镜像真实入口 + 契约用例）→ #92 f709e1c（同步回滚入口默认关闭，鉴权先于开关）→ #67 1ef609c（/metrics 验收三行矩阵 + compose 下发 ERP_METRICS_ENABLED）→ #93 fb5e804（0010 工单持久化迁移；真库 head 断言 len=27/列宽 32）→ #94 ffe5f35（tick 接线 env + 例外表 16 条）→ #95 c0fa577（PR2 工单投影读库 + systems NULL fail-closed）→ #96 7fe19aa（PR3 写路径事件化，版本号端口边界偏移）→ #97 7517b5d（PR4 审批落库 + 孤儿巡检 900s/双落点）→ #98 c778687（心跳 env 接线 + heartbeat≤lease/2 硬闸；例外 16→15）→ #99 dd7b29a（租约用例改显式状态 + `OR l.owner IS NULL`）→ #100 b340a5b（alembic fileConfig 关 disable_existing_loggers、删两处用例 workaround）→ #101 1f26966（补偿停止原因决定结束态，退避中保持「补偿中」）→ #102 3f4e9c0（租约落账失败留痕、回收不误伤自己、丢弃不算 done）→ #103 bb253a30（0011 租约代次围栏 + run_at 可空）；v0.2.0 产物 sha e1926cf)',
+  chain: 'e719974 → #32 9543438 → #33 41efa09 → #36 e2a9233 → #35 01f2a10 → #34 f131dbc → #37 fa01905 → #38 0657673 → #39 14ce70a → #40 e1926cf → #42 e78422c → #43 1b1fdea → #44 9bef4cd → #45 11a6df9 → #41 47b0c33 → #46 9bdc75e → #47 2a7f9d0 → #48 bad702f → #49 be5e868 → #50 05b23d8 → #51 e071fd0 → #52 167d095 → #53 5ade300 → #54 a9c1dc4 → #55 a946b9d → #56 318e411 → #59 9b297ef → #61 e34ac1b → #62 d1ce3c0 → #60 0d313a1 → #58 f48a969 → #64 bfcd7f2 → #63 8830ea7 → #66 65ef3d2 → #75 3c142ba → #71 97b26f2 → #73 47766ad → #74 a3fddc0 → #68 d9b05de → #69 2de7bfa → #76 8c5837f → #70 6bbfdfc → #77 e0bf544 → #57 c3c662b → #72 6c41af7 → #78 6d56184 → #65 36bab07 → #83 45572f7 → #82 9079728 → #79 54eb65e → #85 ccbcbbc → #88 6585831 → #89 0f597b3 → #84 5d67440 → #87 6fb3bd3 → #86 032a3d3 → #90 3002153 → #91 cf221d8 → #92 f709e1c → #67 1ef609c → #93 fb5e804 → #94 ffe5f35 → #95 c0fa577 → #96 7fe19aa → #97 7517b5d → #98 c778687 → #99 dd7b29a → #100 b340a5b → #101 1f26966 → #102 3f4e9c0 → #103 bb253a30',
+  rows: [
+    {s:'S0', in:'#9 骨架；#14 平台装配；#32 平台层与 API 装配；#45 narrowed_fields 重构', out:'—（errors.py / test_api_assembly.py 为 #31 旧副本已丢弃；pyproject.toml 陈旧手改缺依赖上界，禁止提交，已还原）', ev:'platform 94 passed'},
+    {s:'S1', in:'#13 连接器整包；#38 幂等/限流/熔断三表；#52 文件通道连接器 + Document.kind 增量；#53 ERP_FILE_INBOX 登记 + fail-fast', out:'—（清理后无差异；契约元数据 scope=compose 与 compose 引用的两半并入同一 PR #58）', ev:'connectors 108 passed（#53 CI）· ERP_FILE_INBOX 已进 schema 63 键'},
+    {s:'S2', in:'#10 离线核心；#32 0003 迁移与对账落库', out:'—（3 个 JSON 与 4 个测试文件确认是 1d759af 旧快照，已清；过滤 EOL 后与该提交逐字节一致）', ev:'recon 63 passed'},
+    {s:'S3', in:'#35 core/runtime + tools/ + 0004/0005 迁移', out:'—（test_migrations.py 仅 2 行注释，已丢弃）', ev:'agents 59 passed / 24 skipped（#61 后 main 真实 run 待记）'},
+    {s:'S4', in:'#38 角色闸 + B 级字段白名单 + 导出留痕；#44 config_access + 23 条层内用例；#63 审计加固 + CI 建 erp_app 角色（直接执行 00-provision.sql §4/§7）；#74 迁移链在 CI 真跑（一次性库 upgrade/downgrade/upgrade + 销毁）；#72 角色名替换改词边界 + 出现次数断言', out:'—（#72 已合 6c41af7：§4 一条 CREATE SCHEMA + §7 三条 ALTER DEFAULT PRIVILEGES = 4 处，与 ROLE_MENTIONS=4 对得上；job 名按总监决定不改，`镜像构建` 的 skipping 源于 changes.images=false 而非旧名）', ev:'#63 run 42903608049：security 260 passed / 0 skipped · audit 22 · agents 87；#74 合入后 main 日志 `[migrations-live] upgrade head=0007 len(version_num)=27 column_width=32`；#72 main run 42914034087 success'},
+    {s:'S5', in:'#11 docparse 离线管线（含 PDF 抽取器）', out:'—（docparse 工作树无差异；[pdf] extra 已随 #46 进 machine-checks）', ev:'docparse 90 passed / 0 skipped（#46 CI 日志）'},
+    {s:'S6', in:'#34 web/ 38 文件 + web-checks 门禁；#64 计量卡片与明细过滤同源（64=59+0+3+2）', out:'—（6 个文件已由 #64 @ bfcd7f2 入主干；重建产物 SHA256 与 04:53 逐字节相同）', ev:'npm test 74 passed · build exit 0 / 103 modules · #64 PR run 42902680801 全绿'},
+    {s:'S7', in:'observability/ 9 + tests/e2e 冒烟；#43 补 test_metrics/test_alerts；#56 T709 三个对账质量指标族 + observe_recon_result', out:'—（exporter.py/render.py 与 2 个测试为 #18 旧副本，已判定丢弃）；fix/env-flag-fail-fast @ 93d3cc6 待开 PR（rebase 到 T709 后需 S7 自解冲突）', ev:'observability 65 passed（main run 42911917137）· #83 待合：生效告警 2 条 / 注释 9 条，tests/observability 81 passed'},
+    {s:'S8', in:'#37 构建资产；#39/#40 端口口径；#42 v0.2.0 登记文档；#48 RUNBOOK；#49 档位口径；#53 schema 63 键；#59 build-images 脏树门禁；#61 预拉 alpine + deploy-static 入口统一 pytest；#60 备份/恢复/升级三脚本；#58 file 通道；#75 nginx 剥离 /erp/api 前缀（修 web 容器侧全部 404）；#76 .env.example 7 条注释 + schema description；#68 8010 卡口；#69 web 体积口径；#70 GO-LIVE 首次入库 + 部署顺序；#57 image-bundle（main push 才跑，已用 dispatch 证明）', out:'#67 RUNBOOK metrics **暂缓合入**：现文「结尾必须带 `/`」未覆盖真实缺陷「proxy_pass 变量 + URI」，按现文合会让人误以为已解决；S8 在 nginx 修好后于同一分支补「禁止变量 + URI」再一起合；missing 3：deploy/smart-erp/FULL-READINESS.md、scripts/chaos/run_chaos.py、tests/deploy/test_web_artifact_prefix.py（最后一个=薛定谔的测试，须入库或明确删除）', ev:'tests/deploy 61 passed / 87 subtests（main run 42911917137）· image-bundle 实测 `docker load：4 个镜像`、tar.gz sha256 OK、artifact 180,131,520 bytes · config schema 63 键'},
+    {s:'S9', in:'#31 只读体检；#41 性能改造；#47 CLI --duplicate-name-window；#54 PERF 数字限定语上移', out:'—（T902 已由 S9 自签关闭）', ev:'masterdata 199 passed（clean 5ade300）· 10k 3.69s · 100k 44.93s（B 类，合成夹具，不外推）'},
+    {s:'API', in:'#32 产品 API 18 文件 / 17 路径 + 对账落库；#63 的 0006 已进 main；#66 计量文案改「计费行」；#77 0007 持久化投影 + 三条读路径改走 store（e0bf544）；#65 metrics 接线（36bab07，fc25141：冲突解在 run_recon，投影与失败计数共存）', out:'#79 / 0008 @ 68f4b7e（已 rebase 到含 #65 的主干；CI 两处红待 API 修：`npm run gen:api --check` 未重生成、`test_price_book_migration.py` 24 skip 触发 tests/platform 门禁）· 四桶「预留恒为 0」标注与桶和不变量的用例为两条独立后续任务', ev:'#65 CI：api 50 passed / 6 skipped · lint-imports 1 kept / 0 broken；main run 42911917137：api 49 passed / 0 skipped · 迁移 head=0007 len=27 column_width=32'}
+  ]
+};
+
+/* ========== 2. 状态与本地存储 ========== */
+const LS_KEY = 'concurrent-dev-board.v4';
+const CONCURRENCY = {streams:6, peopleMin:7, peopleMax:10};
+let state = null;
+let filters = {task:'', stream:'', actor:'', from:'', to:''};
+
+const $ = (s, r=document) => r.querySelector(s);
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const nowStr = () => {
+  const d = new Date(), p = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+const uid = pre => pre + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,6);
+
+const notFuture = str => (str && str > nowStr()) ? nowStr() : str;
+
+function seedState(){
+  const tasks = JSON.parse(JSON.stringify(SEED_TASKS)).map(t => Object.assign({note:'',ev:'',by:'',at:''}, t));
+  const logs = [];
+  // 为已有进展的种子任务补出可读的初始流水（时间取自种子的开始/关闭时间，非编造运行记录）
+  // 注意：种子推导出的时间不得超过当前时刻，避免出现「未来 ts」（原 s0+6 天会产生未来时间）
+  tasks.forEach(t => {
+    if(t.st === 'todo') return;
+    if(t.s0) logs.push({id:uid('L'), ts:notFuture(t.s0), taskId:t.id, taskTitle:t.t, stream:t.s, type:'状态流转',
+      from:'待开始', to:'开发中', actor:t.o||'—', note:'领取任务，开始开发', evidence:''});
+    if(t.st === 'block'){
+      logs.push({id:uid('L'), ts:notFuture(t.s0 ? addDays(t.s0, 2) : nowStr()), taskId:t.id, taskTitle:t.t, stream:t.s,
+        type:'状态流转', from:t.s0?'开发中':'待开始', to:'阻塞', actor:t.o||'—',
+        note:t.note||'阻塞原因未记录（需当轮补留底）', evidence:''});
+      return;
+    }
+    if(t.st === 'review' || t.st === 'done'){
+      logs.push({id:uid('L'), ts:notFuture(t.s0 ? addDays(t.s0, 6) : nowStr()), taskId:t.id, taskTitle:t.t, stream:t.s,
+        type:'状态流转', from:'开发中', to:'待评审', actor:t.o||'—', note:'提测待评审（种子推导）', evidence:t.ev||'（种子数据未记录证据）'});
+    }
+    if(t.st === 'done' && t.at){
+      logs.push({id:uid('L'), ts:notFuture(t.at), taskId:t.id, taskTitle:t.t, stream:t.s, type:'状态流转',
+        from:'待评审', to:'已关闭', actor:t.by||'—', note:t.note||'', evidence:t.ev||''});
+    }
+  });
+  logs.sort((a,b) => a.ts.localeCompare(b.ts));
+  logs.forEach((l, i) => { l.seq = i + 1; l._seed = true; });
+  return {
+    v:4, tasks, logs, createdAt:nowStr(),
+    seedMarker: SEED_MARKER,
+    extdeps: EXTERNAL_DEPS.map(d => ({id:d.id, done:false})),
+    // 种子流水由 SEED_TASKS 推导；留底文件已追加至 seq#90（2026-11-11 00:45），
+    // 导入 dev-ledger.json 可取回含 T008/T608/T708/T901 与 9 条状态校正的完整 90 条流水
+    syncedAt: '2026-11-11 00:45',
+    syncedSeq: 90,
+    importedFrom: ''     // 最近导入的文件名
+  };
+}
+function addDays(str, n){
+  const d = new Date(str.replace(' ','T') + ':00');
+  if(isNaN(d)) return str;
+  d.setDate(d.getDate()+n);
+  const p = x => String(x).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function adoptOverlay(d){
+  state = d;
+  // 兼容早期数据：补齐字段
+  state.tasks.forEach(t => { t.note = t.note||''; t.ev = t.ev||''; t.by = t.by||''; t.at = t.at||''; if(!Array.isArray(t.p)) t.p=[]; });
+  if(!Array.isArray(state.extdeps)) state.extdeps = EXTERNAL_DEPS.map(x => ({id:x.id, done:false}));
+  state.syncedAt = state.syncedAt || '';
+  // 兼容早期数据：补齐 id 与 seq（seq 缺失时按既有数组顺序回填，此后排序只认 seq）
+  state.logs.forEach((l, i) => { if(!l.id) l.id = uid('L'); if(typeof l.seq !== 'number') l.seq = i + 1; });
+  state.logs.sort((a,b) => a.seq - b.seq);
+  if(typeof state.syncedSeq !== 'number') state.syncedSeq = lastLogSeq();
+}
+function load(){
+  let staleMarker = '', backupKey = '', backupFailed = false;
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(raw){
+      const d = JSON.parse(raw);
+      if(d && Array.isArray(d.tasks) && Array.isArray(d.logs)){
+        // 只有「与当前种子同源」或「用户自有数据层（导入/手工恢复）」才允许压过种子。
+        if(d.seedMarker === SEED_MARKER || d.userOwned === true){ adoptOverlay(d); return; }
+        staleMarker = d.seedMarker || '未标记';
+        try{
+          backupKey = backupOverlay(raw, staleMarker);
+        }catch(e){
+          // 备份写不进去就不丢弃：宁可暂时显示旧数据，也不能把证据静默抹掉。
+          console.warn('旧快照备份失败，已保留原覆盖层', e);
+          adoptOverlay(d);
+          showSeedNotice(staleMarker, '', true);
+          return;
+        }
+      }
+    }
+  }catch(e){ console.warn('读取本地数据失败，回退种子数据', e); }
+  state = seedState();
+  save();
+  if(staleMarker) showSeedNotice(staleMarker, backupKey);
+}
+const SNAP_PREFIX = 'smart-erp/board/snapshot-';
+function snapshotTag(marker){ return /^v4-[a-z0-9]+$/i.test(String(marker||'')) ? marker : 'legacy'; }
+function backupOverlay(raw, marker){
+  const stamp = nowStr().replace(/[^0-9]/g, '').slice(0, 12);
+  const key = SNAP_PREFIX + snapshotTag(marker) + '-' + stamp;
+  localStorage.setItem(key, JSON.stringify({ savedAt: nowStr(), marker: marker || '', raw: raw }));
+  return key;
+}
+function listSnapshots(){
+  const out = [];
+  for(let i = 0; i < localStorage.length; i++){
+    const k = localStorage.key(i);
+    if(!k || k.indexOf(SNAP_PREFIX) !== 0) continue;
+    let tasks = 0, savedAt = '', marker = '';
+    try{
+      const rec = JSON.parse(localStorage.getItem(k));
+      savedAt = rec.savedAt || ''; marker = rec.marker || '';
+      tasks = (JSON.parse(rec.raw).tasks || []).length;
+    }catch(e){ savedAt = '（内容损坏）'; }
+    out.push({ key: k, savedAt: savedAt, marker: marker, tasks: tasks });
+  }
+  return out.sort((a,b) => String(b.savedAt).localeCompare(String(a.savedAt)));
+}
+function exportSnapshot(key){
+  let rec = null;
+  try{ rec = JSON.parse(localStorage.getItem(key) || 'null'); }catch(e){}
+  if(!rec || !rec.raw) return toast('旧快照不存在或已损坏', true);
+  download('旧快照-' + key.slice(SNAP_PREFIX.length) + '.json', rec.raw, 'application/json');
+  toast('已导出旧快照');
+}
+function restoreSnapshot(key){
+  let rec = null, d = null;
+  try{ rec = JSON.parse(localStorage.getItem(key) || 'null'); d = rec && JSON.parse(rec.raw); }catch(e){}
+  if(!d || !Array.isArray(d.tasks) || !Array.isArray(d.logs)) return toast('旧快照不存在或已损坏', true);
+  d.userOwned = true;   // 用户明确恢复的数据不再被种子指纹判定失效
+  d.seedMarker = d.seedMarker || rec.marker || 'restored';
+  adoptOverlay(d);
+  save(); renderAll();
+  const n = $('#seedNotice'); if(n) n.hidden = true;
+  toast('已恢复旧快照（' + d.tasks.length + ' 个任务）');
+}
+function snapshotsModal(){
+  const items = listSnapshots();
+  const body = items.length
+    ? `<p style="font-size:12.5px;margin:0 0 8px">共 <b>${items.length}</b> 份被判定失效的本地覆盖层，全部保存在本浏览器 localStorage，前缀 <code>${SNAP_PREFIX}</code>。</p>`
+      + items.map(s => `<div class="lock-note" style="margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <code style="font-size:11px">${esc(s.key)}</code>
+          <span style="font-size:11px">${esc(s.savedAt)} · 任务 ${s.tasks} · 旧标记 ${esc(s.marker || '未标记')}</span>
+          <span style="margin-left:auto;display:flex;gap:6px">
+            <button class="btn sm" data-snap="${esc(s.key)}" data-act="export">导出</button>
+            <button class="btn sm" data-snap="${esc(s.key)}" data-act="restore">恢复</button>
+          </span></div>`).join('')
+    : '<p style="font-size:12.5px">当前没有旧快照备份。只有「种子指纹变化、旧覆盖层被自动丢弃」时才会生成备份。</p>';
+  openModal('旧快照备份', 'localStorage · 丢弃前自动留底', body, '<button class="btn" data-close="1">关闭</button>');
+  document.querySelectorAll('[data-snap]').forEach(btn => btn.addEventListener('click', () => {
+    const key = btn.dataset.snap;
+    if(btn.dataset.act === 'export') exportSnapshot(key);
+    else if(confirm('用该快照覆盖当前页面数据？')){ restoreSnapshot(key); closeModal(); }
+  }));
+}
+function showSeedNotice(oldMarker, backupKey, backupFailed){
+  const el = $('#seedNotice');
+  if(!el) return;
+  el.hidden = false;
+  const head = '<b>检测到旧快照已失效，已切换为内置种子</b>';
+  const why = '<span>localStorage 快照标记 <code>' + esc(oldMarker) + '</code> 与当前种子 <code>' + esc(SEED_MARKER)
+    + '</code> 不一致。</span>';
+  if(backupFailed){
+    el.innerHTML = head + why + '<span style="color:#8f2f22">备份写入失败，已保留旧数据未丢弃；请先「导出快照」再重置。</span>';
+    return;
+  }
+  el.innerHTML = head + why
+    + '<span>旧覆盖层已备份到 <code>' + esc(backupKey) + '</code>，可用「旧快照」入口回看/恢复。</span>'
+    + '<button class="btn sm" id="btnNoticeExport">导出旧快照</button>'
+    + '<button class="btn sm" id="btnNoticeRestore">恢复旧快照</button>';
+  const b1 = $('#btnNoticeExport'), b2 = $('#btnNoticeRestore');
+  if(b1) b1.addEventListener('click', () => exportSnapshot(backupKey));
+  if(b2) b2.addEventListener('click', () => { if(confirm('用旧快照覆盖当前页面数据？')) restoreSnapshot(backupKey); });
+}
+function save(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+  catch(e){ toast('本地保存失败（可能是浏览器隐私模式或容量限制）', true); }
+}
+function task(id){ return state.tasks.find(t => t.id === id); }
+function streamOf(id){ return STREAMS.find(s => s.id === id); }
+
+/* ========== 3. 路径所有权与冲突 ========== */
+function normPath(p){
+  return String(p||'').trim().replace(/\\/g,'/').replace(/[（(].*?[）)]/g,'').replace(/\/+$/,'').toLowerCase();
+}
+function isSharedPath(p){
+  const n = normPath(p);
+  return n.startsWith('contracts') || n.startsWith('db/migrations') || n === 'apps/api/main.py' || n === 'apps/api/deps.py';
+}
+function isDeployPath(p){
+  const n = normPath(p);
+  return n.startsWith('deploy/smart-erp') || n.startsWith('scripts') || n.startsWith('projects/smart-erp/docker')
+    || n === '.github/workflows/smart-erp.yml' || n.startsWith('tests/deploy');
+}
+// 文档明确切开的两处：其余 workflow 归 S0，仅 smart-erp.yml 归 S8
+const CARVE_OUTS = [['.github/workflows/smart-erp.yml', '.github']];
+function pathOverlap(a,b){
+  const x = normPath(a), y = normPath(b);
+  if(!x || !y) return false;
+  for(const [p, q] of CARVE_OUTS){
+    if((x === p && y === q) || (y === p && x === q)) return false;
+  }
+  return x === y || x.startsWith(y + '/') || y.startsWith(x + '/');
+}
+function conflicts(){
+  const doing = state.tasks.filter(t => t.st === 'doing');
+  const hit = [];
+  for(let i=0;i<doing.length;i++){
+    for(let j=i+1;j<doing.length;j++){
+      const A = doing[i], B = doing[j];
+      // 同一负责人的并行任务不构成「互相踩」：串行由该开发者自行排期
+      if(A.o && B.o && A.o === B.o) continue;
+      const pairs = [];
+      A.p.forEach(pa => B.p.forEach(pb => { if(pathOverlap(pa,pb)) pairs.push([pa,pb]); }));
+      if(pairs.length) hit.push({a:A, b:B, pairs});
+    }
+  }
+  return hit;
+}
+function taskConflictIds(){
+  const set = new Set();
+  conflicts().forEach(c => { set.add(c.a.id); set.add(c.b.id); });
+  return set;
+}
+
+/* ========== 4. 状态流转校验（状态纪律） ========== */
+const RULES = {
+  owner:  '进入「开发中」必须填写负责人（开发者标识）',
+  start:  '进入「开发中」必须填写开始时间',
+  ev:     '进入「待评审」必须填提交/分支或产物链接等证据',
+  close:  '「已关闭」必须填写验收结论与关闭人',
+  step:   '不得跳过「待评审」直接关闭',
+  frozen: '已关闭任务的字段已锁定，只能新增补充记录'
+};
+
+// 返回 {errors:[{field,msg}], values:{...}}
+function validateMove(t, to, f){
+  const errs = [];
+  const push = (field, msg) => errs.push({field, msg});
+  if(!to) push('to', '请选择目标状态');
+  if(to === t.st) push('to', '目标状态与当前状态相同');
+  if(t.st === 'done') push('to', RULES.frozen);
+  if(t.st === 'cancel') push('to', '已取消的任务不可再流转，请新建任务');
+  if(to === 'done' && t.st !== 'review') push('close', RULES.step + '：当前处于「' + STATUS[t.st].label + '」，需先进入「待评审」并被评审通过');
+
+  const actor = (f.actor||'').trim();
+  if(!actor) push('actor', '每次流转都必须填写操作人（开发者标识）');
+
+  if(to === 'doing'){
+    const owner = (f.owner||'').trim();
+    if(!owner) push('owner', '缺少负责人：' + RULES.owner);
+    if(!(f.start||'').trim()) push('start', '缺少开始时间：' + RULES.start);
+  }
+  if(to === 'review'){
+    const ev = (f.evidence||'').trim();
+    if(!ev) push('evidence', '缺少证据：' + RULES.ev);
+    else if(ev.length < 6) push('evidence', '证据过短：请给出可核验的分支/提交/PR/产物链接（至少 6 个字符）');
+    if(!(f.owner||t.o||'').trim()) push('owner', '待评审必须能追溯到负责人：请填写负责人');
+  }
+  if(to === 'done'){
+    const note = (f.note||'').trim();
+    const closer = (f.closer||'').trim();
+    if(!closer) push('closer', '缺少关闭人：' + RULES.close);
+    if(!note) push('note', '缺少验收结论：' + RULES.close);
+    else if(note.length < 6) push('note', '验收结论过短：请写清验收口径与结论（至少 6 个字符）');
+  }
+  return errs;
+}
+
+function snapshot(t){
+  return {status:STATUS[t.st].label, owner:t.o||'', start:t.s0||'', evidence:t.ev||'', note:t.note||'',
+    closed_by:t.by||'', closed_at:t.at||'', paths:(t.p||[]).slice()};
+}
+function applyMove(t, to, f){
+  const errs = validateMove(t, to, f);
+  if(errs.length) return {ok:false, errs};
+  const from = t.st;
+  const ts = nowStr();
+  const actor = f.actor.trim();
+  const before = snapshot(t);
+
+  // 负责人变更必须留痕：旧负责人写进流水，不覆盖
+  if((f.owner||'').trim() && f.owner.trim() !== t.o){
+    state.logs.push({id:uid('L'), seq:nextSeq(), ts, taskId:t.id, taskTitle:t.t, stream:t.s, type:'负责人变更',
+      from:t.o||'（空）', to:f.owner.trim(), actor, note:f.ownerNote||'流转时变更负责人', evidence:'',
+      payload_before:{owner:t.o||''}, payload_after:{owner:f.owner.trim()}});
+    t.o = f.owner.trim();
+  }
+  if(to === 'doing' && !t.o) t.o = (f.owner||'').trim();
+  if(to === 'doing'){ t.s0 = f.start; if((f.owner||'').trim()) t.o = f.owner.trim(); }
+  if(to === 'review'){ if((f.evidence||'').trim()) t.ev = f.evidence.trim(); }
+  if(to === 'done'){
+    t.note = f.note.trim(); t.by = f.closer.trim(); t.at = ts;
+    if((f.evidence||'').trim()) t.ev = f.evidence.trim();
+  }
+  if(to === 'block'){ if((f.note||'').trim()) t.note = f.note.trim(); }
+  t.st = to;
+  state.logs.push({id:uid('L'), seq:nextSeq(), ts, taskId:t.id, taskTitle:t.t, stream:t.s, type:'状态流转',
+    from:STATUS[from].label, to:STATUS[to].label, actor,
+    note:(f.note||'').trim(), evidence:(f.evidence||'').trim(),
+    payload_before:before, payload_after:snapshot(t)});
+  save();
+  return {ok:true};
+}
+
+function addSupplement(t, text, actor){
+  if(!text.trim() || !actor.trim()) return false;
+  state.logs.push({id:uid('L'), seq:nextSeq(), ts:nowStr(), taskId:t.id, taskTitle:t.t, stream:t.s, type:'补充记录',
+    from:'—', to:'—', actor:actor.trim(), note:text.trim(), evidence:''});
+  save();
+  return true;
+}
+function changeOwner(t, newOwner, actor, reason){
+  state.logs.push({id:uid('L'), seq:nextSeq(), ts:nowStr(), taskId:t.id, taskTitle:t.t, stream:t.s, type:'负责人变更',
+    from:t.o||'（空）', to:newOwner, actor, note:reason||'', evidence:''});
+  t.o = newOwner;
+  save();
+}
+
+/* ========== 5. 渲染：概览 / 甘特 / 串行段 / 规约 / 冲突 ========== */
+function counts(){
+  const c = {todo:0,doing:0,block:0,review:0,done:0,cancel:0};
+  state.tasks.forEach(t => { c[t.st] = (c[t.st]||0)+1; });
+  return c;
+}
+function pct(n,d){ return d ? Math.round(n/d*1000)/10 : 0; }
+
+function renderOverview(){
+  const c = counts();
+  const total = state.tasks.length - c.cancel;
+  const doneTotal = c.done;
+  const doingTasks = state.tasks.filter(t => t.st === 'doing');
+  // 阶段 1 并行流只算 S1–S6；S0 / S7 是半投入的横切流（路线 §6.1）
+  const activeStreams = [...new Set(doingTasks.map(t => t.s))].filter(s => s >= 'S1' && s <= 'S6');
+  const halfStreams = [...new Set(doingTasks.map(t => t.s))].filter(s => s === 'S0' || s === 'S7' || s === 'S8' || s === 'S9');
+  const owners = [...new Set(doingTasks.map(t => t.o).filter(Boolean))];
+  const overStream = activeStreams.length > CONCURRENCY.streams;
+  const overPeople = owners.length > CONCURRENCY.peopleMax;
+
+  const segs = ['done','doing','review','block','todo'].map(k =>
+    `<i style="width:${pct(c[k], total)}%;background:${STATUS[k].color}"></i>`).join('');
+  const legend = ['done','doing','review','block','todo'].map(k =>
+    `<div><span class="dot" style="background:${STATUS[k].color}"></span>${STATUS[k].label} ${c[k]}</div>`).join('');
+
+  const msList = ['M0-M1','M2','M3','M4','M5','M6'].map(ms => {
+    const ts = state.tasks.filter(t => t.ms === ms);
+    if(!ts.length) return '';
+    const d = ts.filter(t => t.st === 'done').length;
+    return `<div class="para-line"><span class="lbl">${esc(ms)}</span>
+      <div class="mini">${ts.map(t => `<i class="${t.st==='doing'?'on':(t.st==='block'?'ov':'')}" title="${esc(t.id)} ${esc(t.t)}｜${STATUS[t.st].label}"></i>`).join('')}</div>
+      <span class="para-num">${d}/${ts.length}</span></div>`;
+  }).join('');
+
+  const slots = Array.from({length:CONCURRENCY.streams}, (_,i) => {
+    const sid = activeStreams[i];
+    return `<i class="${sid?'on':''}" title="${sid? sid+' 有开发中任务':'空闲槽位'}"></i>`;
+  }).join('');
+
+  $('#overview').innerHTML = `
+    <div class="card">
+      <div class="card-h"><h3>全局进度</h3><span class="hint">不含已取消 · 口径：state.tasks 中 st==='done' 的计数（共 ${state.tasks.length} 项节点）</span></div>
+      <div class="card-b">
+        <div class="kpi-row">
+          <div class="kpi"><b>${pct(doneTotal, total)}%</b><span>已关闭 ${doneTotal} / ${total} 项</span></div>
+          <div class="kpi"><b>${c.doing}</b><span>开发中</span></div>
+          <div class="kpi"><b>${c.block}</b><span>阻塞</span></div>
+          <div class="kpi"><b>${c.review}</b><span>待评审</span></div>
+        </div>
+        <div class="bar">${segs}</div>
+        <div class="seg-legend">${legend}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>并行度占用</h3><span class="hint">业务并行上限 6 条流 / 总人力 7–10 人（路线 §6.1）</span></div>
+      <div class="card-b para">
+        <div class="para-line"><span class="lbl">并行流</span><div class="mini">${slots}</div><span class="para-num">${activeStreams.length}/${CONCURRENCY.streams}</span></div>
+        <div class="para-line"><span class="lbl">在岗开发</span><div class="mini">${Array.from({length:CONCURRENCY.peopleMax},(_,i)=>`<i class="${i<owners.length?'on':''}" title="${owners[i]||'空位'}"></i>`).join('')}</div><span class="para-num">${owners.length}/${CONCURRENCY.peopleMax}</span></div>
+        <div class="limit-row">
+          <span class="chip ${overStream?'bad':'ok'}">${overStream?'超出并行流上限':'流数在限内'}</span>
+          <span class="chip ${overPeople?'bad':(owners.length<CONCURRENCY.peopleMin?'':'ok')}">${overPeople?'人数超出 10 人上限':(owners.length<CONCURRENCY.peopleMin?'低于 7 人最低配置':'人数在 7–10 区间')}</span>
+        </div>
+        <div class="muted" style="font-size:11px">在岗：${owners.length?esc(owners.join('、')):'—'} · 半投入横切流：${halfStreams.length?esc(halfStreams.join('/')):'无'}（S0 / S7 / S8 不计入 6 条业务并行流）。</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>里程碑分布（M0–M6）</h3><span class="hint">右侧 = 已关闭 / 该里程碑任务数</span></div>
+      <div class="card-b para">${msList || '<div class="empty">暂无任务</div>'}</div>
+    </div>`;
+}
+
+function renderGantt(){
+  const weeks = Array.from({length:12}, (_,i)=>`<span>W${i+1}</span>`).join('');
+  const phases = PHASES.map(p => {
+    const left = (p.from-1)/12*100, w = (p.to-p.from+1)/12*100;
+    return `<div class="ph" style="left:${left}%;width:${w}%">${esc(p.label)}</div>`;
+  }).join('');
+  const gates = GATES.map(g => {
+    const left = g.at/12*100;
+    return `<div class="gate" style="left:calc(${left}% - ${g.at===12?30:0}px)" title="${esc(g.id)}：${esc(g.note)}">${esc(g.label)}</div>`;
+  }).join('');
+
+  const rows = STREAMS.map(s => {
+    const runs = [];
+    let i = 0;
+    while(i < 12){
+      const k = s.load[i]; let j = i;
+      while(j+1 < 12 && s.load[j+1] === k) j++;
+      if(k !== '·'){
+        const waitAfter = (k === 'h' && s.load.slice(j+1).every(x => x === '·'));
+        const col = s.serial ? '#8a5a2b' : (s.id === 'S8' ? '#2e7d52' : (s.id === 'S7' ? '#5d7a8a' : '#2f6fb5'));
+        runs.push(`<div class="p ${k==='f'?'f':'h'}" style="left:${i/12*100}%;width:${(j-i+1)/12*100}%;background:${k==='f'? col : '#b9c2cc'}" title="${s.id}｜W${i+1}–W${j+1}｜${k==='f'?'全职':'半投入'}${waitAfter?'（等 G 门 / 联调）':''}"></div>`);
+      }
+      i = j+1;
+    }
+    return `<div class="g-row">
+      <div class="g-name"><b>${s.id} ${esc(s.name)}</b><span>${esc(s.role)}</span></div>
+      <div class="g-track">
+        ${Array.from({length:12},()=>'<div class="cell"></div>').join('')}
+        <div class="barfill ${s.serial?'serial':''}" style="left:0;width:100%">${runs.join('')}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const mergeMarks = MERGE_POINTS.map(p => {
+    const left = (p.from-1)/12*100, w = (p.to-p.from+1)/12*100;
+    return `<div class="merge-mark ${p.cls}" style="left:${left}%;width:${w}%" title="${esc(p.label)}：${esc(p.detail)}">${esc(p.label)}</div>
+      <div class="merge-note" style="left:${left + w/2}%">${esc(p.note)}</div>`;
+  }).join('');
+
+  $('#ganttCard').innerHTML = `
+    <div class="card-h"><h3>并行节奏（W1–W12）</h3>
+      <span class="hint">实心 = 全职 · 浅色 = 半投入（评审/联调）· 空白 = 不参与 · 棕色虚线框 = 串行源头 · 绿 = S8 部署横切</span></div>
+    <div class="gantt-scroll"><div class="gantt">
+      <div class="g-head"><div class="g-label">流 / 周次</div><div class="g-weeks">${weeks}</div></div>
+      <div class="g-gate-row"><div class="g-label">阶段与契约门</div><div class="g-gate">${phases}${gates}</div></div>
+      <div class="merge-band"><div class="g-label">并入 hulkai</div><div class="merge-track">${mergeMarks}</div></div>
+      ${rows}
+    </div></div>
+    <div class="merge-legend">
+      ${MERGE_POINTS.map(p => `<div><span class="dot" style="background:${p.cls==='no'?'#8a929c':p.cls==='cloud'?'#2f6fb5':p.cls==='open'?'#2e7d52':'#7a5aa0'}"></span>${esc(p.label)} · ${esc(p.detail)}</div>`).join('')}
+    </div>
+    <div class="gantt-note">
+      G0 = W2 末（C1–C5、C10 + C11demo/C12/C14/C15 冻结）· G1 = W3 末（C6 读/C7/C8/C9/C13）· G2 ≈ W6（C6 写 / C11 full）· G3 = 发布门。
+      W2 前只在 127.0.0.1:8010 自测，不并入；W8–W9 对外依赖 hk-web Nginx 变更合入。
+    </div>`;
+}
+
+function renderSerial(){
+  $('#serialGrid').innerHTML = `
+    <div class="serial-head"><b>六段必须串行</b>
+      <span>不是人力问题，是物理约束；串行段之外的 6 条业务流才可并行</span></div>
+    ${SERIAL.map(x => `
+    <div class="serial-item">
+      <span class="sid">${x.id}</span>
+      <b>${esc(x.name)}</b>
+      <div class="win">${esc(x.win)}</div>
+      <p>${esc(x.why)}</p>
+      <div class="wait">谁等谁：${esc(x.wait)}</div>
+    </div>`).join('')}`;
+}
+
+function renderCovenant(){
+  $('#covenant').innerHTML = COVENANT.map(([k,v]) => `<div><b>${esc(k)}</b>${esc(v)}</div>`).join('');
+}
+
+function renderConflicts(){
+  const cs = conflicts();
+  if(!cs.length){
+    $('#conflictZone').innerHTML = `<div class="alert" style="border-color:#cfe6da;background:#f2f9f5">
+      <div class="alert-h" style="color:#2e7d52">路径所有权检查：当前「开发中」任务之间无重叠路径</div></div>`;
+    return;
+  }
+  $('#conflictZone').innerHTML = `<div class="alert">
+    <div class="alert-h">⚠ 路径冲突 ${cs.length} 组：两个「开发中」任务声明了重叠路径，合并必然冲突</div>
+    <div class="alert-b">${cs.map(c => `
+      <div class="alert-it">
+        <b>${esc(c.a.id)}</b>（${esc(c.a.s)} · ${esc(c.a.o||'无负责人')}）↔ <b>${esc(c.b.id)}</b>（${esc(c.b.s)} · ${esc(c.b.o||'无负责人')}）
+        ${c.pairs.map(([pa,pb]) => `<code>${esc(pa)}</code>${normPath(pa)!==normPath(pb)?' ∩ <code>'+esc(pb)+'</code>':''}`).join(' ')}
+        <span class="muted">· 处置：一方置阻塞或改到独立路径，由路径 Owner 合并</span>
+      </div>`).join('')}</div>
+  </div>`;
+}
+
+/* ========== 6. 渲染：开发流分组与任务 ========== */
+function tagsHtml(t, conflictIds){
+  const tags = [];
+  tags.push(`<span class="tag ms">${esc(t.ms)}</span>`);
+  if(t.fr && t.fr !== '—') tags.push(`<span class="tag fr">${esc(t.fr)}</span>`);
+  if(t.serial){
+    const x = SERIAL.find(s => s.id === t.serial);
+    tags.push(`<span class="tag serial" title="串行段 ${t.serial}：${esc(x?x.why:'')}">串行 ${t.serial}</span>`);
+  }
+  if(t.shared) tags.push(`<span class="tag shared" title="公共代码/共享契约：须走变更流程（RFC），不得自行改">公共契约：${esc(t.shared)}</span>`);
+  else if((t.p||[]).some(isSharedPath)) tags.push(`<span class="tag shared">公共路径：需走变更流程</span>`);
+  (t.p||[]).forEach(p => tags.push(`<span class="tag path">${esc(p)}</span>`));
+  if(conflictIds.has(t.id)) tags.push(`<span class="conflict-flag">路径冲突</span>`);
+  return `<div class="tmeta">${tags.join('')}</div>`;
+}
+
+function renderLanes(){
+  const conflictIds = taskConflictIds();
+  const q = ($('#ownerFilter').value||'').trim().toLowerCase();
+  let shown = 0, totalRows = 0;
+
+  $('#lanes').innerHTML = STREAMS.map(s => {
+    const ts = state.tasks.filter(t => t.s === s.id);
+    const c = {doing:0,review:0,block:0,done:0,todo:0,cancel:0};
+    ts.forEach(t => c[t.st]++);
+    const visible = ts.filter(t => !q || (t.o||'').toLowerCase().includes(q));
+    shown += visible.length; totalRows += ts.length;
+
+    const rows = visible.map(t => {
+      const st = STATUS[t.st];
+      const meta = [];
+      if(t.st === 'doing' && t.s0) meta.push('开始 ' + esc(t.s0));
+      if(t.ev && (t.st === 'review' || t.st === 'done')) meta.push('证据 ' + esc(t.ev));
+      if(t.st === 'block' && t.note) meta.push('阻塞 ' + esc(t.note));
+      if(t.st === 'done') meta.push('验收 ' + esc(t.note) + ' · 关闭人 ' + esc(t.by||'—') + ' · ' + esc(t.at||''));
+      const actions = t.st === 'done'
+        ? `<button class="btn sm" data-act="detail" data-id="${t.id}">详情 / 留底</button><button class="btn sm" data-act="supp" data-id="${t.id}">补充记录</button>`
+        : (t.st === 'cancel'
+          ? `<button class="btn sm" data-act="detail" data-id="${t.id}">详情 / 留底</button>`
+          : `<button class="btn sm primary" data-act="move" data-id="${t.id}">流转</button><button class="btn sm" data-act="detail" data-id="${t.id}">详情 / 留底</button>`);
+      return `<tr>
+        <td><div class="tid">${esc(t.id)}</div></td>
+        <td><div class="ttitle">${esc(t.t)}</div>${tagsHtml(t, conflictIds)}
+          ${meta.length?`<div class="muted" style="font-size:11px;margin-top:2px">${meta.join(' ｜ ')}</div>`:''}</td>
+        <td><span class="st ${st.cls}">${st.label}</span></td>
+        <td><div class="owner">${esc(t.o||'—')}</div></td>
+        <td><div class="due">${esc(t.due||'—')}</div></td>
+        <td><div class="row-actions">${actions}</div></td>
+      </tr>`;
+    }).join('');
+
+    const own = s.dirs.map(d => `<code class="${isSharedPath(d)?'shared':''}" title="${isSharedPath(d)?'公共/共享资产：改动需 RFC 或 Owner 合并':'本流独占'}">${esc(d)}</code>`).join('');
+
+    return `<section class="lane ${s.serial?'serial-dir':''}">
+      <div class="lane-h">
+        <span class="sid">${s.id}</span><b>${esc(s.name)}</b>
+        <span class="dep">依赖：${esc(s.deps)}</span>
+        <span class="stats">
+          ${c.doing?`<span class="chip">开发中 ${c.doing}</span>`:''}
+          ${c.review?`<span class="chip">待评审 ${c.review}</span>`:''}
+          ${c.block?`<span class="chip bad">阻塞 ${c.block}</span>`:''}
+          <span class="chip ok">已关闭 ${c.done}/${ts.length}</span>
+        </span>
+      </div>
+      <div class="lane-b">
+        <div class="own">${own}</div>
+        <div class="tbl-scroll"><table class="tasks">
+          <thead><tr><th style="width:58px">任务</th><th>标题 / 归属</th><th style="width:64px">状态</th><th style="width:104px">负责人</th><th style="width:44px">计划</th><th style="width:150px">操作</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="6" class="muted" style="padding:12px">无匹配任务</td></tr>'}</tbody>
+        </table></div>
+      </div>
+    </section>`;
+  }).join('');
+
+  const cs = conflicts().length;
+  $('#laneSummary').textContent = `共 ${state.tasks.length} 个任务 · 显示 ${shown} 个 · 路径冲突 ${cs} 组`;
+}
+
+/* ========== 7. 渲染：留底记录 ========== */
+function filteredLogs(){
+  return state.logs.filter(l => {
+    if(filters.task){
+      const k = filters.task.toLowerCase();
+      if(!(l.taskId||'').toLowerCase().includes(k) && !(l.taskTitle||'').toLowerCase().includes(k)) return false;
+    }
+    if(filters.stream && l.stream !== filters.stream) return false;
+    if(filters.actor && !(l.actor||'').toLowerCase().includes(filters.actor.toLowerCase())) return false;
+    if(filters.from && l.ts.slice(0,10) < filters.from) return false;
+    if(filters.to && l.ts.slice(0,10) > filters.to) return false;
+    return true;
+  }).sort((a,b) => b.seq - a.seq);
+}
+function renderAudit(){
+  const list = filteredLogs();
+  $('#auditSummary').textContent = `${list.length} / ${state.logs.length} 条流水 · 只追加不可编辑`;
+  if(!list.length){
+    $('#auditTable').innerHTML = '<div class="empty">没有符合条件的流水记录</div>';
+    return;
+  }
+  $('#auditTable').innerHTML = `<table class="log">
+    <thead><tr><th style="width:128px">时间</th><th style="width:150px">任务</th><th style="width:38px">流</th><th style="width:78px">类型</th><th style="width:150px">从 → 到</th><th style="width:92px">操作人</th><th>备注</th><th style="width:190px">证据</th></tr></thead>
+    <tbody>${list.map(l => `<tr class="${l._conflict?'conflict':''}">
+      <td class="t">${esc(l.ts)}${l._conflict?'<div style="color:#8f2f22;font-size:10px">冲突待裁定</div>':''}</td>
+      <td><div class="nowrap" style="font:11px var(--mono);color:var(--ink3)">${esc(l.taskId)}</div><div>${esc(l.taskTitle)}</div></td>
+      <td>${esc(l.stream)}</td>
+      <td><span class="tag ${l.type==='负责人变更'?'shared':''}">${esc(l.type)}</span></td>
+      <td>${l.from==='—'?'<span class="muted">—</span>':`${esc(l.from)} <span class="arrow">→</span> ${esc(l.to)}`}</td>
+      <td>${esc(l.actor||'—')}</td>
+      <td>${esc(l.note||'')}</td>
+      <td class="muted" style="font:11px var(--mono);word-break:break-all">${esc(l.evidence||'')}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+/* ========== 7.5 外部依赖 / 契约清单 / 依赖图 / 留底同步状态 ========== */
+function extDone(id){
+  const d = (state.extdeps||[]).find(x => x.id === id);
+  return !!(d && d.done);
+}
+function pendingExt(){ return EXTERNAL_DEPS.filter(d => !extDone(d.id)); }
+
+function renderExternal(){
+  const pending = pendingExt();
+  $('#extdepCard').innerHTML = `
+    <div class="card-h"><h3>外部依赖（不属于我们的迁移/代码）</h3>
+      <span class="hint">三项全部完成前，不得对外宣称「已上线」</span></div>
+    <div class="card-b">
+      <div class="release-gate ${pending.length?'':'ok'}">
+        <b>${pending.length?'⚠ 发布口径受限':'✓ 外部依赖已完成'}</b>
+        <span>${pending.length
+          ? `有 ${pending.length} 项外部依赖未完成：<b>不可宣称上线</b>。可对外表述为「云端可运行 / 演示环境可用」。`
+          : '三项外部依赖均已完成，可按 G3 口径宣称上线。'}</span>
+      </div>
+      <div class="extdep">${EXTERNAL_DEPS.map(d => {
+        const done = extDone(d.id);
+        return `<div class="ext-item ${done?'':'pending'}">
+          <h4>${esc(d.title)} <span class="state ${done?'d':'p'}">${done?'已完成':'未完成'}</span></h4>
+          <p>${esc(d.detail)}</p>
+          <div class="who">负责：${esc(d.owner)}</div>
+          <div class="ext-actions">
+            <button data-ext="${d.id}" data-done="0" class="${done?'':'on'}">未完成</button>
+            <button data-ext="${d.id}" data-done="1" class="${done?'on':''}">已完成</button>
+          </div>
+        </div>`;
+      }).join('')}</div>
+    </div>`;
+}
+
+function renderContracts(){
+  $('#contractCard').innerHTML = `
+    <div class="card-h"><h3>契约清单 C1–C15</h3>
+      <span class="hint">G0 冻结范围已扩大到 C11(demo)/C12/C14/C15；C6 读在 G1、写在 G2</span></div>
+    <div class="card-b"><div class="contracts">${CONTRACTS.map(c => {
+      const cls = c.gate === 'G0' ? 'g0' : (c.gate === 'G1' ? 'g1' : 'g2');
+      return `<div class="contract ${cls}" title="${esc(c.name)} · ${esc(c.gate)} · Owner ${esc(c.owner)}">
+        <b>${esc(c.id)}</b>${esc(c.name)}<span class="own">${esc(c.owner)}</span></div>`;
+    }).join('')}</div></div>`;
+}
+
+function renderGraph(){
+  const box = (x,y,w,h,label,sub,fill) => `
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="${fill}" stroke="#c6ccd4"/>
+    <text x="${x+8}" y="${y+16}" font-size="11.5" font-weight="600" fill="#1c2126">${label}</text>
+    <text x="${x+8}" y="${y+29}" font-size="9" fill="#6b7481">${sub}</text>`;
+  const link = (x1,y1,x2,y2,dash,label) => `
+    <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#9aa3ad" stroke-width="1.2"
+      ${dash?'stroke-dasharray="4 3"':''} marker-end="url(#ar)"/>
+    ${label?`<text x="${(x1+x2)/2}" y="${(y1+y2)/2 - 3}" font-size="8.5" fill="#6b7481" text-anchor="middle">${label}</text>`:''}`;
+  $('#graphCard').innerHTML = `
+    <div class="card-h"><h3>依赖图（含 S8 横切带）</h3><span class="hint">实线 = 契约依赖 · 虚线 = 供给/运行时依赖</span></div>
+    <div class="card-b graph-wrap">
+      <svg viewBox="0 0 760 300" role="img" aria-label="九条开发流依赖图">
+        <defs><marker id="ar" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 z" fill="#9aa3ad"/></marker></defs>
+        ${box(290,8,180,36,'S0 平台底座','policy / kernel / API 网关','#fdf6ec')}
+        ${box(16,76,150,36,'S1 连接器','canonical / connectors','#f2f7fc')}
+        ${box(210,76,150,36,'S2 对账/指标','domain/recon','#f2f7fc')}
+        ${box(404,76,150,36,'S3 Agent 运行时','core/runtime · agents','#f2f7fc')}
+        ${box(594,76,150,36,'S4 审计与权限','core/audit · iam','#f2f7fc')}
+        ${box(16,162,150,36,'S5 文档解析','domain/docparse','#f2f7fc')}
+        ${box(330,162,150,36,'S6 前端/触达','web · integrations/im','#f2f7fc')}
+        ${box(594,162,150,36,'S7 观测 + 测试','observability · tests','#f5f7f8')}
+        ${link(360,44,110,76,false,'C1/C2/C4')}
+        ${link(380,44,285,76,false,'C3/C5')}
+        ${link(420,44,470,76,false,'C3/C4')}
+        ${link(450,44,650,76,false,'C3/C4/C8')}
+        ${link(166,94,210,94,false,'C1 样本')}
+        ${link(479,94,594,94,true,'audit hook')}
+        ${link(166,112,100,162,false,'C2 read')}
+        ${link(404,112,405,162,false,'C8 坐标')}
+        ${link(480,180,594,180,true,'/metrics')}
+        <rect x="16" y="238" width="728" height="46" rx="4" fill="#eef7f1" stroke="#9cc4ac"/>
+        <text x="28" y="256" font-size="11.5" font-weight="600" fill="#1c2126">S8 基础设施与部署（横切带）</text>
+        <text x="28" y="271" font-size="9" fill="#4b5563">deploy/smart-erp/ · scripts/ · projects/smart-ERP/docker/ · .github/workflows/smart-erp.yml · tests/deploy/</text>
+        ${link(120,238,80,198,true,'镜像/依赖集')}
+        ${link(260,238,270,198,true,'镜像')}
+        ${link(420,238,410,198,true,'token 预算/queue')}
+        ${link(560,238,660,198,true,'/metrics 端口')}
+        ${link(380,60,380,238,true,'启动参数')}
+      </svg>
+      <div class="graph-note">
+        S8 被所有流依赖却只能单点修改：镜像 tag 走 X5 串行，compose 参数由 S8 统一改；
+        业务流只提 PR，不直接改 deploy/。S8 不计入 6 条业务并行流。
+      </div>
+    </div>`;
+}
+
+function lastLogTs(){
+  return state.logs.reduce((m,l) => (l.ts > m ? l.ts : m), '');
+}
+// seq：单调递增整数，是排序与「谁覆盖谁」的唯一依据；ts 只作展示与时钟异常检测
+function maxSeq(){ return state.logs.reduce((m,l) => Math.max(m, Number(l.seq)||0), 0); }
+function lastLogSeq(){ return maxSeq(); }
+function nextSeq(){ return maxSeq() + 1; }
+function unsyncedCount(){
+  const base = typeof state.syncedSeq === 'number' ? state.syncedSeq : 0;
+  return state.logs.filter(l => (Number(l.seq)||0) > base).length;
+}
+// 时钟异常：按 seq 顺序扫描，ts 小于此前最大值 → 倒退；ts 晚于当前时刻 → 未来。仅告警，不改变排序
+function clockAnomalies(){
+  const ordered = state.logs.slice().sort((a,b) => (Number(a.seq)||0) - (Number(b.seq)||0));
+  const now = nowStr();
+  const back = [], future = [];
+  let maxTs = '';
+  ordered.forEach(l => {
+    if(!l.ts) return;
+    if(l.ts > now) future.push(l);
+    if(l.ts < maxTs) back.push({log:l, peak:maxTs}); else maxTs = l.ts;
+  });
+  return {back, future};
+}
+function clockWarnHtml(){
+  const {back, future} = clockAnomalies();
+  if(!back.length && !future.length) return '';
+  const parts = [];
+  if(back.length) parts.push(`ts 倒退 ${back.length} 条`);
+  if(future.length) parts.push(`未来 ts ${future.length} 条`);
+  const tip = back.slice(0,5).map(x => `seq#${x.log.seq} ${x.log.taskId} ${x.log.ts}（前序最大 ${x.peak}）`)
+    .concat(future.slice(0,5).map(x => `seq#${x.seq} ${x.taskId} ${x.ts}（晚于当前时刻）`)).join('\n');
+  return `<span style="color:#b8860b" title="时钟异常仅提示，不影响排序与覆盖（排序以 seq 为准）：&#10;${esc(tip)}">⚠ 时钟异常：${parts.join(' · ')}｜本机时钟曾回拨，ts 仅供参考，先后以 seq 为准（不阻断操作）</span>`;
+}
+function renderLedgerStatus(){
+  const last = lastLogTs() || '—';
+  const lastSeq = maxSeq();
+  const n = unsyncedCount();
+  const clock = clockWarnHtml();
+  const synced = state.syncedAt ? esc(state.syncedAt) : '尚未与文件同步';
+  const top = n
+    ? `<span>留底更新 <b>${esc(last)}</b>（seq#${lastSeq}）</span><span style="color:#b8860b">● 未同步 ${n} 条（导出手册或导入 dev-ledger.json）</span>${clock}`
+    : `<span>留底更新 <b>${esc(last)}</b>（seq#${lastSeq}）</span><span style="color:#2e7d52">● 已同步（${synced}）</span>${clock}`;
+  const el1 = $('#ledgerStatusTop');
+  if(el1) el1.innerHTML = top;
+  const elL = $('#lastUpdateTop');
+  if(elL) elL.innerHTML = `<span>最后更新：<b>${esc(nowStr())}</b>（本机当前时间，打开页面即刷新）</span><span>重建基线：<b>2026-11-11 07:25</b></span><span class="muted">main HEAD 3c142ba (#75) · 已合 #54/#55/#56/#59/#61/#62/#60/#58/#64/#63/#66/#75 · 在审 12 条（#65 metrics 红在导入边界 / #67 需按 nginx 新口径重写 §5.2 / #68 #69 #70 #71 #72 #73 #74 #76 / #77 0007 新开 / #57 image-bundle 单独一轮）· v0.2.0 产物 sha e1926cf · ts 仅参考，先后以 seq#${lastSeq} 为准</span><span style="color:#2e7d52">main push 连三绿：42904578644 @8830ea7 · 42906448618 @65ef3d2 · 42907616288 @3c142ba</span>`;
+  const el2 = $('#auditSync');
+  if(el2){
+    el2.innerHTML = `<div class="sync-bar ${n?'warn':''}">
+      <span>留底真源：<code>dev-ledger.json</code></span>
+      <span>最后一条留底：<b>${esc(last)}</b>（seq#${lastSeq}）</span>
+      <span>最近一次文件同步：<b>${synced}</b>${state.importedFrom?`（${esc(state.importedFrom)}）`:''}</span>
+      <span>${n?`<b style="color:#b8860b">未同步 ${n} 条</b>：页面状态可能领先于文件，请导出后提交到仓库`:'页面与文件已对齐'}</span>
+      ${clock?`<span>${clock}</span>`:''}
+    </div>`;
+  }
+}
+
+function renderAll(){
+  renderOverview(); renderBlockPin(); renderMainGap(); renderExternal(); renderGantt(); renderSerial(); renderContracts(); renderGraph();
+  renderCovenant(); renderConflicts(); renderLanes(); renderAudit(); renderLedgerStatus();
+}
+function renderMainGap(){
+  const el = $('#mainGap'); if(!el) return;
+  const pending = MAIN_GAP.rows.filter(r => r.out !== '—').length;
+  const rows = MAIN_GAP.rows.map(r => `<div class="para-line">
+    <span class="lbl">${esc(r.s)}</span>
+    <div style="flex:1;min-width:0">
+      <div><b style="color:#2e7d52">已进 main：</b>${esc(r.in)}</div>
+      <div><b style="color:#b3261e">仍在工作树：</b>${r.out === '—' ? '—' : esc(r.out)}</div>
+    </div>
+    <span class="chip">${esc(r.ev)}</span>
+  </div>`).join('');
+  el.innerHTML = `<div class="card">
+    <div class="card-h"><h3>main 与工作树差距</h3><span class="hint">HEAD <b>${esc(MAIN_GAP.head)}</b> · ${pending} 个流仍有未合内容</span></div>
+    <div class="card-b para">
+      <div class="muted" style="font-size:11px;margin-bottom:6px">演进链：${esc(MAIN_GAP.chain)}</div>
+      ${rows}
+    </div>
+  </div>`;
+}
+function renderBlockPin(){
+  const el = $('#blockPin'); if(!el) return;
+  const blocks = state.tasks.filter(t => t.st === 'block');
+  if(!blocks.length){
+    el.innerHTML = `<div class="card"><div class="card-h"><h3>阻塞项（置顶）</h3><span class="hint">当前无阻塞</span></div></div>`;
+    return;
+  }
+  const rows = blocks.map(t => `<div class="para-line">
+    <span class="lbl">${esc(t.id)}</span>
+    <div style="flex:1;min-width:0"><b>${esc(t.t)}</b>
+      <div class="muted" style="font-size:11px">${esc(t.note || '未填写阻塞原因（违反规约，需当轮补留底）')}</div>
+    </div>
+    <span class="chip bad">${esc(t.s)} · ${esc(t.o || '未指派')}</span>
+  </div>`).join('');
+  el.innerHTML = `<div class="card">
+    <div class="card-h"><h3>阻塞项（置顶）</h3><span class="hint">${blocks.length} 项 · 解除阻塞须当轮更新状态与留底</span></div>
+    <div class="card-b para">${rows}</div>
+  </div>`;
+}
+let toastTimer = null;
+function toast(msg, bad){
+  const el = $('#toast');
+  el.textContent = msg;
+  el.className = 'toast' + (bad?' bad':'');
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
+}
+function openModal(title, sub, body, foot){
+  $('#mTitle').textContent = title;
+  $('#mSub').textContent = sub || '';
+  $('#mBody').innerHTML = body;
+  $('#mFoot').innerHTML = foot || '';
+  $('#mask').hidden = false;
+}
+function closeModal(){ $('#mask').hidden = true; $('#mBody').innerHTML = ''; $('#mFoot').innerHTML = ''; }
+
+function fieldRow(name, label, input, required, why){
+  return `<div class="fld" data-fld="${name}">
+    <label>${esc(label)} <span class="req" style="visibility:${required?'visible':'hidden'}">*</span> <span class="why">${esc(why||'')}</span></label>
+    ${input}<div class="fld-err"></div></div>`;
+}
+
+function moveModal(id){
+  const t = task(id);
+  if(!t) return;
+  if(t.st === 'done'){ detailModal(id); return; }
+  if(t.st === 'cancel'){ toast('已取消的任务不可流转', true); return; }
+
+  const pick = Object.keys(STATUS).filter(k => k !== t.st).map(k =>
+    `<button type="button" data-to="${k}" class="${k===t.st?'on':''}">${STATUS[k].label}</button>`).join('');
+  const defaultTo = t.st === 'review' ? 'done' : (t.st === 'doing' ? 'review' : 'doing');
+
+  openModal('状态流转 · ' + t.id, t.t, `
+    <div class="form-alert" id="formAlert"></div>
+    <div class="fld">
+      <label>目标状态 <span class="req">*</span> <span class="why">当前：${STATUS[t.st].label}</span></label>
+      <div class="state-pick" id="statePick">${pick}</div>
+    </div>
+    ${fieldRow('actor','操作人',`<input type="text" name="actor" value="${esc(t.o||'')}" placeholder="开发者标识，如 dev-be-03">`,true,'每次流转必填')}
+    ${fieldRow('owner','负责人',`<input type="text" name="owner" value="${esc(t.o||'')}" placeholder="开发者标识">`,false,'进入「开发中」必填；变更会单独留痕')}
+    ${fieldRow('start','开始时间',`<input type="datetime-local" name="start">`,false,'进入「开发中」必填')}
+    ${fieldRow('evidence','证据',`<input type="text" name="evidence" value="${esc(t.ev||'')}" placeholder="分支 / 提交 / PR / 产物链接">`,false,'进入「待评审」必填')}
+    ${fieldRow('note','备注 / 验收结论',`<textarea name="note" placeholder="关闭时写验收口径与结论；阻塞时写等谁">${esc(t.st==='done'?t.note:'')}</textarea>`,false,'关闭时必填')}
+    ${fieldRow('closer','关闭人',`<input type="text" name="closer" value="" placeholder="验收人 / 关闭人标识">`,false,'进入「已关闭」必填')}
+    <div class="lock-note" style="background:#f7f8fa;border-color:var(--line);color:var(--ink2)">
+      规则：进入「开发中」→ 负责人 + 开始时间；进入「待评审」→ 证据；「已关闭」→ 验收结论 + 关闭人。
+      未经「待评审」直接关闭会被拒绝；已关闭任务字段锁定，只能追加补充记录。
+    </div>`,
+    `<button class="btn" data-close="1">取消</button><button class="btn primary" id="doMove">提交流转</button>`);
+
+  let target = defaultTo;
+  const setTarget = k => {
+    target = k;
+    document.querySelectorAll('#statePick button').forEach(b => b.classList.toggle('on', b.dataset.to === k));
+    // 动态标注必填
+    const req = {owner:['doing','review'], start:['doing'], evidence:['review'], note:['done'], closer:['done']};
+    Object.keys(req).forEach(f => {
+      const box = document.querySelector(`.fld[data-fld="${f}"]`);
+      if(!box) return;
+      const lab = box.querySelector('label .req');
+      if(lab) lab.style.visibility = req[f].includes(k) ? 'visible' : 'hidden';
+    });
+  };
+  $('#statePick').addEventListener('click', e => {
+    const b = e.target.closest('button[data-to]');
+    if(b) setTarget(b.dataset.to);
+  });
+  setTarget(defaultTo);
+  // 默认填当前时间，便于「开发中」
+  const d = new Date(), p = n => String(n).padStart(2,'0');
+  $('input[name="start"]').value = `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+
+  $('#doMove').addEventListener('click', () => {
+    const f = {
+      actor: $('input[name="actor"]').value,
+      owner: $('input[name="owner"]').value,
+      start: $('input[name="start"]').value.replace('T',' '),
+      evidence: $('input[name="evidence"]').value,
+      note: $('textarea[name="note"]').value,
+      closer: $('input[name="closer"]').value
+    };
+    const errs = validateMove(t, target, f);
+    document.querySelectorAll('.fld').forEach(x => {
+      x.classList.remove('err');
+      const e0 = x.querySelector('.fld-err'); if(e0) e0.textContent = '';
+    });
+    const alert = $('#formAlert');
+    if(errs.length){
+      alert.className = 'form-alert on';
+      alert.innerHTML = `<b>不能流转，缺少 ${errs.length} 项：</b><ul>${errs.map(e => `<li>${esc(e.msg)}</li>`).join('')}</ul>`;
+      errs.forEach(e => {
+        const box = document.querySelector(`.fld[data-fld="${e.field}"]`);
+        if(box){ box.classList.add('err'); const fe = box.querySelector('.fld-err'); if(fe) fe.textContent = e.msg; }
+      });
+      const first = document.querySelector('.fld.err input, .fld.err textarea, .fld.err select');
+      if(first) first.focus();
+      return;
+    }
+    const r = applyMove(t, target, f);
+    if(r.ok){
+      closeModal();
+      renderAll();
+      toast(`${t.id} 已流转到「${STATUS[target].label}」，已生成留底记录`);
+    }
+  });
+}
+
+function detailModal(id){
+  const t = task(id);
+  if(!t) return;
+  const st = STATUS[t.st];
+  const logs = state.logs.filter(l => l.taskId === id).sort((a,b) => b.seq - a.seq);
+  const timeline = logs.length ? `<ol>${logs.map(l => `<li><span class="t">${esc(l.ts)}</span> · ${esc(l.type)} · ${esc(l.actor||'—')}
+    ${l.from!=='—'?`<span class="arrow">${esc(l.from)} → ${esc(l.to)}</span>`:''}
+    ${l.note?`<div>${esc(l.note)}</div>`:''}
+    ${l.evidence?`<div class="muted" style="font:11px var(--mono);word-break:break-all">证据：${esc(l.evidence)}</div>`:''}</li>`).join('')}</ol>`
+    : '<div class="muted" style="font-size:11.5px">暂无流水</div>';
+
+  const locked = t.st === 'done';
+  openModal('任务详情 · ' + t.id, t.t, `
+    ${locked?`<div class="lock-note">已关闭：负责人、证据、验收结论、关闭人已锁定不可修改，只能新增补充记录。</div>`:''}
+    <div class="grid2" style="margin-bottom:8px">
+      <div><div class="muted" style="font-size:11px">流</div>${esc(t.s)} ${esc(streamOf(t.s)?streamOf(t.s).name:'')}</div>
+      <div><div class="muted" style="font-size:11px">状态</div><span class="st ${st.cls}">${st.label}</span></div>
+      <div><div class="muted" style="font-size:11px">里程碑 / 需求</div>${esc(t.ms)} · ${esc(t.fr||'—')}</div>
+      <div><div class="muted" style="font-size:11px">负责人 / 计划</div>${esc(t.o||'—')} · ${esc(t.due||'—')}</div>
+      <div><div class="muted" style="font-size:11px">开始时间</div>${esc(t.s0||'—')}</div>
+      <div><div class="muted" style="font-size:11px">证据</div><span style="font:11px var(--mono);word-break:break-all">${esc(t.ev||'—')}</span></div>
+    </div>
+    ${t.st==='block'||locked?`<div class="fld"><label>${locked?'验收结论':'阻塞原因'}</label><div style="font-size:12.5px">${esc(t.note||'—')}</div></div>`:''}
+    ${locked?`<div class="grid2" style="margin-bottom:8px"><div><div class="muted" style="font-size:11px">关闭人</div>${esc(t.by||'—')}</div><div><div class="muted" style="font-size:11px">关闭时间</div>${esc(t.at||'—')}</div></div>`:''}
+    <div class="fld"><label>独占路径 / 共享标记</label><div class="tmeta">${tagsHtml(t, taskConflictIds())}</div></div>
+    <div class="hist"><h4>该任务留底流水（${logs.length} 条，新→旧）</h4>${timeline}</div>`,
+    `<button class="btn" data-close="1">关闭</button>
+     ${t.st!=='done'&&t.st!=='cancel'?`<button class="btn" data-act="owner" data-id="${t.id}">变更负责人</button>`:''}
+     <button class="btn primary" data-act="supp" data-id="${t.id}">补充记录</button>`);
+}
+
+function suppModal(id){
+  const t = task(id);
+  openModal('补充记录 · ' + t.id, t.t + '（原记录不改，只追加）', `
+    ${fieldRow('suppActor','操作人',`<input type="text" name="suppActor" value="${esc(t.o||'')}" placeholder="开发者标识">`,true,'')}
+    ${fieldRow('suppText','补充内容',`<textarea name="suppText" placeholder="补充说明、后续跟进、复盘结论"></textarea>`,true,'至少 2 个字符')}`,
+    `<button class="btn" data-close="1">取消</button><button class="btn primary" id="doSupp">追加</button>`);
+  $('#doSupp').addEventListener('click', () => {
+    const text = $('textarea[name="suppText"]').value.trim();
+    const actor = $('input[name="suppActor"]').value.trim();
+    const errs = [];
+    if(!actor) errs.push(['suppActor','缺少操作人']);
+    if(text.length < 2) errs.push(['suppText','缺少补充内容']);
+    document.querySelectorAll('.fld').forEach(x => x.classList.remove('err'));
+    if(errs.length){
+      errs.forEach(([f,m]) => { const b = document.querySelector(`.fld[data-fld="${f}"]`); if(b){ b.classList.add('err'); b.querySelector('.fld-err').textContent = m; } });
+      return;
+    }
+    addSupplement(t, text, actor);
+    closeModal(); renderAll(); toast('补充记录已追加（不可编辑）');
+  });
+}
+
+function ownerModal(id){
+  const t = task(id);
+  openModal('变更负责人 · ' + t.id, '旧负责人 ' + (t.o||'（空）') + ' 会写进留底，不被覆盖', `
+    ${fieldRow('newOwner','新负责人',`<input type="text" name="newOwner" placeholder="开发者标识">`,true,'')}
+    ${fieldRow('ownerActor','操作人',`<input type="text" name="ownerActor" value="${esc(t.o||'')}" placeholder="开发者标识">`,true,'谁做的交接')}
+    ${fieldRow('ownerReason','交接原因',`<input type="text" name="ownerReason" placeholder="如：原负责人转去做 P4 复核页">`,false,'建议填写')}`,
+    `<button class="btn" data-close="1">取消</button><button class="btn primary" id="doOwner">确认变更</button>`);
+  $('#doOwner').addEventListener('click', () => {
+    const n = $('input[name="newOwner"]').value.trim();
+    const a = $('input[name="ownerActor"]').value.trim();
+    const r = $('input[name="ownerReason"]').value.trim();
+    document.querySelectorAll('.fld').forEach(x => x.classList.remove('err'));
+    if(!n || !a){
+      if(!n){ const b = document.querySelector('.fld[data-fld="newOwner"]'); b.classList.add('err'); b.querySelector('.fld-err').textContent = '缺少新负责人'; }
+      if(!a){ const b = document.querySelector('.fld[data-fld="ownerActor"]'); b.classList.add('err'); b.querySelector('.fld-err').textContent = '缺少操作人'; }
+      return;
+    }
+    changeOwner(t, n, a, r);
+    closeModal(); renderAll(); toast('负责人已变更，旧负责人已留痕');
+  });
+}
+
+/* ========== 9. 导出 / 导入 / 重置 ========== */
+function download(name, content, mime){
+  const blob = new Blob([content], {type:mime});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+}
+const CSV_HEAD = ['时间','任务ID','任务标题','流','类型','从','到','操作人','备注','证据'];
+function toCSV(rows){
+  const q = v => {
+    const s = String(v==null?'':v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+  };
+  return '\ufeff' + [CSV_HEAD.join(',')].concat(rows.map(r => [r.ts,r.taskId,r.taskTitle,r.stream,r.type,r.from,r.to,r.actor,r.note,r.evidence].map(q).join(','))).join('\r\n');
+}
+function stamp(){
+  const d = new Date(), p = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+}
+function exportLogsJson(rows){
+  download(`留底记录-${stamp()}.json`, JSON.stringify({exportedAt:nowStr(), source:'并发开发看板', count:rows.length, entries:rows}, null, 2), 'application/json');
+}
+function exportLogsCsv(rows){
+  download(`留底记录-${stamp()}.csv`, toCSV(rows), 'text/csv;charset=utf-8');
+}
+function exportAllJson(){
+  download(`并发开发看板-交接-${stamp()}.json`, JSON.stringify({
+    exportedAt:nowStr(), v:state.v, tasks:state.tasks, logs:state.logs,
+    seedMarker:state.seedMarker, userOwned:!!state.userOwned,
+    extdeps:state.extdeps, syncedAt:state.syncedAt
+  }, null, 2), 'application/json');
+  toast('已导出交接 JSON（含任务与全部流水）');
+}
+function importJson(file){
+  const fr = new FileReader();
+  fr.onload = () => {
+    let d;
+    try{ d = JSON.parse(fr.result); }
+    catch(e){ toast('导入失败：不是合法 JSON', true); return; }
+    if(!d || !Array.isArray(d.tasks) || !Array.isArray(d.logs)){ toast('导入失败：缺少 tasks / logs 字段', true); return; }
+    const bad = d.tasks.filter(t => !t.id || !t.st || !STATUS[t.st]);
+    if(bad.length){ toast('导入失败：存在非法状态或缺少 id 的任务', true); return; }
+    openModal('导入确认', '将覆盖当前本地数据', `
+      <p style="font-size:13px;margin:0 0 8px">文件包含 <b>${d.tasks.length}</b> 个任务、<b>${d.logs.length}</b> 条流水。</p>
+      <div class="lock-note" style="background:var(--warn-bg);border-color:var(--warn-line);color:#8f2f22">导入会整体替换当前浏览器中的任务与流水，且不可撤销。历史流水会随文件一并恢复。</div>
+      <label class="muted" style="font-size:12px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="imOk"> 我确认用该文件替换当前数据</label>`,
+      `<button class="btn" data-close="1">取消</button><button class="btn primary" id="doImport" disabled>确认导入</button>`);
+    $('#imOk').addEventListener('change', e => { $('#doImport').disabled = !e.target.checked; });
+    $('#doImport').addEventListener('click', () => {
+      state = {v:3, tasks:d.tasks, logs:d.logs, createdAt:d.exportedAt||nowStr(),
+        userOwned:true,   // 导入即用户自有数据层：不因种子指纹变化被自动丢弃
+        extdeps:(d.extdeps&&d.extdeps.length?d.extdeps:EXTERNAL_DEPS.map(x => ({id:x.id, done:false}))),
+        syncedAt:d.syncedAt||'', syncedSeq:(typeof d.syncedSeq === 'number' ? d.syncedSeq : undefined)};
+      state.tasks.forEach(t => { t.note=t.note||''; t.ev=t.ev||''; t.by=t.by||''; t.at=t.at||''; if(!Array.isArray(t.p)) t.p=[]; });
+      state.logs.forEach((l, i) => { if(!l.id) l.id = uid('L'); if(typeof l.seq !== 'number') l.seq = i + 1; });
+      state.logs.sort((a,b) => a.seq - b.seq);
+      if(typeof state.syncedSeq !== 'number') state.syncedSeq = lastLogSeq();
+      save(); closeModal(); renderAll(); toast('导入完成');
+    });
+  };
+  fr.readAsText(file, 'utf-8');
+}
+function resetModal(){
+  openModal('重置为初始种子数据', '二次确认', `
+    <p style="font-size:13px;margin:0 0 8px">当前有 <b>${state.tasks.length}</b> 个任务、<b>${state.logs.length}</b> 条流水，将全部丢弃并恢复到内置种子数据（9 条流 S0–S8 + ${SEED_TASKS.length} 个任务）。</p>
+    <div class="lock-note" style="background:var(--warn-bg);border-color:var(--warn-line);color:#8f2f22">此操作不可撤销。如需保留，请先「导出 JSON」。</div>
+    ${fieldRow('confirmWord','请输入「重置」二字以确认',`<input type="text" name="confirmWord" placeholder="重置">`,true,'')}`,
+    `<button class="btn" data-close="1">取消</button><button class="btn danger" id="doReset" disabled>确认重置</button>`);
+  const inp = $('input[name="confirmWord"]');
+  inp.addEventListener('input', () => { $('#doReset').disabled = inp.value.trim() !== '重置'; });
+  $('#doReset').addEventListener('click', () => {
+    state = seedState(); save(); closeModal(); renderAll(); toast('已重置为初始种子数据');
+  });
+}
+
+/* ========== 9.5 dev-ledger.json：留底真源 ========== */
+const LEDGER_FIELDS = {
+  seq: '单调递增整数，写入时分配（本地最大 seq + 1）；排序与「谁覆盖谁」的唯一依据',
+  ts: 'ISO 时间，本地时区，精确到分钟；仅用于展示与时钟异常检测（ts 倒退/未来 ts 告警），不参与排序',
+  task_id: '任务 ID，如 T302',
+  task_title: '任务标题（便于人读，可缺）',
+  stream: '流编号 S0–S8',
+  type: '状态流转 / 负责人变更 / 补充记录',
+  from: '原状态标签；补充记录为 —',
+  to: '新状态标签；补充记录为 —',
+  actor: '开发者标识（必填）',
+  evidence: '分支 / 提交 / PR / 产物链接（待评审必填）',
+  note: '备注 / 验收结论 / 阻塞原因',
+  payload_before: '变更前状态快照（可选）',
+  payload_after: '变更后状态快照（可选）'
+};
+const LABEL2KEY = {};
+Object.keys(STATUS).forEach(k => { LABEL2KEY[STATUS[k].label] = k; });
+
+function ledgerEntries(){
+  return state.logs.slice().sort((a,b) => a.seq - b.seq).map(l => ({
+    seq: l.seq, ts: l.ts, task_id: l.taskId, task_title: l.taskTitle, stream: l.stream, type: l.type,
+    from: l.from, to: l.to, actor: l.actor, evidence: l.evidence || '', note: l.note || '',
+    payload_before: l.payload_before, payload_after: l.payload_after
+  }));
+}
+function exportLedger(){
+  const payload = {
+    schema_version: 2,
+    generated_by: 'concurrent-dev-board',
+    updated_at: nowStr(),
+    append_only: true,
+    fields: LEDGER_FIELDS,
+    entries: ledgerEntries()
+  };
+  download('dev-ledger.json', JSON.stringify(payload, null, 2), 'application/json');
+  state.syncedAt = lastLogTs() || nowStr();
+  state.syncedSeq = maxSeq();
+  save(); renderLedgerStatus();
+  toast(`已导出 dev-ledger.json（${state.logs.length} 条），同步标记已更新`);
+}
+// 去重键：有 seq 用 seq（seq 是「谁覆盖谁」的唯一依据）；旧格式无 seq 时退回 ts+task+from+to+actor
+function ledgerIdKey(e){
+  if(e.seq !== null && e.seq !== undefined && e.seq !== '' && Number.isFinite(Number(e.seq))) return 'seq:' + Number(e.seq);
+  return [e.ts, e.taskId, e.from, e.to, e.actor].join('|');
+}
+
+// 合并：按 seq 升序；同任务取 seq 最大者；重复去重；互斥/更旧矛盾标红。
+// 旧格式（无 seq）条目按 ts 升序接在本地最大 seq 之后，回放时以 ts 兜底判定新旧。
+function mergeLedger(data, filename){
+  const raw = Array.isArray(data) ? data : (data && data.entries);
+  if(!Array.isArray(raw)) throw new Error('缺少 entries 数组');
+  const hasSeq = v => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
+  const incoming = raw.map(e => ({
+    seq: hasSeq(e.seq) ? Number(e.seq) : null,
+    ts: String(e.ts || '').slice(0,16).replace('T',' '),
+    taskId: e.task_id || e.taskId || '',
+    taskTitle: e.task_title || e.taskTitle || '',
+    stream: e.stream || '',
+    type: e.type || '状态流转',
+    from: e.from || '—',
+    to: e.to || '—',
+    actor: e.actor || '',
+    evidence: e.evidence || '',
+    note: e.note || '',
+    payload_before: e.payload_before,
+    payload_after: e.payload_after
+  })).filter(e => e.ts && e.taskId);
+  if(!incoming.length) throw new Error('没有可用条目（需要 ts 与 task_id）');
+
+  // 有 seq 的按 seq 升序在前；缺 seq 的按 ts 升序排在后
+  incoming.sort((a,b) => {
+    if(a.seq !== null && b.seq !== null) return a.seq - b.seq;
+    if(a.seq !== null) return -1;
+    if(b.seq !== null) return 1;
+    return a.ts.localeCompare(b.ts);
+  });
+
+  const existing = new Set(state.logs.map(ledgerIdKey));
+  const localBySeq = new Map();
+  state.logs.forEach(l => { if(Number.isFinite(Number(l.seq))) localBySeq.set(Number(l.seq), l); });
+
+  const seen = new Map();
+  const fresh = [];
+  let dupLocal = 0, dupInFile = 0, conflicts = 0, reseq = 0, replaced = 0;
+  let seqCursor = maxSeq();
+
+  incoming.forEach(e => {
+    if(e.seq !== null && localBySeq.has(e.seq)){
+      const local = localBySeq.get(e.seq);
+      const same = local.taskId === e.taskId && local.ts === e.ts && (local.note||'') === e.note && (local.evidence||'') === e.evidence;
+      if(same){ dupLocal++; return; }
+      if(local._seed){
+        // 本地是同 seq 的种子流水 → 用文件条目替换，不算冲突
+        e._replaces = local.id; replaced++;
+        existing.delete('seq:' + e.seq);
+        const idx = state.logs.findIndex(l => l.id === local.id);
+        if(idx >= 0) state.logs.splice(idx, 1);
+        localBySeq.delete(e.seq);
+      } else {
+        // 同一 seq 指向不同记录（真实冲突）→ 保留本地，导入方顺延新 seq 并标红
+        e._conflict = true; conflicts++; e.seq = ++seqCursor; reseq++;
+      }
+    } else if(e.seq === null){
+      // 旧格式文件：接在本地最大 seq 之后，并标记为「按 ts 兜底判新旧」
+      e.seq = ++seqCursor; e._assigned = true; reseq++;
+    }
+    const k = ledgerIdKey(e);
+    if(seen.has(k)){
+      const prev = seen.get(k);
+      if((prev.note||'') !== e.note || (prev.evidence||'') !== e.evidence){ prev._conflict = true; e._conflict = true; conflicts++; }
+      else dupInFile++;
+      return;
+    }
+    seen.set(k, e);
+    if(existing.has(k)){ dupLocal++; return; }
+    fresh.push(e);
+  });
+
+  // 每任务本地最后 seq / 最后 ts（导入前）
+  const localLastSeq = {}, localLastTs = {};
+  state.logs.forEach(l => {
+    const s = Number(l.seq) || 0;
+    if(!(l.taskId in localLastSeq) || s > localLastSeq[l.taskId]) localLastSeq[l.taskId] = s;
+    if(!(l.taskId in localLastTs) || l.ts > localLastTs[l.taskId]) localLastTs[l.taskId] = l.ts;
+  });
+
+  const latest = {};
+  fresh.forEach(e => { if(!latest[e.taskId] || e.seq > latest[e.taskId].seq) latest[e.taskId] = e; });
+
+  Object.keys(latest).forEach(tid => {
+    const t = task(tid);
+    if(!t) return;
+    const e = latest[tid];
+    const target = LABEL2KEY[e.to];
+    // 有 seq 的按 seq 比新旧（ts 倒退不影响）；旧格式无 seq 的按 ts 兜底
+    const newer = e._assigned ? (e.ts > (localLastTs[tid] || '')) : (e.seq > (localLastSeq[tid] || 0));
+    if(newer){
+      if(target && STATUS[t.st].label !== e.to){
+        t.st = target;
+        if(target === 'doing'){ if(e.payload_after){ t.o = e.payload_after.owner || t.o; t.s0 = e.payload_after.start || t.s0; } }
+        if(target === 'review') t.ev = e.evidence || t.ev;
+        if(target === 'done'){ t.note = e.note || t.note; t.by = e.actor || t.by; t.at = e.ts; }
+        if(target === 'block') t.note = e.note || t.note;
+        if(e.payload_after && e.payload_after.owner) t.o = e.payload_after.owner;
+      }
+    } else if(target && STATUS[t.st].label !== e.to){
+      e._conflict = true; conflicts++;
+    }
+  });
+
+  fresh.forEach(e => {
+    state.logs.push({
+      id: uid('L'), seq: e.seq, ts: e.ts, taskId: e.taskId, taskTitle: e.taskTitle || (task(e.taskId) ? task(e.taskId).t : e.taskId),
+      stream: e.stream || (task(e.taskId) ? task(e.taskId).s : ''), type: e.type,
+      from: e.from, to: e.to, actor: e.actor, note: e.note, evidence: e.evidence,
+      payload_before: e.payload_before, payload_after: e.payload_after,
+      _conflict: !!e._conflict, _imported: true
+    });
+  });
+  state.logs.sort((a,b) => a.seq - b.seq);
+  state.syncedAt = lastLogTs();
+  state.syncedSeq = maxSeq();
+  state.importedFrom = filename || 'dev-ledger.json';
+  state.userOwned = true;   // 合并留底即用户数据层，不再被种子指纹判失效
+  save();
+  return {added: fresh.length, dupLocal, dupInFile, conflicts, reseq, replaced, clock: clockAnomalies()};
+}
+
+function importLedgerFile(file){
+  const fr = new FileReader();
+  fr.onload = () => {
+    let d;
+    try{ d = JSON.parse(fr.result); }
+    catch(e){ toast('导入失败：不是合法 JSON', true); return; }
+    const count = Array.isArray(d) ? d.length : (d && Array.isArray(d.entries) ? d.entries.length : 0);
+    if(!count){ toast('导入失败：缺少 entries 数组', true); return; }
+    openModal('导入 dev-ledger.json', file.name, `
+      <p style="font-size:12.5px;margin:0 0 8px">文件含 <b>${count}</b> 条留底；当前本地 <b>${state.logs.length}</b> 条。</p>
+      <div class="lock-note" style="background:#f7f8fa;border-color:var(--line);color:var(--ink2)">
+        <b>合并策略（seq 为准）</b><br>
+        ① 按 <code>seq</code> 升序追加，重复条目（seq 相同且内容一致）去重；<br>
+        ② 同一任务取 <b>seq 最大</b> 的状态作为当前状态，<code>ts</code> 不参与排序；<br>
+        ③ 只有 seq 大于本地该任务最大 seq 的条目才回放任务字段，更旧的只并入历史；<br>
+        ④ 同一 seq 指向不同记录 → 保留本地、导入方顺延新 seq，该行标红，人工裁定；<br>
+        ⑤ 旧格式无 seq 的条目按 ts 升序接在本地最大 seq 之后，回放时以 ts 兜底；<br>
+        ⑥ ts 倒退或未来 ts 只在状态栏提示「时钟异常」，不改变排序、不阻断合并。
+      </div>
+      <label class="muted" style="font-size:12px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="ledOk"> 我确认按上述策略合并（不删除任何已有留底）</label>`,
+      `<button class="btn" data-close="1">取消</button><button class="btn primary" id="doLedger" disabled>确认合并</button>`);
+    $('#ledOk').addEventListener('change', e => { $('#doLedger').disabled = !e.target.checked; });
+    $('#doLedger').addEventListener('click', () => {
+      try{
+        const r = mergeLedger(d, file.name);
+        closeModal(); renderAll();
+        const ca = r.clock || {back:[], future:[]};
+        const clockTxt = (ca.back.length || ca.future.length)
+          ? `；时钟异常告警：${ca.back.length?`ts 倒退 ${ca.back.length} 条`:''}${ca.back.length&&ca.future.length?'，':''}${ca.future.length?`未来 ts ${ca.future.length} 条`:''}（不阻断）`
+          : '';
+        toast(`合并完成：新增 ${r.added} 条，本地重复去重 ${r.dupLocal} 条${r.replaced?`，替换种子流水 ${r.replaced} 条`:''}${r.dupInFile?`，文件内重复 ${r.dupInFile} 条`:''}${r.conflicts?`，冲突标红 ${r.conflicts} 条`:''}${r.reseq?`，seq 顺延 ${r.reseq} 条`:''}${clockTxt}`, !!r.conflicts);
+      }catch(err){ toast('合并失败：' + err.message, true); }
+    });
+  };
+  fr.readAsText(file, 'utf-8');
+}
+
+/* ========== 10. 事件与初始化 ========== */
+function bind(){
+  document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === b));
+    const v = b.dataset.view;
+    $('#boardView').hidden = v !== 'board';
+    $('#auditView').hidden = v !== 'audit';
+  }));
+
+  $('#btnExportJson').addEventListener('click', exportAllJson);
+  $('#btnExportCsv').addEventListener('click', () => exportLogsCsv(state.logs.slice().sort((a,b)=>b.seq-a.seq)));
+  $('#btnImport').addEventListener('click', () => $('#fileImport').click());
+  $('#fileImport').addEventListener('change', e => {
+    const f = e.target.files[0];
+    if(f) importJson(f);
+    e.target.value = '';
+  });
+  $('#btnReset').addEventListener('click', resetModal);
+  $('#btnSnapshots').addEventListener('click', snapshotsModal);
+  $('#btnAuditJson').addEventListener('click', () => exportLogsJson(filteredLogs()));
+  $('#btnAuditCsv').addEventListener('click', () => exportLogsCsv(filteredLogs()));
+
+  // dev-ledger.json：真源导出 / 合并导入
+  $('#btnExportLedger').addEventListener('click', exportLedger);
+  $('#btnImportLedger').addEventListener('click', () => $('#fileLedger').click());
+  $('#fileLedger').addEventListener('change', e => {
+    const f = e.target.files[0];
+    if(f) importLedgerFile(f);
+    e.target.value = '';
+  });
+
+  const sel = $('#fStream');
+  sel.innerHTML = '<option value="">全部流</option>' + STREAMS.map(s => `<option value="${s.id}">${s.id} ${esc(s.name)}</option>`).join('');
+  const sync = () => {
+    filters = {
+      task: $('#fTask').value.trim(),
+      stream: sel.value,
+      actor: $('#fActor').value.trim(),
+      from: $('#fFrom').value,
+      to: $('#fTo').value
+    };
+    renderAudit();
+  };
+  ['#fTask','#fActor','#fFrom','#fTo'].forEach(s => $(s).addEventListener('input', sync));
+  sel.addEventListener('change', sync);
+  $('#fClear').addEventListener('click', () => {
+    $('#fTask').value = ''; sel.value = ''; $('#fActor').value = ''; $('#fFrom').value = ''; $('#fTo').value = '';
+    sync();
+  });
+
+  $('#ownerFilter').addEventListener('input', renderLanes);
+
+  document.addEventListener('click', e => {
+    const ext = e.target.closest('[data-ext]');
+    if(ext){
+      const id = ext.dataset.ext, done = ext.dataset.done === '1';
+      if(!Array.isArray(state.extdeps)) state.extdeps = EXTERNAL_DEPS.map(x => ({id:x.id, done:false}));
+      const item = state.extdeps.find(x => x.id === id);
+      if(item) item.done = done; else state.extdeps.push({id, done});
+      save(); renderExternal();
+      const left = pendingExt().length;
+      toast(done
+        ? (left ? `已标记完成，仍有 ${left} 项外部依赖未完成：不可宣称上线` : '三项外部依赖均已完成，可按 G3 口径宣称上线')
+        : '已标记为未完成：不可宣称上线', !done);
+      return;
+    }
+    const btn = e.target.closest('[data-act]');
+    if(btn){
+      const id = btn.dataset.id, act = btn.dataset.act;
+      if(act === 'move') moveModal(id);
+      if(act === 'detail') detailModal(id);
+      if(act === 'supp') suppModal(id);
+      if(act === 'owner') ownerModal(id);
+      return;
+    }
+    if(e.target.closest('[data-close]')) closeModal();
+    if(e.target.id === 'mClose') closeModal();
+    if(e.target.id === 'mask') closeModal();
+  });
+  document.addEventListener('keydown', e => { if(e.key === 'Escape') closeModal(); });
+}
+
+load();
+bind();
+renderAll();
+
+</script>
+</body>
+</html>
