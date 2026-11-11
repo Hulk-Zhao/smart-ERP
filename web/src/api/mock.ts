@@ -784,8 +784,8 @@ function decide(ticketId: string, decision: 'approve' | 'reject', body: Record<s
   if (!body.role) return problem(409, 'E-POLICY-APPROVAL', '审批角色必填');
   if (row.ticket_id === T_DUAL && body.role !== 'approver') {
     return problem(409, 'E-POLICY-APPROVAL', '审批未满足：还需 approver（财务/业务负责人）审批', {
-      missing_roles: ['approver'],
-      required_roles: ['reviewer', 'approver'],
+      approval_missing_roles: ['approver'],
+      approval_required_roles: ['reviewer', 'approver'],
     });
   }
   if (decision === 'reject' && !String(body.comment ?? '').trim()) {

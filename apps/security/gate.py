@@ -38,7 +38,28 @@ class LevelNotAllowed(AccessDenied):
 
 
 class ApprovalNotSatisfied(AccessDenied):
+    """执行闸的审批差集。字段与 ``TicketDetailOut`` 同名同义，直接进 problem body。
+
+    ``execution_*`` 是执行闸实际核对的那一组（含 B 级强制双签）；
+    ``approval_*`` 是审批链自身的阈值——用它区分「审批就缺」与「审批齐了、执行缺」。
+    """
+
     code = ErrorCode.POLICY_APPROVAL
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        approval_required: tuple[str, ...] = (),
+        approval_missing: tuple[str, ...] = (),
+        execution_required: tuple[str, ...] = (),
+        execution_missing: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.approval_required = approval_required
+        self.approval_missing = approval_missing
+        self.execution_required = execution_required
+        self.execution_missing = execution_missing
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +146,21 @@ class AccessGate:
                 force_dual=lease.requires_dual_review,
             )
             raise ApprovalNotSatisfied(
-                f"审批未满足（G-04）：缺少角色 {list(missing)}"
+                f"审批未满足（G-04）：缺少角色 {list(missing)}",
+                approval_required=self._approvals.required_roles(
+                    level=level,
+                    amount=request.amount,
+                    touches_fund=request.touches_fund,
+                ),
+                approval_missing=self._approvals.missing_roles(
+                    ticket_id=request.ticket_id,
+                    level=level,
+                    amount=request.amount,
+                    touches_fund=request.touches_fund,
+                    initiator_id=request.session.user_id,
+                ),
+                execution_required=required,
+                execution_missing=missing,
             )
 
         return AccessGrant(

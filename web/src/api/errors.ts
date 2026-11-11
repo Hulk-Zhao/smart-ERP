@@ -11,6 +11,11 @@ export interface ProblemBody {
   trace_id?: string;
   retriable?: boolean;
   fail_code?: FailCode;
+  /** 角色差集：与工单详情同名字段同义；仅 E-POLICY-APPROVAL 的 409 携带。 */
+  approval_required_roles?: string[] | null;
+  approval_missing_roles?: string[] | null;
+  execution_required_roles?: string[] | null;
+  execution_missing_roles?: string[] | null;
 }
 
 export class ApiError extends Error {

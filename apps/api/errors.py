@@ -24,7 +24,7 @@ from apps.platform.contracts.errors import ErrorCode
 from apps.platform.contracts.ticket import IllegalTransition
 from apps.platform.policy.gateway import WriteGatewayError
 from apps.security.approvals import ApprovalError
-from apps.security.gate import AccessDenied
+from apps.security.gate import AccessDenied, ApprovalNotSatisfied
 from apps.security.identity import IdentityError
 from apps.security.roles import RoleDenied
 from apps.security.scope import ScopeViolation
@@ -43,6 +43,18 @@ def as_problem(exc: BaseException) -> ProblemError | None:
     # 顺序：子类在前，避免父类把更具体的错误码盖掉（W3NotApprovable 等）。
     if isinstance(exc, ScopeViolation):
         return ProblemError(ErrorCode.AUTHZ_SCOPE, str(exc))
+    if isinstance(exc, ApprovalNotSatisfied):
+        # 结构化差集进 problem body：前端 chip 在真后端也亮，不靠解析 detail。
+        return ProblemError(
+            exc.code,
+            str(exc),
+            roles={
+                "approval_required_roles": exc.approval_required,
+                "approval_missing_roles": exc.approval_missing,
+                "execution_required_roles": exc.execution_required,
+                "execution_missing_roles": exc.execution_missing,
+            },
+        )
     if isinstance(exc, AccessDenied):
         return ProblemError(exc.code, str(exc))
     if isinstance(exc, RoleDenied):

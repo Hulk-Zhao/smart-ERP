@@ -17,6 +17,19 @@ from dataclasses import dataclass, field
 from uuid import UUID
 
 import pytest
+from conftest import (
+    APPROVER,
+    INITIATOR,
+    ORG,
+    PERIOD,
+    PREFIX,
+    REVIEWER,
+    SCENE,
+    SYSTEM,
+    TENANT,
+    EmptyPriceBook,
+    _ticket,
+)
 from fastapi.testclient import TestClient
 
 from apps.api import configure_container, reset_container
@@ -30,19 +43,6 @@ from apps.platform.contracts.ticket import TicketState
 from apps.platform.policy.gateway import FieldScopeViolation, WriteGateway
 from apps.platform.policy.levels import SceneSpec, WriteLevel
 from apps.security.identity import ScopeGrant, UserPrincipal
-from conftest import (
-    APPROVER,
-    INITIATOR,
-    ORG,
-    PERIOD,
-    PREFIX,
-    SCENE,
-    SYSTEM,
-    TENANT,
-    REVIEWER,
-    EmptyPriceBook,
-    _ticket,
-)
 
 _PO_ACTION = "u8.po.create_draft"
 
@@ -404,7 +404,14 @@ def test_approval_roles_and_execution_roles_are_separately_named(
 
     blocked = write_env.execute("w2", key="k-roles-exec-blocked")
     assert blocked.status_code == 409, blocked.text
-    assert blocked.json()["code"] == "E-POLICY-APPROVAL"
+    blocked_body = blocked.json()
+    assert blocked_body["code"] == "E-POLICY-APPROVAL"
+    # 409 必须带结构化差集：前端 chip 靠它，不靠解析 detail 文本。
+    # 与详情/决定响应用同一组名字，审批一票 ≠ 执行一票。
+    assert blocked_body["approval_required_roles"] == ["approver"]
+    assert blocked_body["approval_missing_roles"] == []
+    assert blocked_body["execution_required_roles"] == ["approver", "reviewer"]
+    assert blocked_body["execution_missing_roles"] == ["reviewer"]
     assert write_env.stub.state.receipts == []
 
     reviewed = write_env.decision(
