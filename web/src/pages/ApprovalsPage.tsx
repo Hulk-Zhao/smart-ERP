@@ -325,6 +325,11 @@ export function ApprovalsPage() {
                       <option key={item} value={item}>{item}</option>
                     ))}
                   </select>
+                  {config.roles.length === 0 ? (
+                    <span className="mt-1 block text-[10.5px] leading-4 text-amber-700">
+                      会话未返回审批角色，提交会被服务端拒绝
+                    </span>
+                  ) : null}
                 </label>
                 <div className="min-w-0 text-[11px] text-slate-500">
                   <div className="label">当前身份</div>
