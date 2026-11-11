@@ -163,12 +163,20 @@ async function request<K extends keyof ApiOperations>(
   return parseJson<Operation<K>['response']>(result);
 }
 
-function ticketPath(ticketId: string, suffix = ''): string {
+export function ticketPath(ticketId: string, suffix = ''): string {
   return `/v1/tickets/${encodeURIComponent(ticketId)}${suffix}`;
 }
 
-function batchPath(batchId: string, suffix = ''): string {
+export function batchPath(batchId: string, suffix = ''): string {
   return `/v1/recon/runs/${encodeURIComponent(batchId)}${suffix}`;
+}
+
+export function meteringPath(batchId: string, suffix = ''): string {
+  return `/v1/metering/batches/${encodeURIComponent(batchId)}${suffix}`;
+}
+
+export function auditPath(ticketId: string, suffix = ''): string {
+  return `/v1/audit/tickets/${encodeURIComponent(ticketId)}${suffix}`;
 }
 
 export interface AuditExport {
@@ -246,12 +254,12 @@ export const api = {
   getMeteringStatement(batchId: string): Promise<MeteringStatementOut> {
     return request<'GET /v1/metering/batches/{batch_id}/statement'>(
       'GET',
-      `/v1/metering/batches/${encodeURIComponent(batchId)}/statement`,
+      meteringPath(batchId, '/statement'),
     );
   },
 
   async exportMeteringCsv(batchId: string): Promise<MeteringExport> {
-    const result = await sendJson('GET', `/v1/metering/batches/${encodeURIComponent(batchId)}/statement`, {
+    const result = await sendJson('GET', meteringPath(batchId, '/statement'), {
       query: { format: 'csv' },
     });
     if (result.status >= 400) throw toApiError(result.status, result.text);
@@ -271,7 +279,7 @@ export const api = {
   listAuditImages(ticketId: string, params: ListImagesParams = {}): Promise<PageAuditImageOut> {
     return request<'GET /v1/audit/tickets/{ticket_id}/images'>(
       'GET',
-      `/v1/audit/tickets/${encodeURIComponent(ticketId)}/images`,
+      auditPath(ticketId, '/images'),
       { query: params as Record<string, unknown> },
     );
   },
@@ -279,7 +287,7 @@ export const api = {
   getAuditChain(ticketId: string): Promise<AuditChainOut> {
     return request<'GET /v1/audit/tickets/{ticket_id}/chain'>(
       'GET',
-      `/v1/audit/tickets/${encodeURIComponent(ticketId)}/chain`,
+      auditPath(ticketId, '/chain'),
     );
   },
 

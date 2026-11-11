@@ -51,7 +51,8 @@ export function OverviewPage() {
   const config = useApiConfig();
   const tickets = useQuery({
     queryKey: ['tickets', 'overview'],
-    queryFn: () => api.listTickets({ limit: 30 }),
+    // 真实接口上限 100（apps/api/deps.py PageLimit le=100）；取满以覆盖 KPI 与风险雷达。
+    queryFn: () => api.listTickets({ limit: 100 }),
   });
   const approvals = useQuery({
     queryKey: ['approvals', 'pending', 'overview'],

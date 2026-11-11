@@ -274,6 +274,15 @@
     --row-h: 36px;
   }
 
+  /* 顶栏密度开关：紧凑时行高 34px，一屏再多 2–3 行 */
+  html[data-density='compact'] {
+    --row-h: 34px;
+  }
+
+  html[data-density='compact'] .data-table thead th {
+    height: 32px;
+  }
+
   .num {
     font-variant-numeric: tabular-nums;
   }

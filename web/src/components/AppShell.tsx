@@ -277,6 +277,21 @@ export function AppShell() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [compact, setCompact] = useState(() => {
+    try {
+      return globalThis.localStorage?.getItem('smart-erp.web.density') === 'compact';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    document.documentElement.dataset.density = compact ? 'compact' : 'comfortable';
+    try {
+      globalThis.localStorage?.setItem('smart-erp.web.density', compact ? 'compact' : 'comfortable');
+    } catch {
+      // 仅影响持久化，不影响当前会话
+    }
+  }, [compact]);
   const [assistantOpen, setAssistantOpen] = useState(() => {
     // 窄屏不默认展开助手，避免首屏被抽屉遮住；桌面默认展开。
     const desktop = globalThis.matchMedia?.('(min-width: 1280px)').matches ?? true;
@@ -428,6 +443,16 @@ export function AppShell() {
             <SourceBadge compact />
           </div>
 
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => setCompact((current) => !current)}
+            aria-pressed={compact}
+            aria-label={compact ? '表格密度：紧凑，点击切换为舒适' : '表格密度：舒适，点击切换为紧凑'}
+            title={compact ? '表格密度：紧凑（点击切换）' : '表格密度：舒适（点击切换）'}
+          >
+            <span className="text-[11px] font-medium">{compact ? '紧凑' : '舒适'}</span>
+          </button>
           <button
             type="button"
             className="btn btn-ghost btn-sm"
