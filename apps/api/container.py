@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from apps.api.approval_sql import ApprovalStorePort
+from apps.api.audit_integrity import AuditIntegrityScanner
 from apps.api.errors import IdemConflict
 from apps.api.metering import MeteringPolicy
 from apps.api.price_book import PriceBookLookup
@@ -20,8 +22,8 @@ from apps.api.recon_store import ReconStore
 from apps.api.store import (
     ReconBatchRepository,
     ReconDatasetRegistry,
-    TicketRepository,
 )
+from apps.api.ticket_sql import SqlTicketRepository, TicketStorePort
 from apps.audit.ledger import AuditLedger
 from apps.platform.api.errors import ProblemError
 from apps.platform.connectors.sdk import Connector, ConnectorMeta
@@ -98,7 +100,13 @@ class IdempotencyStore:
 
 @dataclass
 class ApiContainer:
-    tickets: TicketRepository = field(default_factory=TicketRepository)
+    #: 工单端口：生产默认 PostgreSQL（读库 + 事件化写同一条路径）；
+    #: 测试显式注入内存 ``TicketRepository``，不连库。
+    tickets: TicketStorePort = field(default_factory=SqlTicketRepository)
+    #: 审批记录持久化端口；``None`` 表示纯进程内（单测默认，行为与改造前一致）。
+    approval_records: ApprovalStorePort | None = None
+    #: 孤儿 ``audit_image_id`` 巡检；``None`` 表示不启动后台巡检（单测默认）。
+    audit_integrity: AuditIntegrityScanner | None = None
     recon_batches: ReconBatchRepository = field(default_factory=ReconBatchRepository)
     recon_datasets: ReconDatasetRegistry = field(default_factory=ReconDatasetRegistry)
     ledger: AuditLedger = field(default_factory=AuditLedger)
@@ -179,6 +187,8 @@ class ApiContainer:
             connector,
             approvals=ApprovalGateAdapter(self.approvals, {ticket_id: facts}),
             narrowed_fields=narrowed_fields,
+            # 必须用容器注册表：``/metrics`` 挂的是它，用默认单例会写出「端点 200 但空值」。
+            metrics=self.metrics,
         )
 
 
@@ -195,7 +205,26 @@ def configure_container(container: ApiContainer) -> None:
 def get_container() -> ApiContainer:
     global _CONTAINER
     if _CONTAINER is None:
-        _CONTAINER = ApiContainer()
+        # 生产装配：工单/审批都落 PostgreSQL；巡检复用同一个指标注册表，
+        # 保证 ``/metrics`` 能读到后台巡检写的值。
+        from apps.api.approval_sql import SqlApprovalStore
+        from apps.api.demo_session import bind_demo_session
+        from apps.audit.ledger import AuditLedger
+        from apps.audit.store import SqlAuditStore
+        from apps.platform.config import get_settings
+        from apps.platform.db.session import build_engine, build_session_factory
+
+        settings = get_settings()
+        # 审计读路径与巡检同源：影像来自 erp.audit_image（见 apps/audit/image_link.py），
+        # 生产不再使用进程内台账，否则重启后证据区为空、且与 B-AUDIT-ORPHAN 各数一套。
+        audit_store = SqlAuditStore(build_session_factory(build_engine(settings)))
+        _CONTAINER = ApiContainer(
+            approval_records=SqlApprovalStore(),
+            ledger=AuditLedger(store=audit_store),
+        )
+        _CONTAINER.audit_integrity = AuditIntegrityScanner(metrics=_CONTAINER.metrics)
+        # demo 档静态会话：部署期 env 注入，默认关闭；full/生产由 Settings 拒绝启动。
+        bind_demo_session(_CONTAINER, get_settings())
     return _CONTAINER
 
 

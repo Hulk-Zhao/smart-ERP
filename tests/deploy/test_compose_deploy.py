@@ -194,7 +194,11 @@ class ComposeStaticTest(unittest.TestCase):
             with self.subTest(service=name):
                 command = " ".join(str(part) for part in self.services[name]["command"])
                 self.assertIn(f"--queues={queue}", command)
-                self.assertIn(f"ERP_WORKER_QUEUES: {queue}", COMPOSE_FILE.read_text(encoding="utf-8"))
+                # 队列只经 command 生效；环境副本没有任何读取点，2026-11-11 已删除
+                # （B-COMPOSE-METRICS）。这里反过来锁住，避免又加回一份假配置。
+                self.assertNotIn(
+                    "ERP_WORKER_QUEUES", self.services[name].get("environment") or {}
+                )
 
         migrate = self.services["migrate"]
         self.assertEqual(migrate["restart"], "no", "migrate 必须是一次性服务")
@@ -782,7 +786,12 @@ class ArtifactsTest(unittest.TestCase):
         self.assertIn("CREATE ROLE erp_migrator", sql)
         self.assertIn("CONNECTION LIMIT 20", sql)
         self.assertIn("alembic_version_erp", sql)
-        self.assertIn("CREATE EXTENSION IF NOT EXISTS vector   SCHEMA erp", sql)
+        # vector 是可选前置：缺失时只告警跳过，不能阻断开通（demo 库无 pgvector）
+        self.assertIn("CREATE EXTENSION IF NOT EXISTS vector SCHEMA erp", sql)
+        self.assertIn("EXCEPTION WHEN OTHERS THEN", sql)
+        self.assertIn("pgvector 不可用，已跳过", sql)
+        self.assertIn("CREATE EXTENSION IF NOT EXISTS pg_trgm", sql)
+        self.assertIn("CREATE EXTENSION IF NOT EXISTS pgcrypto", sql)
         # 只收回本项目角色对 public 的权限；不许动全局 PUBLIC
         self.assertIn("REVOKE ALL ON SCHEMA public FROM erp_app", sql)
         self.assertNotRegex(

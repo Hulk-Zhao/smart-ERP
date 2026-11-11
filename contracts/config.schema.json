@@ -287,6 +287,102 @@
       "phase": "startup",
       "default": 30000
     },
+    "ERP_DEMO_SESSION_ENABLED": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "",
+      "description": "1/true/yes/on 才绑定部署期注入的 demo 静态会话；默认关闭，且 ERP_APP_ENV 必须为 demo，否则启动失败（apps/api/demo_session.py）。只读当前会话，不签发令牌"
+    },
+    "ERP_DEMO_SESSION_ORGS": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "",
+      "description": "demo 会话授权组织，逗号分隔（对应 G-05 org_id）"
+    },
+    "ERP_DEMO_SESSION_PERIODS": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "",
+      "description": "demo 会话授权期间，逗号分隔（对应 G-05 period）"
+    },
+    "ERP_DEMO_SESSION_ROLES": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "",
+      "description": "demo 会话角色，逗号分隔（如 reviewer,approver,cfo）；审批待办按它与发起人过滤"
+    },
+    "ERP_DEMO_SESSION_SYSTEMS": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "",
+      "description": "demo 会话授权系统，逗号分隔（对应 G-05 system_ids）"
+    },
+    "ERP_DEMO_SESSION_TENANT_ID": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "",
+      "description": "demo 会话租户 UUID；开启开关时必填"
+    },
+    "ERP_DEMO_SESSION_TOKEN": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
+      "required": false,
+      "secret": true,
+      "phase": "startup",
+      "default": "",
+      "description": "部署期注入的静态会话令牌（至少 16 字符）；只从请求头 X-Session-Token 或 Authorization: Bearer 读取，不接受 query 参数"
+    },
+    "ERP_DEMO_SESSION_USER_ID": {
+      "type": "string",
+      "scope": "compose",
+      "services": [
+        "api"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": "",
+      "description": "demo 会话用户 UUID；开启开关时必填"
+    },
     "ERP_DEPLOY_DIR": {
       "type": "string",
       "scope": "deploy",
@@ -648,6 +744,16 @@
       "phase": "startup",
       "default": "/data/objects"
     },
+    "ERP_ROLLBACK_SYNC_ENABLED": {
+      "type": "string",
+      "scope": "code",
+      "services": [],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": null,
+      "description": "true 才开放 POST /tickets/{id}/actions/compensate 的同步回滚（默认 false）：关闭时返回 503 E-ROLLBACK-UNAVAILABLE 且连接器零调用。该路径仍不写 ticket_event、仍有无痕窗口，仅作过渡，不得对外承诺"
+    },
     "ERP_S3_ACCESS_KEY": {
       "type": "string",
       "scope": "compose",
@@ -803,8 +909,8 @@
     },
     "ERP_METRICS_ENABLED": {
       "type": "string",
-      "scope": "code",
-      "services": [],
+      "scope": "compose",
+      "services": ["api"],
       "required": false,
       "secret": false,
       "phase": "startup",
@@ -813,8 +919,8 @@
     },
     "ERP_METRICS_PATH": {
       "type": "string",
-      "scope": "code",
-      "services": [],
+      "scope": "compose",
+      "services": ["api"],
       "required": false,
       "secret": false,
       "phase": "startup",

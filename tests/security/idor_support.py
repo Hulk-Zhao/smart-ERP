@@ -39,6 +39,7 @@ from apps.api.store import (
     PendingWrite,
     ReconBatchRecord,
     TicketRecord,
+    TicketRepository,
     TicketStepRecord,
 )
 from apps.main import create_app
@@ -145,6 +146,7 @@ def build_env() -> IdorEnv:
         scenes={SCENE: SceneSpec(code=SCENE, max_level=WriteLevel.W2)},
         metering=MeteringPolicy(unit_price=Decimal(1)),
         recon_store=InMemoryReconStore(),
+        tickets=TicketRepository(),
     )
     for action in (action_forward(), action_reverse()):
         container.actions.register(action)

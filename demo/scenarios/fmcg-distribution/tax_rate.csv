@@ -1,0 +1,3 @@
+scenario,effective_from,tax_code,tax_name,country,rate
+fmcg-distribution,2025-11-12,VAT13,增值税 13%,CN,0.130000
+fmcg-distribution,2025-11-12,VAT9,增值税 9%（农产品）,CN,0.090000

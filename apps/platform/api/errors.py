@@ -1,6 +1,6 @@
 """统一错误响应：所有异常都落成 RFC 9457 ``application/problem+json``，且带 ``trace_id``。
 
-错误码沿用 ``contracts/errors/codes.v1.json`` 的 20 个 ``E-*``（冻结契约，改码必须先改契约）。
+错误码沿用 ``contracts/errors/codes.v1.json`` 的 ``E-*``（冻结契约，改码必须先改契约）。
 传输层异常（405/500 等）没有专属业务码，按语义就近映射到现有码，响应状态码仍保留
 原始 HTTP 状态，避免为了包装层新增错误码而破坏冻结契约。
 """

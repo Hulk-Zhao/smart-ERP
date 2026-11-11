@@ -41,6 +41,7 @@ from core.runtime.queue import (
     DEFAULT_RETRY_BACKOFF_SECONDS,
     Job,
     JobQueueStore,
+    LeaseLostError,
 )
 
 logger = logging.getLogger("erp.worker")
@@ -53,6 +54,33 @@ DEFAULT_CONCURRENCY = 4
 DEFAULT_HEARTBEAT_SECONDS = 10.0
 DEFAULT_POLL_SECONDS = 1.0
 DEFAULT_DRAIN_SECONDS = 30.0
+
+# 任务租约每次续约的间隔是 lease/3（_run_job 的 asyncio.wait 超时）；
+# 心跳间隔不得超过租约的一半——再稀疏就会让 stale 回收与存活信号滞后一整个租约窗口。
+HEARTBEAT_RENEW_DIVISOR = 3
+HEARTBEAT_MAX_LEASE_RATIO = 0.5
+_HEARTBEAT_ENV = "ERP_HEARTBEAT_INTERVAL_SECONDS"
+
+
+def _heartbeat_seconds_from_env() -> tuple[float, str]:
+    """未给 --heartbeat-seconds 时读环境变量，返回 (秒数, 来源)。
+
+    空值回落默认 10s；非数字或 ≤0 直接抛 SystemExit 并带上键名，不静默回落——
+    compose 里写着一个看似生效的值而实际不生效，比没有这个变量更危险。
+    """
+    raw = os.environ.get(_HEARTBEAT_ENV)
+    if raw is None or not raw.strip():
+        return DEFAULT_HEARTBEAT_SECONDS, "default"
+    try:
+        value = float(raw)
+    except ValueError:
+        raise SystemExit(
+            f"{_HEARTBEAT_ENV}={raw!r} 不是数字；留空或删除该变量则使用默认 "
+            f"{DEFAULT_HEARTBEAT_SECONDS}s"
+        ) from None
+    if value <= 0:
+        raise SystemExit(f"{_HEARTBEAT_ENV}={raw!r} 必须 > 0")
+    return value, "env"
 
 
 HANDLERS: dict[str, JobHandler] = {}
@@ -86,6 +114,8 @@ async def _handle_sleep(job: Job) -> None:
 class WorkerStats:
     done: int = 0
     failed: int = 0
+    # 落账被拒（租约已被接管）：handler 跑完了，但结果没进账本，不能算 done。
+    discarded: int = 0
 
 
 @dataclass
@@ -96,6 +126,8 @@ class Worker:
     concurrency: int = DEFAULT_CONCURRENCY
     lease_seconds: float = DEFAULT_LEASE_SECONDS
     heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS
+    # 心跳的来源（cli/env/default），只用于启动日志对账，不参与调度决策。
+    heartbeat_source: str = "default"
     poll_seconds: float = DEFAULT_POLL_SECONDS
     drain_seconds: float = DEFAULT_DRAIN_SECONDS
     retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS
@@ -110,13 +142,55 @@ class Worker:
             raise ValueError("concurrency 必须 >= 1")
         if self.lease_seconds <= 0:
             raise ValueError("lease_seconds 必须 > 0")
-        # 心跳间隔必须小于租约 TTL：否则心跳还没写下一次，租约先过期，
+        # 心跳间隔必须明显小于租约 TTL：否则心跳还没写下一次，租约先过期，
         # 正常运行中的任务会被别的 worker 当成 stale 抢走（双跑）。
-        if self.heartbeat_seconds <= 0 or self.heartbeat_seconds >= self.lease_seconds:
+        if self.heartbeat_seconds <= 0:
             raise ValueError(
-                "heartbeat_seconds 必须 > 0 且 < lease_seconds（默认 10s / 60s）"
+                f"heartbeat_seconds={self.heartbeat_seconds} 必须 > 0"
+                f"（来自 {_HEARTBEAT_ENV} 或 --heartbeat-seconds）"
+            )
+        limit = self.lease_seconds * HEARTBEAT_MAX_LEASE_RATIO
+        if self.heartbeat_seconds > limit:
+            raise ValueError(
+                f"heartbeat_seconds={self.heartbeat_seconds} 超过上限 {limit}："
+                f"上限 = lease_seconds({self.lease_seconds}) × "
+                f"{HEARTBEAT_MAX_LEASE_RATIO}（租约的一半）；"
+                f"heartbeat 来自 {_HEARTBEAT_ENV} 或 --heartbeat-seconds，"
+                "lease 来自 --lease-seconds。"
+                "注意：调小租约默认值也会让原本合法的 heartbeat 变非法，"
+                "不是心跳配置写错了。"
+                "心跳比租约还稀疏时，stale 回收和存活信号会滞后一整个租约窗口。"
             )
         self.queue = JobQueueStore(self.session_factory)
+
+    @property
+    def heartbeat_limit(self) -> float:
+        """心跳间隔的硬上限（租约的一半），与启动日志同一个口径。"""
+        return self.lease_seconds * HEARTBEAT_MAX_LEASE_RATIO
+
+    @property
+    def lease_renew_seconds(self) -> float:
+        """任务租约的续约周期（lease/3），与 _run_job 的等待超时一致。"""
+        return self.lease_seconds / HEARTBEAT_RENEW_DIVISOR
+
+    def _log_startup(self) -> None:
+        """启动日志：配置值 / 来源 / 租约 / 续约周期 / 心跳上限，一次说全。
+
+        注释会腐烂，这行日志不会——「我把 30 改成了 300 为什么起不来」
+        的答案必须在 docker logs 里。
+        """
+        logger.info(
+            "worker %s 启动 queues=%s concurrency=%s heartbeat_seconds=%s source=%s "
+            "lease=%ss renew=%ss heartbeat_limit=%ss (lease/2)",
+            self.worker_id,
+            ",".join(self.queues),
+            self.concurrency,
+            self.heartbeat_seconds,
+            self.heartbeat_source,
+            self.lease_seconds,
+            self.lease_renew_seconds,
+            self.heartbeat_limit,
+        )
 
     # ---------------------------------------------------------------- 心跳
     async def _beat(self, state: str) -> None:
@@ -140,11 +214,43 @@ class Worker:
                 },
             )
 
+    async def _describe_lease_loss(self, job_id: int) -> str:
+        """租约落账失败时读回库里的真实状态，说明实际值以及任务会不会重跑。"""
+
+        async with self.session_factory() as session:
+            row = (
+                await session.execute(
+                    text(
+                        "SELECT state, lease_owner FROM erp.job_queue WHERE id = :job_id"
+                    ),
+                    {"job_id": job_id},
+                )
+            ).mappings().one_or_none()
+        if row is None:
+            return "实际：库中已无此行；任务不会重跑，本次结果丢失"
+        state = str(row["state"])
+        actual_owner = row["lease_owner"]
+        if state == "queued":
+            fate = "任务已回 queued，会被重新领取再跑一遍（at-least-once，handler 必须幂等）"
+        elif state == "running":
+            fate = (
+                f"任务已被 owner={actual_owner} 重新持有，会由它再跑一遍"
+                "（at-least-once，handler 必须幂等）"
+            )
+        elif state == "dead":
+            fate = "任务已转 dead（attempts 用尽），不会自动重跑，本次结果永久丢失，需人工重放"
+        else:
+            fate = f"任务已是终态 {state}，不会重跑，本次结果被丢弃"
+        return f"实际 state={state} lease_owner={actual_owner}；{fate}"
+
     async def _heartbeat_loop(self) -> None:
         while not self._stop.is_set():
             try:
                 await self._beat("busy" if self._in_flight else "idle")
-                reclaimed = await self.queue.reclaim_stale()
+                reclaimed = await self.queue.reclaim_stale(
+                    exclude_owner=self.worker_id,
+                    grace_seconds=self.lease_renew_seconds,
+                )
                 if reclaimed:
                     logger.warning("回收 stale running 任务 %s 条", reclaimed)
             except Exception:  # noqa: BLE001 - 心跳失败不拖死消费主循环
@@ -157,47 +263,98 @@ class Worker:
                 continue
 
     # ---------------------------------------------------------------- 消费
+    async def _settle_failure(
+        self, job: Job, *, error: str, permanent: bool = False
+    ) -> str | None:
+        """失败落账；租约已被接管时返回 None（结果丢弃），不拖死消费循环。"""
+
+        try:
+            return await self.queue.fail(
+                job.id,
+                owner=self.worker_id,
+                lease_gen=job.lease_gen,
+                error=error,
+                backoff_seconds=self.retry_backoff_seconds,
+                permanent=permanent,
+            )
+        except LeaseLostError as exc:
+            logger.warning("%s；失败结果被丢弃，任务已由接管方重新执行", exc)
+            return None
+
     async def _run_job(self, job: Job) -> None:
         handler = self.handlers.get(job.kind)
         if handler is None:
             self.stats.failed += 1
-            state = await self.queue.fail(
-                job.id,
-                owner=self.worker_id,
-                error=f"未知任务类型: {job.kind}",
-                permanent=True,
+            state = await self._settle_failure(
+                job, error=f"未知任务类型: {job.kind}", permanent=True
             )
-            logger.error("任务 %s kind=%s 未知，转 %s", job.id, job.kind, state)
+            if state is not None:
+                logger.error("任务 %s kind=%s 未知，转 %s", job.id, job.kind, state)
             return
+        lease_lost = False
         job_task = asyncio.ensure_future(handler(job))
         while True:
             done, _ = await asyncio.wait({job_task}, timeout=self.lease_seconds / 3)
             if done:
                 break
+            if lease_lost:
+                continue
             # 长任务续租，避免执行中被别的 worker 判 stale 抢走
-            await self.queue.heartbeat_lease(
-                job.id, owner=self.worker_id, lease_seconds=self.lease_seconds
-            )
+            try:
+                await self.queue.heartbeat_lease(
+                    job.id,
+                    owner=self.worker_id,
+                    lease_gen=job.lease_gen,
+                    lease_seconds=self.lease_seconds,
+                )
+            except LeaseLostError as exc:
+                # 只警告一次：之后每 lease/3 都会失败，不必刷屏；handler 继续跑完，
+                # 落账会在 complete 处再被拒，结果照旧丢弃。
+                lease_lost = True
+                detail = await self._describe_lease_loss(job.id)
+                logger.warning(
+                    "任务 %s 续租失败：租约已被他人接管，本次结果被丢弃"
+                    "（到 complete 时不会再落 succeeded）。"
+                    "预期 state=running lease_owner=%s；%s；%s",
+                    job.id,
+                    self.worker_id,
+                    detail,
+                    exc,
+                )
         try:
             job_task.result()
         except asyncio.CancelledError:
             self.stats.failed += 1
-            await self.queue.fail(
-                job.id, owner=self.worker_id, error="worker 停止，任务回队列"
-            )
+            await self._settle_failure(job, error="worker 停止，任务回队列")
             raise
         except Exception as exc:  # noqa: BLE001 - 失败落账后继续下一条
             self.stats.failed += 1
-            state = await self.queue.fail(
-                job.id,
-                owner=self.worker_id,
-                error=f"{type(exc).__name__}: {exc}",
-                backoff_seconds=self.retry_backoff_seconds,
+            state = await self._settle_failure(
+                job, error=f"{type(exc).__name__}: {exc}"
             )
-            logger.warning("任务 %s 失败 attempts=%s -> %s", job.id, job.attempts, state)
+            if state is not None:
+                logger.warning(
+                    "任务 %s 失败 attempts=%s -> %s", job.id, job.attempts, state
+                )
         else:
-            await self.queue.complete(job.id, owner=self.worker_id)
-            self.stats.done += 1
+            try:
+                await self.queue.complete(
+                    job.id, owner=self.worker_id, lease_gen=job.lease_gen
+                )
+            except LeaseLostError as exc:
+                # 结果没落账：计 discarded 而不是 done，否则汇总会「全绿但实际被重跑」。
+                self.stats.discarded += 1
+                detail = await self._describe_lease_loss(job.id)
+                logger.warning(
+                    "任务 %s 完成落账失败：租约已被他人接管，本次结果被丢弃。"
+                    "预期 state=running lease_owner=%s；%s；%s",
+                    job.id,
+                    self.worker_id,
+                    detail,
+                    exc,
+                )
+            else:
+                self.stats.done += 1
 
     async def _consume(self, max_jobs: int | None, processed: list[int]) -> None:
         while not self._stop.is_set():
@@ -236,15 +393,13 @@ class Worker:
                     signal.signal(sig, lambda *_: self.stop())
 
         await self._beat("starting")
-        reclaimed = await self.queue.reclaim_stale()
+        reclaimed = await self.queue.reclaim_stale(
+            exclude_owner=self.worker_id,
+            grace_seconds=self.lease_renew_seconds,
+        )
         if reclaimed:
             logger.warning("启动回收 stale running 任务 %s 条", reclaimed)
-        logger.info(
-            "worker %s 启动 queues=%s concurrency=%s",
-            self.worker_id,
-            ",".join(self.queues),
-            self.concurrency,
-        )
+        self._log_startup()
 
         processed = [0]
         heartbeat = asyncio.create_task(self._heartbeat_loop())
@@ -285,7 +440,11 @@ class Worker:
                 pass
             await self._beat("stopped")
         logger.info(
-            "worker %s 退出 done=%s failed=%s", self.worker_id, self.stats.done, self.stats.failed
+            "worker %s 退出：跑完 %s、丢弃 %s、失败 %s",
+            self.worker_id,
+            self.stats.done,
+            self.stats.discarded,
+            self.stats.failed,
         )
         return self.stats
 
@@ -301,7 +460,13 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--lease-seconds", type=float, default=DEFAULT_LEASE_SECONDS)
     parser.add_argument(
-        "--heartbeat-seconds", type=float, default=DEFAULT_HEARTBEAT_SECONDS
+        "--heartbeat-seconds",
+        type=float,
+        default=None,
+        help=(
+            f"心跳间隔秒数；未指定时依次取 {_HEARTBEAT_ENV}、默认 "
+            f"{DEFAULT_HEARTBEAT_SECONDS}s（必须 ≤ lease/2）"
+        ),
     )
     parser.add_argument("--poll-seconds", type=float, default=DEFAULT_POLL_SECONDS)
     parser.add_argument("--drain-seconds", type=float, default=DEFAULT_DRAIN_SECONDS)
@@ -314,7 +479,14 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--max-jobs", type=int, default=None, help="处理 N 条后退出（冒烟/测试用）"
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.heartbeat_seconds is None:
+        args.heartbeat_seconds, args.heartbeat_source = (
+            _heartbeat_seconds_from_env()
+        )
+    else:
+        args.heartbeat_source = "cli"
+    return args
 
 
 async def _amain(args: argparse.Namespace) -> WorkerStats:
@@ -329,6 +501,7 @@ async def _amain(args: argparse.Namespace) -> WorkerStats:
             concurrency=args.concurrency,
             lease_seconds=args.lease_seconds,
             heartbeat_seconds=args.heartbeat_seconds,
+            heartbeat_source=args.heartbeat_source,
             poll_seconds=args.poll_seconds,
             drain_seconds=args.drain_seconds,
             retry_backoff_seconds=args.retry_backoff_seconds,

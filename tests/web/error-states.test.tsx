@@ -15,6 +15,7 @@ import {
   BATCH_ID,
   DIFF_ID,
   meteringStatement,
+  OTHER_APPROVER_ID,
   reconBatch,
   reconDiffDetail,
   ticketDetail,
@@ -133,7 +134,20 @@ function errorReply(mode: ErrorMode): Reply {
 
 function emptyReply(pageName: string, request: CapturedRequest): Reply {
   const { path } = request;
+  if (path === '/v1/auth/session') {
+    return {
+      body: {
+        user_id: OTHER_APPROVER_ID,
+        tenant_id: '11111111-1111-1111-1111-111111111111',
+        roles: ['reviewer'],
+        default_scope: { org_id: 'ORG-1', period: '2026-10', system_ids: ['u8', 'statement'] },
+      },
+    };
+  }
   if (path === '/v1/tickets' || path === '/v1/approvals/pending') {
+    return { body: { items: [], next_cursor: null } };
+  }
+  if (path === '/v1/recon/batches') {
     return { body: { items: [], next_cursor: null } };
   }
   if (pageName === '工单详情') {

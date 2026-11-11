@@ -201,6 +201,17 @@
       "title": "对象不存在"
     },
     {
+      "code": "E-ROLLBACK-UNAVAILABLE",
+      "fail_code": null,
+      "http_status": 503,
+      "http_statuses": [
+        503
+      ],
+      "next_step": "等补偿执行器路径上线；不要重复点击，也不要手工改库",
+      "retriable": false,
+      "title": "同步回滚入口已关闭"
+    },
+    {
       "code": "E-STATE-ILLEGAL",
       "fail_code": null,
       "http_status": 409,

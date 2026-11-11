@@ -40,6 +40,7 @@ from uuid import UUID
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -56,7 +57,6 @@ from apps.platform.contracts.export_contracts import ROOT
 IMAGE = os.environ.get("ERP_PG_TEST_IMAGE", "postgres:15-alpine")
 STARTUP_TIMEOUT_S = 60.0
 
-REVISION = "0008_metering_price_book"
 PREVIOUS_REVISION = "0007_recon_batch_projection"
 PRICE_COLUMNS = (
     "currency",
@@ -694,14 +694,17 @@ def test_new_batch_takes_new_price_while_old_batch_keeps_snapshot(
 
 def test_downgrade_drops_price_snapshot_and_upgrade_restores(provisioned_pg) -> None:
     container, migrator_url, _ = provisioned_pg
-
-    assert _psql(container, VERSION_SQL) == REVISION
+    config = _config(migrator_url)
+    # head 不写死：0009 合入后 head 会继续前移（与迁移 head 硬编码同一坑）。
+    # 回到 0007 用显式目标，不依赖「head 恰好是 0008」。
+    head = ScriptDirectory.from_config(config).get_current_head()
+    assert head is not None
+    assert _psql(container, VERSION_SQL) == head
     assert int(_psql(container, "SELECT count(*) FROM erp.metering_price_book")) > 0
     assert _psql(container, PRICE_COLUMNS_SQL) == ",".join(PRICE_COLUMNS)
 
-    config = _config(migrator_url)
     # 回退会 DROP COLUMN，已快照的计价依据随之丢失（迁移 docstring 已写明）
-    command.downgrade(config, "-1")
+    command.downgrade(config, PREVIOUS_REVISION)
 
     assert _psql(container, VERSION_SQL) == PREVIOUS_REVISION
     assert (
@@ -716,5 +719,5 @@ def test_downgrade_drops_price_snapshot_and_upgrade_restores(provisioned_pg) -> 
 
     command.upgrade(config, "head")
 
-    assert _psql(container, VERSION_SQL) == REVISION
+    assert _psql(container, VERSION_SQL) == head
     assert _psql(container, PRICE_COLUMNS_SQL) == ",".join(PRICE_COLUMNS)

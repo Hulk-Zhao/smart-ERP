@@ -9,6 +9,8 @@ from typing import Any
 
 import pytest
 
+from apps.platform.api.errors import ProblemError
+from apps.platform.contracts.errors import ErrorCode
 from apps.platform.policy import gateway as gateway_module
 from apps.platform.policy.gateway import (
     ApprovalRequiredError,
@@ -19,6 +21,7 @@ from apps.platform.policy.gateway import (
     WriteGateway,
 )
 from apps.platform.policy.levels import ActionSpec, SceneSpec, WriteLevel
+from observability.metrics import MetricsRegistry
 from tests.platform.support import AllowAllApprovals, FakeConnector, make_action
 
 SCENE = SceneSpec(code="AG1", max_level=WriteLevel.W2)
@@ -154,3 +157,68 @@ def test_no_bypass_switch_in_gateway_api() -> None:
     assert not (execute_params & forbidden_names)
     assert not (init_params & forbidden_names)
     assert not hasattr(gateway_module, "ALLOW_W3")
+
+
+def test_successful_write_counts_stage_total_only() -> None:
+    """① 成功写入 → preview/write/verify 各 +1，失败计数保持 0。"""
+
+    registry = MetricsRegistry()
+    connector = FakeConnector(preview_before={"draft": "D-001"})
+    gateway = WriteGateway(connector, approvals=AllowAllApprovals(), metrics=registry)
+
+    result = _run(gateway, make_action(WriteLevel.W1), {"note": "x"})
+
+    assert result.level is WriteLevel.W1
+    for stage in ("preview", "write", "verify"):
+        assert registry.write_stage_total.value(stage=stage) == 1.0, stage
+        assert registry.write_stage_failures_total.value(stage=stage) == 0.0, stage
+
+
+def test_problem_error_counts_failure_and_propagates_unchanged() -> None:
+    """② 写阶段抛 ProblemError → 失败 +1，且调用方拿到的异常原样不变。"""
+
+    registry = MetricsRegistry()
+    connector = FakeConnector(preview_before={"draft": "D-001"})
+    boom = ProblemError(ErrorCode.CONN_UNAVAILABLE, "连接器挂了")
+
+    async def explode(*_args: Any, **_kwargs: Any) -> Any:
+        connector.calls.append("write")
+        raise boom
+
+    connector.write = explode  # type: ignore[method-assign]
+    gateway = WriteGateway(connector, approvals=AllowAllApprovals(), metrics=registry)
+
+    with pytest.raises(ProblemError) as caught:
+        _run(gateway, make_action(WriteLevel.W1), {"note": "x"})
+
+    # 同一个异常实例被重新抛出，错误码/详情/HTTP 状态均与埋点前一致
+    assert caught.value is boom
+    assert caught.value.code is ErrorCode.CONN_UNAVAILABLE
+    assert caught.value.detail == "连接器挂了"
+    assert caught.value.status_code == boom.status_code
+    assert registry.write_stage_total.value(stage="write") == 1.0
+    assert registry.write_stage_failures_total.value(stage="write") == 1.0
+    assert registry.write_stage_failures_total.value(stage="preview") == 0.0
+    assert registry.write_stage_failures_total.value(stage="verify") == 0.0
+    assert connector.calls == ["preview", "write"], "写入失败不得继续进入 verify"
+
+
+def test_broken_metrics_do_not_affect_write_path() -> None:
+    """观测故障必须被兜住：指标写入抛错时，成功写入仍返回完整结构。"""
+
+    class BrokenMetrics:
+        def record_stage(self, *_args: Any, **_kwargs: Any) -> None:
+            raise RuntimeError("metrics 坏了")
+
+    connector = FakeConnector(preview_before={"draft": "D-001"})
+    gateway = WriteGateway(
+        connector,
+        approvals=AllowAllApprovals(),
+        metrics=BrokenMetrics(),  # type: ignore[arg-type]
+    )
+
+    result = _run(gateway, make_action(WriteLevel.W1), {"note": "x"})
+
+    assert connector.calls == ["preview", "write", "verify"]
+    assert result.write.external_id == "D-001"
+    assert result.verify.matches()

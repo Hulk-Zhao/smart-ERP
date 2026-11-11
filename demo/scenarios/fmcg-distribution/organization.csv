@@ -1,0 +1,4 @@
+scenario,timezone,org_code,org_name,legal_entity,country,base_currency
+fmcg-distribution,Asia/Shanghai,ORG-SH,上海总部,臻选快消（上海）有限公司,CN,CNY
+fmcg-distribution,Asia/Shanghai,ORG-HZ,杭州分仓,臻选快消（杭州）有限公司,CN,CNY
+fmcg-distribution,Asia/Shanghai,ORG-NJ,南京分仓,臻选快消（南京）有限公司,CN,CNY

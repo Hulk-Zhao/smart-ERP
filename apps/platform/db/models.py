@@ -25,7 +25,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -98,8 +98,23 @@ class Ticket(Base):
             "trigger_kind IN ('timer', 'event', 'manual')", name="ck_ticket_trigger_kind"
         ),
         CheckConstraint(_in_list("state", TICKET_STATES), name="ck_ticket_state"),
+        CheckConstraint(
+            "write_level IS NULL OR write_level BETWEEN 0 AND 3",
+            name="ck_ticket_write_level",
+        ),
+        CheckConstraint(
+            "amount IS NULL OR amount >= 0", name="ck_ticket_amount_non_negative"
+        ),
         Index("ticket_tenant_state_created_idx", "tenant_id", "state", text("created_at DESC")),
         Index("ticket_tenant_business_key_idx", "tenant_id", "business_key"),
+        # 列表默认按 (created_at DESC, id DESC) 键集分页；上面那条索引第二列是
+        # state，不带状态过滤时供不了序（0010）。
+        Index(
+            "ticket_tenant_created_id_idx",
+            "tenant_id",
+            text("created_at DESC"),
+            text("id DESC"),
+        ),
         {"schema": SCHEMA},
     )
 
@@ -110,18 +125,30 @@ class Ticket(Base):
     initiator_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     trigger_kind: Mapped[str] = mapped_column(Text, nullable=False)
     business_key: Mapped[str] = mapped_column(Text, nullable=False)
+    # API 读路径的 scope 过滤字段（0010）。可空＝「执行器建的历史工单没有这些信息」，
+    # 不能用空数组冒充：空数组会让 `systems <@ scope` 恒真。
+    org_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    period: Mapped[str | None] = mapped_column(Text, nullable=True)
+    systems: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     state: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    write_level: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
     diff_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
     systems_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     touches_fund: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # 审批通过后只执行这一份写计划；不持久化则进程重启后 approve 无计划可执行。
+    pending_write: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     lease_owner: Mapped[str | None] = mapped_column(Text, nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
 
@@ -187,3 +214,15 @@ class TicketStep(Base):
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 详情要输出的步骤执行时间（0010）；C3 表只有 attempt/latency_ms。
+    executed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # API 详情要输出的目标对象（0010）；执行器路径这两列为空。
+    object_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    object_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 不加外键：API 的审计影像可能只在进程内账本里，外键会让「先写步骤、后落影像」
+    # 的两段提交在第一段就失败。
+    audit_image_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), nullable=True
+    )

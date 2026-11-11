@@ -68,7 +68,7 @@ async def list_tickets(
     limit: PageLimit = None,
 ):
     with translated():
-        items, next_cursor = service.list_tickets(
+        items, next_cursor = await service.list_tickets(
             container,
             session,
             scope_in=scope.payload,
@@ -96,7 +96,7 @@ async def get_ticket(
     scope: ScopeDep,
 ):
     with translated():
-        return service.get_ticket(
+        return await service.get_ticket(
             container, session, scope_in=scope.payload, ticket_id=ticket_id
         )
 
@@ -144,7 +144,7 @@ async def reject_ticket(
     idem_key: IdempotencyKey = None,
 ):
     async def run() -> ActionOut:
-        return service.reject_ticket(
+        return await service.reject_ticket(
             container, session, ticket_id=ticket_id, body=body
         )
 
@@ -168,7 +168,7 @@ async def cancel_ticket(
     idem_key: IdempotencyKey = None,
 ):
     async def run() -> ActionOut:
-        return service.cancel_ticket(
+        return await service.cancel_ticket(
             container, session, ticket_id=ticket_id, body=body
         )
 

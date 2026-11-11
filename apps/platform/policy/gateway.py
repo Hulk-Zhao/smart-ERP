@@ -11,8 +11,10 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any, Protocol
 
 from apps.platform.connectors.sdk import (
@@ -28,6 +30,20 @@ from apps.platform.policy.levels import (
     WriteLevel,
     effective_level,
 )
+from observability.metrics import MetricsRegistry
+
+logger = logging.getLogger("erp.platform.policy.gateway")
+
+_DEFAULT_METRICS: MetricsRegistry | None = None
+
+
+def default_metrics_registry() -> MetricsRegistry:
+    """进程内唯一注册表：写阶段与补偿采集必须落在同一实例，否则 ``/metrics`` 只看到一半。"""
+
+    global _DEFAULT_METRICS
+    if _DEFAULT_METRICS is None:
+        _DEFAULT_METRICS = MetricsRegistry()
+    return _DEFAULT_METRICS
 
 
 class WriteGatewayError(Exception):
@@ -122,6 +138,7 @@ class WriteGateway:
         breaker_cap: Callable[[str], WriteLevel] | None = None,
         approvals: ApprovalGate | None = None,
         narrowed_fields: frozenset[str] | None = None,
+        metrics: MetricsRegistry | None = None,
     ) -> None:
         self._connector = connector
         self._connector_cap = connector_cap or (lambda action_key: WriteLevel.W2)
@@ -129,6 +146,7 @@ class WriteGateway:
         self._approvals = approvals or DenyAllApprovals()
         #: B 级（服务账号降级）租约上的字段白名单；None 表示 A 级，不额外收窄。
         self._narrowed_fields = frozenset(narrowed_fields) if narrowed_fields is not None else None
+        self._metrics = metrics if metrics is not None else default_metrics_registry()
 
     async def execute(
         self,
@@ -157,18 +175,57 @@ class WriteGateway:
         self._assert_narrowed_fields(action, payload)
         self._assert_no_forbidden(action, payload)
 
-        preview = await self._connector.preview(action, payload)
-        if preview.before is None:
+        # 埋点只包「四路取严」之后的真实阶段调用，不按 effective_level 预判。
+        started = monotonic()
+        try:
+            preview = await self._connector.preview(action, payload)
+        except Exception:
+            self._record_stage("preview", monotonic() - started, ok=False)
+            raise
+        # create 不是「无前像」：u8 在草稿不存在时合成 {"exists": False} 前像
+        # （connectors/u8/connector.py:274-279）；before=None 只表示拿不到业务键/
+        # 取快照失败，此时网关零写入并抛 PreviewFailedError，属于失败路径。
+        snapshot_ok = preview.before is not None
+        self._record_stage("preview", monotonic() - started, ok=snapshot_ok)
+        if not snapshot_ok:
             raise PreviewFailedError(action.key, "未取得写前快照")
 
-        write = await self._connector.write(
-            action, payload, ticket_id=ticket_id, idem_key=idem_key
-        )
-        verify = await self._connector.verify(action.verify or preview.verify_spec, payload)
-        if not verify.matches():
+        started = monotonic()
+        try:
+            write = await self._connector.write(
+                action, payload, ticket_id=ticket_id, idem_key=idem_key
+            )
+        except Exception:
+            self._record_stage("write", monotonic() - started, ok=False)
+            raise
+        self._record_stage("write", monotonic() - started, ok=True)
+
+        started = monotonic()
+        try:
+            verify = await self._connector.verify(
+                action.verify or preview.verify_spec, payload
+            )
+        except Exception:
+            self._record_stage("verify", monotonic() - started, ok=False)
+            raise
+        verified = verify.matches()
+        self._record_stage("verify", monotonic() - started, ok=verified)
+        if not verified:
             raise VerifyMismatchError(action.key)
 
         return GatewayResult(level=level, write=write, verify=verify, preview=preview)
+
+    def _record_stage(self, stage: str, duration_seconds: float, *, ok: bool) -> None:
+        """写阶段计数旁路。
+
+        观测不得影响写路径：指标异常一律吞掉并记日志，既不改变本方法返回值，
+        也不会替换掉调用方本应看到的原始异常。``ok=False`` 与阶段真实结果一致。
+        """
+
+        try:
+            self._metrics.record_stage(stage, duration_seconds, ok=ok)
+        except Exception:
+            logger.warning("写阶段指标写入失败（stage=%s），已忽略", stage, exc_info=True)
 
     @staticmethod
     def _assert_field_scope(action: ActionSpec, payload: Mapping[str, Any]) -> None:

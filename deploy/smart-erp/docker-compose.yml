@@ -93,6 +93,19 @@ services:
       ERP_LLM_API_KEY: ${ERP_LLM_API_KEY:-}
       ERP_LLM_MODEL: ${ERP_LLM_MODEL:-}
       ERP_LLM_TIMEOUT_SECONDS: ${ERP_LLM_TIMEOUT_SECONDS:-60}
+      # 默认不挂载 /metrics；验收时临时在 .env 置 1/true/yes/on（RUNBOOK §5.2 三行矩阵）
+      ERP_METRICS_ENABLED: "${ERP_METRICS_ENABLED:-}"
+      ERP_METRICS_PATH: "${ERP_METRICS_PATH:-/metrics}"
+      # demo 静态会话：默认关闭；开启时 ERP_APP_ENV 必须为 demo，否则 api 拒绝启动。
+      # 令牌只在部署期注入，API 不提供任何签发端点（apps/api/demo_session.py）。
+      ERP_DEMO_SESSION_ENABLED: "${ERP_DEMO_SESSION_ENABLED:-}"
+      ERP_DEMO_SESSION_TOKEN: "${ERP_DEMO_SESSION_TOKEN:-}"
+      ERP_DEMO_SESSION_USER_ID: "${ERP_DEMO_SESSION_USER_ID:-}"
+      ERP_DEMO_SESSION_TENANT_ID: "${ERP_DEMO_SESSION_TENANT_ID:-}"
+      ERP_DEMO_SESSION_ROLES: "${ERP_DEMO_SESSION_ROLES:-}"
+      ERP_DEMO_SESSION_ORGS: "${ERP_DEMO_SESSION_ORGS:-}"
+      ERP_DEMO_SESSION_PERIODS: "${ERP_DEMO_SESSION_PERIODS:-}"
+      ERP_DEMO_SESSION_SYSTEMS: "${ERP_DEMO_SESSION_SYSTEMS:-}"
     ports:
       # 只绑回环：公网入口只有 hk-web 的 nginx（/erp/api/ → 127.0.0.1:8010），
       # 宿主不再监听 0.0.0.0。4C4G 演示机若确需宿主直连，显式设 ERP_API_BIND=0.0.0.0。
@@ -139,8 +152,8 @@ services:
       ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
       ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-4}
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
-      ERP_WORKER_QUEUES: ${ERP_WORKER_QUEUES:-agent,io}
-      ERP_WORKER_CONCURRENCY: ${ERP_WORKER_CONCURRENCY:-4}
+      # 心跳间隔必须 ≤ lease/2（默认租约 60s → 上限 30s），超了 worker 拒绝启动；
+      # 租约续约周期是 lease/3=20s，启动日志会打 lease=60.0s renew=20.0s。
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
       ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
@@ -187,6 +200,8 @@ services:
       ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
       ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-1}
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
+      # 实际循环间隔 = min(tick, lease/2)；lease 默认 30 → 这里写 60 实际是每 15s 一跳。
+      # 启动日志会打 `tick_seconds=60 source=env lease=30 effective=15`，别只看这个数。
       ERP_SCHEDULER_TICK_SECONDS: ${ERP_SCHEDULER_TICK_SECONDS:-60}
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
@@ -209,7 +224,9 @@ services:
   # ---------------------------------------------------------------------------
   # compensation：补偿执行器（独立进程，消费 erp.compensation_task）
   # 只认队列有到期行（不按工单/步骤状态扫）；自 serve /metrics 与 /healthz（8013 内网）
-  # full 档专属：demo 档仍由 API 同步回滚，不需要执行器；预算 256m / 0.5 核
+  # full 档专属：demo 档不启动执行器；API 侧同步回滚入口默认关闭
+  # （ERP_ROLLBACK_SYNC_ENABLED=false → 503 E-ROLLBACK-UNAVAILABLE），因此 demo 档没有可用回滚路径
+  # 预算 256m / 0.5 核
   # ---------------------------------------------------------------------------
   compensation:
     profiles: ["full"]
@@ -406,8 +423,8 @@ services:
       ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
       ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-4}
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
-      ERP_WORKER_QUEUES: agent
-      ERP_WORKER_CONCURRENCY: ${ERP_AGENT_WORKER_CONCURRENCY:-4}
+      # 心跳间隔必须 ≤ lease/2（默认租约 60s → 上限 30s），超了 worker 拒绝启动；
+      # 租约续约周期是 lease/3=20s，启动日志会打 lease=60.0s renew=20.0s。
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
       ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
@@ -460,8 +477,8 @@ services:
       ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
       ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-2}
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
-      ERP_WORKER_QUEUES: io
-      ERP_WORKER_CONCURRENCY: ${ERP_IO_WORKER_CONCURRENCY:-2}
+      # 心跳间隔必须 ≤ lease/2（默认租约 60s → 上限 30s），超了 worker 拒绝启动；
+      # 租约续约周期是 lease/3=20s，启动日志会打 lease=60.0s renew=20.0s。
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
       ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}

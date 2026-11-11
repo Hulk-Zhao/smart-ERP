@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { api, downloadText, type MeteringExport } from '../api/client';
+import { useSession } from '../api/session';
 import type { BillingBucket, MeteringDataGapOut, MeteringStatementOut } from '../api/types';
 import { DiffTypeBadge } from '../components/Badges';
 import { EmptyState } from '../components/EmptyState';
@@ -32,9 +33,9 @@ function Metric({
   tone?: string;
 }) {
   return (
-    <div className="min-w-0 rounded-lg border border-slate-200 px-2.5 py-2">
+    <div className="min-w-0 px-3 py-2">
       <div className="label">{label}</div>
-      <div className={`mt-0.5 break-words font-mono text-[15px] ${tone || 'text-slate-800'}`}>
+      <div className={`mt-0.5 break-words font-mono text-[16px] font-medium num ${tone || 'text-slate-800'}`}>
         {value}
         {unit ? <span className="ml-1 text-[11px] font-normal text-slate-400">{unit}</span> : null}
       </div>
@@ -48,6 +49,13 @@ function Metric({
 const BUCKET_LABEL: Record<BillingBucket, string> = {
   billable: '计费行（billable 桶）',
   auto_released: '自动放行但扣减',
+  dispute_hold: '争议挂起',
+  other_unbillable: '其他不计费',
+};
+
+const BUCKET_SHORT: Record<BillingBucket, string> = {
+  billable: '计费',
+  auto_released: '自动放行·扣减',
   dispute_hold: '争议挂起',
   other_unbillable: '其他不计费',
 };
@@ -80,22 +88,22 @@ function CountCard({
   onClick?: () => void;
   testId?: string;
 }) {
-  const className = `min-w-0 rounded-lg border px-2.5 py-2 text-left ${
-    active ? 'border-sky-400 bg-sky-50 ring-1 ring-sky-200' : 'border-slate-200'
-  } ${onClick ? 'cursor-pointer hover:border-sky-300' : ''}`;
+  const className = `min-w-0 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+    active ? 'border-indigo-400 bg-indigo-50 ring-1 ring-indigo-200' : 'border-slate-200 bg-white'
+  } ${onClick ? 'cursor-pointer hover:border-indigo-300' : ''}`;
   const content = (
     <>
-      <div className="label">{label}</div>
+      <div className="flex items-center justify-between gap-1">
+        <span className="label truncate">{label}</span>
+        {onClick ? <span className="text-[9px] text-slate-400">{active ? '取消' : '下钻'}</span> : null}
+      </div>
       <div
-        className={`mt-0.5 font-mono text-[18px] ${tone || 'text-slate-800'}`}
+        className={`mt-0.5 font-mono text-[20px] font-semibold num ${tone || 'text-slate-800'}`}
         data-testid={testId ? `${testId}-value` : undefined}
       >
         {value}
       </div>
       {hint ? <div className="mt-0.5 break-words text-[10px] leading-4 text-slate-400">{hint}</div> : null}
-      {onClick ? (
-        <div className="mt-0.5 text-[10px] text-sky-700">{active ? '再次点击取消筛选' : '点击查看该桶行列表'}</div>
-      ) : null}
     </>
   );
   return onClick ? (
@@ -113,14 +121,14 @@ function DataGapPanel({ gaps }: { gaps: MeteringDataGapOut[] }) {
   if (gaps.length === 0) return null;
   return (
     <div
-      className="min-w-0 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2"
+      className="min-w-0 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5"
       data-testid="metering-data-gaps"
     >
-      <div className="text-[12px] font-medium text-amber-900">这几项暂无数据源</div>
+      <div className="text-[12px] font-semibold text-amber-900">这几项暂无数据源</div>
       <p className="mt-0.5 text-[10px] leading-4 text-amber-700">
         以下字段当前数据模型提供不了，界面按「—」展示并保留扣减口径，不用 0 冒充真实值。
       </p>
-      <ul className="mt-1 space-y-1">
+      <ul className="mt-1.5 space-y-1">
         {gaps.map((gap) => (
           <li key={`${gap.field}-${gap.reason}`} className="min-w-0 text-[11px] leading-4 text-amber-800">
             <span className="break-all font-mono">{gap.field}</span>
@@ -133,66 +141,80 @@ function DataGapPanel({ gaps }: { gaps: MeteringDataGapOut[] }) {
   );
 }
 
-function LineCard({ line }: { line: NonNullable<MeteringStatementOut['lines']>[number] }) {
+type MeteringLine = NonNullable<MeteringStatementOut['lines']>[number];
+
+function MeteringRow({ line }: { line: MeteringLine }) {
   return (
-    <div className="min-w-0 rounded-lg border border-slate-200 px-2.5 py-2">
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-        <span className="font-mono text-[12px] text-slate-800">#{line.line_no}</span>
-        <span className="badge bg-slate-100 text-slate-600 ring-slate-200">{line.side === 'supplier' ? '供应商侧' : '我方'}</span>
-        <span className="badge bg-white text-slate-600 ring-slate-200">{line.status}</span>
+    <tr>
+      <td className="sticky left-0 z-[1] bg-white font-mono text-[11.5px] text-slate-700 group-hover:bg-slate-50">
+        #{line.line_no}
+      </td>
+      <td className="hidden text-[11px] text-slate-500 sm:table-cell">{line.side === 'supplier' ? '供应商侧' : '我方'}</td>
+      <td>
+        <span className="badge bg-slate-100 text-slate-600 ring-slate-200">{line.status}</span>
+      </td>
+      <td>
+        <span
+          className={`badge ${
+            line.billing_bucket === 'billable'
+              ? 'bg-indigo-50 text-indigo-700 ring-indigo-200'
+              : line.billing_bucket === 'dispute_hold'
+                ? 'bg-amber-50 text-amber-700 ring-amber-200'
+                : 'bg-slate-100 text-slate-600 ring-slate-200'
+          }`}
+          title={BUCKET_LABEL[line.billing_bucket]}
+        >
+          {BUCKET_SHORT[line.billing_bucket]}
+        </span>
+      </td>
+      <td className="hidden lg:table-cell">
         {line.auto_released ? (
-          <span className="badge bg-emerald-50 text-emerald-700 ring-emerald-200">自动放行</span>
+          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700">
+            <span className="status-dot bg-emerald-500" />
+            自动
+          </span>
         ) : (
-          <span className="badge bg-amber-50 text-amber-700 ring-amber-200">未自动放行</span>
+          <span className="inline-flex items-center gap-1 text-[11px] text-amber-700">
+            <span className="status-dot bg-amber-400" />
+            未自动
+          </span>
         )}
-        {line.needs_manual ? <span className="badge bg-rose-50 text-rose-700 ring-rose-200">需人工</span> : null}
-        {line.human_modified === null ? (
-          <span className="badge bg-slate-100 text-slate-500 ring-slate-200">人工改动 —</span>
-        ) : line.human_modified ? (
-          <span className="badge bg-sky-50 text-sky-700 ring-sky-200">人工改动过</span>
-        ) : null}
-        <span className="ml-auto font-mono text-[10px] text-slate-400">置信度 {line.confidence}</span>
-      </div>
-
-      <dl className="mt-1.5 grid grid-cols-1 gap-x-4 gap-y-1 text-[11px] sm:grid-cols-2">
-        <div className="min-w-0">
-          <dt className="label">责任方 / 供应商</dt>
-          <dd className="mt-0.5 break-words">{text(line.owner)} · {text(line.supplier_code)}</dd>
+        {line.needs_manual ? <span className="ml-1 text-[10px] text-rose-600">需人工</span> : null}
+      </td>
+      <td className="hidden max-w-[90px] truncate text-[11px] text-slate-600 lg:table-cell" title={text(line.owner)}>
+        {text(line.owner)}
+      </td>
+      <td className="hidden max-w-[110px] truncate font-mono text-[11px] text-slate-500 md:table-cell" title={text(line.supplier_code)}>
+        {text(line.supplier_code)}
+      </td>
+      <td className="hidden max-w-[110px] truncate font-mono text-[11px] text-slate-500 xl:table-cell" title={text(line.ticket_no)}>
+        {text(line.ticket_no)}
+      </td>
+      <td className="hidden max-w-[220px] xl:table-cell">
+        <div className="truncate font-mono text-[10.5px] text-slate-600" title={`${text(line.our_ref)} / ${text(line.supplier_ref)}`}>
+          {text(line.our_ref)} / {text(line.supplier_ref)}
         </div>
-        <div className="min-w-0">
-          <dt className="label">工单</dt>
-          <dd className="mt-0.5 break-all font-mono">{text(line.ticket_no)}</dd>
+        <div className="truncate font-mono text-[10px] text-slate-400" title={`前像 ${text(line.before_ref)} / 后像 ${text(line.after_ref)}`}>
+          前 {text(line.before_ref)} · 后 {text(line.after_ref)}
         </div>
-        <div className="min-w-0">
-          <dt className="label">我方 / 对方单据</dt>
-          <dd className="mt-0.5 break-all font-mono">{text(line.our_ref)} / {text(line.supplier_ref)}</dd>
-        </div>
-        <div className="min-w-0">
-          <dt className="label">前像 / 后像</dt>
-          <dd className="mt-0.5 break-all font-mono">{text(line.before_ref)} / {text(line.after_ref)}</dd>
-        </div>
-        {(line.source_refs ?? []).length > 0 ? (
-          <div className="min-w-0 sm:col-span-2">
-            <dt className="label">来源</dt>
-            <dd className="mt-0.5 break-all font-mono text-[10px]">{(line.source_refs ?? []).join('、')}</dd>
-          </div>
-        ) : null}
+      </td>
+      <td className="hidden text-right font-mono text-[11px] text-slate-600 sm:table-cell">{line.confidence}</td>
+      <td className="hidden max-w-[180px] lg:table-cell">
         {line.excluded_reason ? (
-          <div className="min-w-0 sm:col-span-2">
-            <dt className="label">不计费原因</dt>
-            <dd className="mt-0.5 break-words">{line.excluded_reason}</dd>
-          </div>
+          <span className="block truncate text-[10.5px] text-amber-700" title={line.excluded_reason}>
+            {line.excluded_reason}
+          </span>
         ) : null}
-      </dl>
-
-      {(line.diff_types ?? []).length > 0 ? (
-        <div className="mt-1.5 flex min-w-0 flex-wrap gap-1">
-          {(line.diff_types ?? []).map((type, index) => (
-            <DiffTypeBadge key={`${type}-${index}`} type={type} />
-          ))}
-        </div>
-      ) : null}
-    </div>
+        {(line.diff_types ?? []).length > 0 ? (
+          <span className="mt-0.5 flex flex-wrap gap-0.5">
+            {(line.diff_types ?? []).slice(0, 2).map((type, index) => (
+              <DiffTypeBadge key={`${type}-${index}`} type={type} />
+            ))}
+          </span>
+        ) : null}
+        {line.human_modified === true ? <span className="text-[10px] text-sky-700">人工改动过</span> : null}
+      </td>
+    </tr>
   );
 }
 
@@ -216,6 +238,7 @@ type DigestState =
   | { status: 'done'; local: string; match: boolean | null };
 
 export function MeteringPage() {
+  const session = useSession();
   const { batchId = '' } = useParams();
   const [exported, setExported] = useState<
     (MeteringExport & { downloadedAt: string; digest?: DigestState }) | null
@@ -226,7 +249,7 @@ export function MeteringPage() {
   const statement = useQuery({
     queryKey: ['metering', batchId],
     queryFn: () => api.getMeteringStatement(batchId),
-    enabled: Boolean(batchId),
+    enabled: session.canQuery && Boolean(batchId),
   });
 
   const csv = useMutation({
@@ -256,10 +279,14 @@ export function MeteringPage() {
     return <ErrorPanel error={{ status: 422, code: 'E-DATA-MISSING', detail: '缺少 batch_id' }} />;
   }
 
-  if (statement.isLoading) {
+  if (statement.isPending) {
     return (
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        {[0, 1, 2, 3, 4, 5, 6, 7].map((key) => <div key={key} className="skeleton h-16 w-full" />)}
+      <div className="space-y-3">
+        <div className="skeleton h-16 w-full" />
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((key) => <div key={key} className="skeleton h-20 w-full" />)}
+        </div>
+        <div className="skeleton h-72 w-full" />
       </div>
     );
   }
@@ -303,56 +330,54 @@ export function MeteringPage() {
 
   return (
     <div className="min-w-0 space-y-4">
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <Link to={`/recon/${batchId}`} className="link inline-flex min-h-[44px] items-center text-[12px]">
-            ← 返回批次
-          </Link>
-          <h1 className="mt-1 break-all text-[16px] font-semibold text-slate-900">计量表 · 批次 {data.batch_id}</h1>
-          <p className="mt-1 break-words text-[11px] text-slate-400">
-            {data.period} · {data.batch_status} · {data.currency} · 计算于 {dateTime(data.computed_at)}
-          </p>
+      <section className="card min-w-0 overflow-hidden">
+        <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+          <div className="min-w-0">
+            <Link to={`/recon/${batchId}`} className="link inline-flex min-h-[32px] items-center text-[11.5px]">
+              ← 返回批次
+            </Link>
+            <h1 className="mt-0.5 break-all text-[18px] font-semibold tracking-tight text-slate-900">
+              计量表 · 批次 {data.batch_id}
+            </h1>
+            <p className="mt-1 break-words text-[11px] text-slate-500">
+              {data.period} · {data.batch_status} · {data.currency} · 计算于 {dateTime(data.computed_at)}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary min-h-[36px]"
+            disabled={csv.isPending}
+            onClick={() => csv.mutate()}
+          >
+            {csv.isPending ? '导出中…' : '下载 CSV'}
+          </button>
         </div>
-        <button
-          type="button"
-          className="btn btn-secondary min-h-[44px]"
-          disabled={csv.isPending}
-          onClick={() => csv.mutate()}
-        >
-          {csv.isPending ? '导出中…' : '下载 CSV'}
-        </button>
-      </div>
+        <div className="grid grid-cols-2 divide-x divide-y divide-slate-100 border-t border-slate-100 lg:grid-cols-4 lg:divide-y-0">
+          <Metric label="本期金额" value={amount(data.period_amount)} unit={data.currency} tone="text-rose-700" />
+          <Metric label="累计金额" value={amount(data.cumulative_amount)} unit={data.currency} hint={`上期累计 ${amount(data.prior_cumulative_amount)}`} />
+          <Metric
+            label="封顶余额"
+            value={data.cap_remaining === null || data.cap_remaining === undefined ? '—' : amount(data.cap_remaining)}
+            unit={data.cap_remaining === null || data.cap_remaining === undefined ? undefined : data.currency}
+            hint={
+              data.cap_remaining === null || data.cap_remaining === undefined
+                ? capGap
+                : `封顶 ${amount(data.cap_amount)} / ${data.cap_exceeded ? '已超封顶' : '未超封顶'}`
+            }
+            tone={data.cap_exceeded ? 'text-rose-700' : 'text-slate-800'}
+          />
+          <Metric label="单价" value={amount(data.unit_price)} unit={data.currency} hint={`来源：${data.unit_price_source}`} />
+        </div>
+      </section>
 
       {csv.error ? <ErrorPanel error={csv.error} onRetry={() => csv.mutate()} onOpenSettings={openSettingsPanel} /> : null}
 
       <section className="card min-w-0">
         <div className="card-head">
           <h2 className="section-title">金额与口径</h2>
-          <span className="text-[11px] text-slate-400">金额均为契约原值，前端不重算</span>
+          <span className="text-[10.5px] text-slate-400">金额均为契约原值，前端不重算</span>
         </div>
-        <div className="card-body space-y-2">
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-            <Metric label="本期金额" value={amount(data.period_amount)} unit={data.currency} tone="text-rose-700" />
-            <Metric label="累计金额" value={amount(data.cumulative_amount)} unit={data.currency} hint={`上期累计 ${amount(data.prior_cumulative_amount)}`} />
-            <Metric
-              label="封顶余额"
-              value={data.cap_remaining === null || data.cap_remaining === undefined ? '—' : amount(data.cap_remaining)}
-              unit={data.cap_remaining === null || data.cap_remaining === undefined ? undefined : data.currency}
-              hint={
-                data.cap_remaining === null || data.cap_remaining === undefined
-                  ? capGap
-                  : `封顶 ${amount(data.cap_amount)} / ${data.cap_exceeded ? '已超封顶' : '未超封顶'}`
-              }
-              tone={data.cap_exceeded ? 'text-rose-700' : 'text-slate-800'}
-            />
-            <Metric
-              label="单价"
-              value={amount(data.unit_price)}
-              unit={data.currency}
-              hint={`来源：${data.unit_price_source}`}
-            />
-          </div>
-
+        <div className="card-body space-y-2.5">
           {/* data_gaps 必须显式可见，紧贴金额，不折叠 */}
           <DataGapPanel gaps={gaps} />
 
@@ -367,67 +392,78 @@ export function MeteringPage() {
       <section className="card min-w-0">
         <div className="card-head">
           <h2 className="section-title">四类行</h2>
-          <span className="text-[11px] text-slate-400">卡片数字与下钻列表同源（接口 billing_bucket），点进去的行数 = 卡片数字</span>
+          <span className="text-[10.5px] text-slate-400">卡片数字与下钻列表同源（接口 billing_bucket），点进去的行数 = 卡片数字</span>
         </div>
-        <div className="card-body space-y-2">
+        <div className="card-body space-y-3">
           {/* 口径数字：只展示、不可下钻；术语与接口字段一一对应，不互相借用 */}
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4" data-testid="metering-caliber">
-            <Metric
-              label="供应商对账单行数（应处理）"
-              value={String(data.expected_lines)}
-              hint="接口 expected_lines（metrics.supplier_lines），含不计费行"
-            />
-            {/* auto_released_lines 是计数字段（行级 auto 合计），与已删除的 auto_released 桶不是一回事：
-                字段值 ≠ 桶计数（桶恒 0，字段为 59）。删桶不等于删这个字段。 */}
-            <Metric
-              label="有效对账行数"
-              value={String(data.auto_released_lines)}
-              hint="行级 auto，含已自动归因的差异行（auto_released_lines）"
-              tone="text-emerald-700"
-            />
-            <Metric
-              label="计费行数（billable 桶）"
-              value={String(data.billable_lines)}
-              hint="billable_lines = 自动放行 − 已确认错放行 − 客户原因（上界）"
-            />
-            <Metric
-              label="本次明细行数"
-              value={String(data.line_count)}
-              hint={`接口本次返回 ${allLines.length} 行；与对账单不一致时见 data_gaps`}
-            />
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="eyebrow">口径数字 · 不可下钻</span>
+              <span className="text-[10px] text-slate-400">字段名与接口一致</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4" data-testid="metering-caliber">
+              <Metric
+                label="供应商对账单行数（应处理）"
+                value={String(data.expected_lines)}
+                hint="接口 expected_lines（metrics.supplier_lines），含不计费行"
+              />
+              {/* auto_released_lines 是计数字段（行级 auto 合计），与已删除的 auto_released 桶不是一回事：
+                  字段值 ≠ 桶计数（桶恒 0，字段为 59）。删桶不等于删这个字段。 */}
+              <Metric
+                label="有效对账行数"
+                value={String(data.auto_released_lines)}
+                hint="行级 auto，含已自动归因的差异行（auto_released_lines）"
+                tone="text-emerald-700"
+              />
+              <Metric
+                label="计费行数（billable 桶）"
+                value={String(data.billable_lines)}
+                hint="billable_lines = 自动放行 − 已确认错放行 − 客户原因（上界）"
+              />
+              <Metric
+                label="本次明细行数"
+                value={String(data.line_count)}
+                hint={`接口本次返回 ${allLines.length} 行；与对账单不一致时见 data_gaps`}
+              />
+            </div>
           </div>
 
           {/* 两数本期相等必须当场解释，否则扣减上线后分开会被当成系统算错 */}
-          <p className="break-words text-[10px] leading-4 text-slate-600" data-testid="metering-valid-vs-billable">
+          <p className="break-words rounded-lg bg-slate-50 px-3 py-2 text-[10.5px] leading-4 text-slate-600" data-testid="metering-valid-vs-billable">
             有效对账行数 {data.auto_released_lines} 与计费行数 {data.billable_lines} 定义不同：
             {'本期无扣减，故两者相等；发生扣减后计费行数将小于有效对账行数。'}
           </p>
 
-          <div className="text-[10px] text-slate-400">下面四张卡可点击下钻，数字按明细行的 billing_bucket 现算：</div>
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-            {BUCKET_ORDER.map((bucketKey) => (
-              <CountCard
-                key={bucketKey}
-                testId={`metering-bucket-${bucketKey}`}
-                label={BUCKET_LABEL[bucketKey]}
-                value={bucketCounts[bucketKey]}
-                hint={BUCKET_HINT[bucketKey]}
-                tone={
-                  bucketKey === 'auto_released'
-                    ? 'text-emerald-700'
-                    : bucketKey === 'dispute_hold'
-                      ? 'text-amber-700'
-                      : bucketKey === 'other_unbillable'
-                        ? 'text-slate-700'
-                        : ''
-                }
-                active={bucket === bucketKey}
-                onClick={() => toggleBucket(bucketKey)}
-              />
-            ))}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="eyebrow">四类行 · 可下钻</span>
+              <span className="text-[10px] text-slate-400">按明细行 billing_bucket 现算</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+              {BUCKET_ORDER.map((bucketKey) => (
+                <CountCard
+                  key={bucketKey}
+                  testId={`metering-bucket-${bucketKey}`}
+                  label={BUCKET_LABEL[bucketKey]}
+                  value={bucketCounts[bucketKey]}
+                  hint={BUCKET_HINT[bucketKey]}
+                  tone={
+                    bucketKey === 'auto_released'
+                      ? 'text-emerald-700'
+                      : bucketKey === 'dispute_hold'
+                        ? 'text-amber-700'
+                        : bucketKey === 'other_unbillable'
+                          ? 'text-slate-700'
+                          : 'text-indigo-700'
+                  }
+                  active={bucket === bucketKey}
+                  onClick={() => toggleBucket(bucketKey)}
+                />
+              ))}
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-1.5 text-[11px] text-slate-600 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-[11px] text-slate-600 sm:grid-cols-2">
             <div className="min-w-0">
               已确认错放行：
               <span className="font-mono">
@@ -475,7 +511,7 @@ export function MeteringPage() {
           </div>
 
           <div
-            className="min-w-0 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] leading-5 text-sky-900"
+            className="min-w-0 rounded-xl border border-indigo-200 bg-indigo-50/70 px-3 py-2.5 text-[11px] leading-5 text-indigo-950"
             data-testid="metering-upper-bound"
           >
             <b>计费行数（billable 桶）是上界，不是精确值。</b>口径：{data.billable_basis}
@@ -499,7 +535,7 @@ export function MeteringPage() {
       <section className="card min-w-0">
         <div className="card-head">
           <h2 className="section-title">算式</h2>
-          <span className="text-[11px] text-slate-400">契约 calculation 原文</span>
+          <span className="text-[10.5px] text-slate-400">契约 calculation 原文</span>
         </div>
         <ol className="card-body space-y-1 text-[11px] leading-5 text-slate-700">
           {(data.calculation ?? []).length === 0 ? (
@@ -513,7 +549,7 @@ export function MeteringPage() {
           )}
         </ol>
         {(data.calculation ?? []).length > 0 ? (
-          <p className="mt-1 break-words text-[10px] leading-4 text-amber-700" data-testid="metering-calculation-gap">
+          <p className="mt-1 break-words px-4 pb-3 text-[10px] leading-4 text-amber-700" data-testid="metering-calculation-gap">
             服务端 calculation 文案把 billable_lines 写作「有效对账行数」，与商务口径不一致；前端不改写契约原文
             （mock.ts 中同样是错的：那两行镜像自 apps/api/metering.py，演示与截图都取自它）。
             字段映射以上方「有效对账行数 = auto_released_lines、计费行数 = billable_lines」为准。
@@ -525,7 +561,7 @@ export function MeteringPage() {
       <section className="card min-w-0">
         <div className="card-head">
           <h2 className="section-title">CSV 导出与完整性</h2>
-          <span className="text-[11px] text-slate-400">响应头 X-Content-SHA256</span>
+          <span className="text-[10.5px] text-slate-400">响应头 X-Content-SHA256</span>
         </div>
         <div className="card-body space-y-1.5 text-[11px] leading-5">
           {exported ? (
@@ -573,9 +609,12 @@ export function MeteringPage() {
         </div>
       </section>
 
-      <section className="card min-w-0">
+      <section className="card min-w-0 overflow-hidden">
         <div className="card-head">
-          <h2 className="section-title">逐行明细</h2>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h2 className="section-title">逐行明细</h2>
+            <span className="text-[10.5px] text-slate-400">移动端隐藏次要列，不横向滚动</span>
+          </div>
           <span className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
             {bucket ? (
               <>
@@ -589,8 +628,9 @@ export function MeteringPage() {
             )}
           </span>
         </div>
-        <div className="card-body space-y-2">
-          {visibleLines.length === 0 ? (
+
+        {visibleLines.length === 0 ? (
+          <div className="p-3">
             <EmptyState
               variant="no-data"
               compact
@@ -600,10 +640,33 @@ export function MeteringPage() {
                   : '该批次没有计量行：本期确实无数据，不是加载失败。'
               }
             />
-          ) : (
-            visibleLines.map((line) => <LineCard key={`${line.line_no}-${line.side}`} line={line} />)
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="max-h-[640px] overflow-auto">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th className="w-[54px]">行号</th>
+                  <th className="hidden w-[64px] sm:table-cell">侧</th>
+                  <th className="w-[86px]">状态</th>
+                  <th className="w-[96px]">桶</th>
+                  <th className="hidden w-[92px] lg:table-cell">自动放行</th>
+                  <th className="hidden w-[76px] lg:table-cell">责任方</th>
+                  <th className="hidden w-[104px] md:table-cell">供应商</th>
+                  <th className="hidden w-[104px] xl:table-cell">工单</th>
+                  <th className="hidden xl:table-cell">我方 / 对方单据</th>
+                  <th className="hidden w-[52px] text-right sm:table-cell">置信度</th>
+                  <th className="hidden w-[150px] lg:table-cell">不计费原因 / 差异</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleLines.map((line) => (
+                  <MeteringRow key={`${line.line_no}-${line.side}`} line={line} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
     </div>
   );

@@ -1,15 +1,15 @@
 /**
  * 本文件由 `node scripts/gen-api-types.mjs` 从 C16 冻结契约生成，请勿手改。
  * 源文件：contracts/api/product_api.openapi.v1.json
- * 契约 sha256：6addfb9234276ddd4390fef265215503404aa8fba4413d03da64d7897b4a61ac
+ * 契约 sha256：2167554becf596c0545e7243a66fcdb63f0c6157b6a64f3da521f536b37992c9
  * 契约版本：1.0.0 · C16
  *
  * 契约变更流程：后端重新生成契约 → 执行 `npm run gen:api` → 评审类型差异。
  */
 
-export const CONTRACT_SHA256 = "6addfb9234276ddd4390fef265215503404aa8fba4413d03da64d7897b4a61ac";
+export const CONTRACT_SHA256 = "2167554becf596c0545e7243a66fcdb63f0c6157b6a64f3da521f536b37992c9";
 export const CONTRACT_VERSION = "1.0.0";
-export const CONTRACT_PATH_COUNT = 17;
+export const CONTRACT_PATH_COUNT = 19;
 
 /** 写接口（POST）路径；前端统一补 Idempotency-Key。 */
 export const WRITE_PATHS = ["/v1/approvals/{ticket_id}/approve","/v1/approvals/{ticket_id}/reject","/v1/recon/runs","/v1/tickets/{ticket_id}/actions/approve","/v1/tickets/{ticket_id}/actions/cancel","/v1/tickets/{ticket_id}/actions/compensate","/v1/tickets/{ticket_id}/actions/reject"] as const;
@@ -253,6 +253,11 @@ export interface PageAuditImageOut {
   next_cursor?: string | null;
 }
 
+export interface PageReconBatchSummaryOut {
+  items: ReconBatchSummaryOut[];
+  next_cursor?: string | null;
+}
+
 export interface PageReconDiffOut {
   items: ReconDiffOut[];
   next_cursor?: string | null;
@@ -277,6 +282,18 @@ export interface ReconBatchOut {
   status_reason: string;
   suppliers: string[];
   system_ids: string[];
+}
+
+/**
+ * 批次列表项。计数与详情同源；``None`` = 旧批次无可读投影，不伪造 0。
+ */
+export interface ReconBatchSummaryOut {
+  batch_id: string;
+  created_at: string;
+  diff_amount?: string | null;
+  diff_count?: number | null;
+  line_count?: number | null;
+  status: string;
 }
 
 /**
@@ -399,6 +416,28 @@ export interface ScopeIn {
   system_ids: string[];
 }
 
+/**
+ * 当前会话身份：前端只读这里，不再从构建期变量猜角色/用户。
+ */
+export interface SessionOut {
+  default_scope?: SessionScopeOut | null;
+  roles: string[];
+  tenant_id: string;
+  user_id: string;
+}
+
+/**
+ * 服务端从会话授权范围派生出的默认 scope（只读，不来自请求）。
+ * 
+ * ``org_id`` 多组织授权时为 ``None``，由前端让用户选择，服务端不猜；
+ * ``period`` 仅在授权期内存在合法 ``YYYY-MM`` 时给出最新一个，否则 ``None``。
+ */
+export interface SessionScopeOut {
+  org_id?: string | null;
+  period?: string | null;
+  system_ids: string[];
+}
+
 export interface SupplierMasterIn {
   aliases?: string[];
   code: string;
@@ -417,6 +456,7 @@ export interface TicketDetailOut {
   org_id: string;
   period: string;
   required_roles: string[];
+  rollback_available: boolean;
   scene_code: string;
   state: TicketStateCode;
   steps: TicketStepOut[];
@@ -550,6 +590,11 @@ export interface ApiOperations {
     body: never;
     response: PageAuditImageOut;
   };
+  "GET /v1/auth/session": {
+    query: never;
+    body: never;
+    response: SessionOut;
+  };
   "GET /v1/metering/batches/{batch_id}/statement": {
     query: {
     format?: "json" | "csv";
@@ -559,6 +604,17 @@ export interface ApiOperations {
   };
     body: never;
     response: MeteringStatementOut;
+  };
+  "GET /v1/recon/batches": {
+    query: {
+    cursor?: string | null;
+    limit?: number | null;
+    org_id: string;
+    period: string;
+    system_ids: string[];
+  };
+    body: never;
+    response: PageReconBatchSummaryOut;
   };
   "POST /v1/recon/runs": {
     query: never;

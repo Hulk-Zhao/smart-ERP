@@ -1,0 +1,5 @@
+scenario,effective_from,tax_code,tax_name,country,rate
+cross-border-multicurrency,2025-11-12,EXPORT0,出口零税率,CN,0.000000
+cross-border-multicurrency,2025-11-12,IMPORT13,进口增值税 13%,CN,0.130000
+cross-border-multicurrency,2025-11-12,VAT13,增值税 13%,CN,0.130000
+cross-border-multicurrency,2025-11-12,GST9,新加坡 GST 9%,SG,0.090000

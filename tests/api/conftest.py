@@ -22,7 +22,8 @@ from apps.api import configure_container, reset_container
 from apps.api.container import ApiContainer
 from apps.api.price_book import PriceLookup
 from apps.api.recon_store import FileReconStore
-from apps.api.store import PendingWrite, TicketRecord
+from apps.api.rollback_gate import ENV_ROLLBACK_SYNC_ENABLED
+from apps.api.store import PendingWrite, TicketRecord, TicketRepository
 from apps.main import create_app
 from apps.platform.config import Settings
 from apps.platform.connectors.sdk import (
@@ -247,6 +248,8 @@ def env(tmp_path: Path) -> ApiEnv:
         recon_store=store,
         # 不连库：默认价目为空，走 env 回落或全 NULL（需要真价目时用例自行注入）。
         price_book=EmptyPriceBook(),
+        # 生产默认是 PostgreSQL 适配器；单测显式用内存仓储（种入即见）。
+        tickets=TicketRepository(),
     )
     container.actions.register(_reverse_action())
     container.actions.register(_forward_action())
@@ -347,6 +350,17 @@ def env(tmp_path: Path) -> ApiEnv:
         )
     finally:
         reset_container()
+
+
+@pytest.fixture(autouse=True)
+def _legacy_sync_rollback_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本目录存量用例走「同步回滚已开放」的旧行为。
+
+    生产默认是关闭；默认值本身的证据在 ``test_rollback_gate.py``（显式 delenv
+    后断言 503 与连接器零调用），这里只负责不让历史用例逐个加开关。
+    """
+
+    monkeypatch.setenv(ENV_ROLLBACK_SYNC_ENABLED, "1")
 
 
 __all__ = [

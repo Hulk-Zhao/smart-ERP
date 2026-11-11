@@ -2,7 +2,8 @@
 
 本层只做「接口需要的读取与状态投影」，不复制状态机：推进仍走
 ``apps.agents.state_machine.resolve_transition``，写入仍走 ``AccessGate`` +
-``WriteGateway``。PG 落库由各流负责，这里的实现只保证 API 语义可测、可替换。
+``WriteGateway``。PG 读写见 ``apps.api.ticket_sql``（事件与投影同事务）；这里的
+内存实现只保证 API 语义可测、可替换。
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
+from apps.agents.state_machine import TransitionContext, resolve_transition
 from apps.api.pagination import decode_cursor, encode_cursor
 from apps.platform.contracts.ticket import TicketState
 from apps.platform.policy.levels import WriteLevel
@@ -56,9 +58,13 @@ class TicketRecord:
     business_key: str
     org_id: str
     period: str
-    systems: tuple[str, ...]
-    write_level: WriteLevel
-    amount: Decimal
+    # ``None`` ＝「涉及系统未知」（执行器建的历史工单没有这个信息）。
+    # 判可见性时按 fail-closed 处理：未知不等于全部，见 ``_in_scope``。
+    systems: tuple[str, ...] | None
+    # 执行器建的历史工单可能没有写等级/金额；这类行因 systems 未知而不可见，
+    # 但仍要能被 ``get`` 映射出来，好让详情统一走「范围未知」403。
+    write_level: WriteLevel | None
+    amount: Decimal | None
     touches_fund: bool
     state: TicketState = TicketState.PENDING_APPROVAL
     version: int = 1
@@ -70,7 +76,7 @@ class TicketRecord:
 
     @property
     def systems_list(self) -> list[str]:
-        return list(self.systems)
+        return list(self.systems or ())
 
     def sort_key(self) -> tuple[str, str]:
         return (self.created_at.isoformat(), str(self.ticket_id))
@@ -92,20 +98,74 @@ class TicketRepository:
         self._rows[ticket.ticket_id] = ticket
         return ticket
 
-    def get(self, *, tenant_id: UUID, ticket_id: UUID) -> TicketRecord | None:
+    async def create(self, ticket: TicketRecord) -> TicketRecord:
+        """建单（与 SQL 实现同名同义）：内存实现没有事件链，只落投影。"""
+
+        return self.add(ticket)
+
+    async def transition(
+        self,
+        *,
+        tenant_id: UUID,
+        ticket_id: UUID,
+        target: TicketState,
+        trigger: str,
+        context: TransitionContext | None = None,
+        actor_id: UUID | None = None,
+        trace_id: str | None = None,
+        payload: Mapping[str, Any] | None = None,
+        approval_record: Any = None,
+    ) -> int:
+        """状态推进：与 ``TicketStore.transition`` 同一套校验与语义。
+
+        返回**对外版本号**（建单即 1），与 SQL 适配器一致；内存实现没有事件表，
+        因此这里不产生事件，只同步投影。``payload`` 里显式出现的
+        ``pending_write`` 会覆盖写计划（与事件重放口径一致）。
+
+        ``approval_record`` 只为与 SQL 适配器同签名而存在：内存模式没有「事务内
+        落审批行」这回事，审批记录由服务层在推进后调用 ``remember`` 进缓存。
+        """
+
+        row = self._rows.get(ticket_id)
+        if row is None or row.tenant_id != tenant_id:
+            raise LookupError(f"工单不存在: {ticket_id}")
+        resolve_transition(row.state, target, trigger, context)
+        row.state = TicketState(target)
+        row.version += 1
+        if payload is not None and "pending_write" in payload:
+            row.pending_write = _pending_from_payload(payload.get("pending_write"))
+        row.updated_at = datetime.now(UTC)
+        return row.version
+
+    async def record_step(
+        self,
+        *,
+        tenant_id: UUID,
+        ticket_id: UUID,
+        step: TicketStepRecord,
+        request_hash: str,
+        trace_id: str | None = None,
+    ) -> None:
+        row = self._rows.get(ticket_id)
+        if row is None or row.tenant_id != tenant_id:
+            raise LookupError(f"工单不存在: {ticket_id}")
+        row.steps.append(step)
+        row.updated_at = datetime.now(UTC)
+
+    async def get(self, *, tenant_id: UUID, ticket_id: UUID) -> TicketRecord | None:
         row = self._rows.get(ticket_id)
         if row is None or row.tenant_id != tenant_id:
             return None
         return row
 
-    def save(self, ticket: TicketRecord) -> None:
+    async def save(self, ticket: TicketRecord) -> None:
         ticket.updated_at = datetime.now(UTC)
         self._rows[ticket.ticket_id] = ticket
 
-    def all(self, *, tenant_id: UUID) -> tuple[TicketRecord, ...]:
+    async def all(self, *, tenant_id: UUID) -> tuple[TicketRecord, ...]:
         return tuple(row for row in self._rows.values() if row.tenant_id == tenant_id)
 
-    def list(
+    async def list(
         self,
         *,
         tenant_id: UUID,
@@ -145,12 +205,31 @@ class TicketRepository:
         next_cursor = None
         if len(window) > limit:
             last = page[-1]
-            next_cursor = encode_cursor({"t": last.created_at.isoformat(), "i": str(last.ticket_id)})
+            next_cursor = encode_cursor(
+                {"t": last.created_at.isoformat(), "i": str(last.ticket_id)}
+            )
         return page, next_cursor
+
+
+def _pending_from_payload(raw: Any) -> PendingWrite | None:
+    """事件 payload 里的写计划快照；空对象与 NULL 同义。"""
+
+    if not raw:
+        return None
+    return PendingWrite(
+        action_key=str(raw["action_key"]),
+        system=str(raw["system"]),
+        payload=dict(raw.get("payload") or {}),
+        idem_key=str(raw["idem_key"]),
+    )
 
 
 def _in_scope(ticket: TicketRecord, scope: Scope) -> bool:
     if ticket.org_id != scope.org_id or ticket.period != scope.period:
+        return False
+    if ticket.systems is None:
+        # 涉及系统未知：fail-closed，看不见。若这里返回 True 或做 ``is None or ...``
+        # 的短路，NULL 就等于「租户内全部可见」——最坏的一种默认值。
         return False
     return set(ticket.systems) <= set(scope.system_ids)
 

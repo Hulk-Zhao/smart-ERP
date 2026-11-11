@@ -16,6 +16,8 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal
+from time import monotonic
+from time import time as wall_time
 from typing import Any
 from uuid import UUID
 
@@ -29,8 +31,13 @@ from apps.agents.state_machine import DEVIATION_THRESHOLD, TransitionContext
 from apps.agents.store import TicketStore
 from apps.platform.connectors.sdk import CompensateResult, UnknownOutcome, VerifyResult
 from apps.platform.contracts.ticket import TicketState
-from apps.platform.policy.gateway import GatewayResult, WriteGateway
+from apps.platform.policy.gateway import (
+    GatewayResult,
+    WriteGateway,
+    default_metrics_registry,
+)
 from apps.platform.policy.levels import ActionSpec, SceneSpec
+from observability.metrics import MetricsRegistry
 
 UNIQUE_VERIFY_KINDS = frozenset({"read_by_external_id", "read_by_idem_key"})
 RECOVERY_THRESHOLD_ERROR = "E-RECOVERY-THRESHOLD"
@@ -140,6 +147,7 @@ class TicketRuntime:
         alert_sink: AlertSink | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], datetime] | None = None,
+        metrics: MetricsRegistry | None = None,
     ) -> None:
         if verifier is None or compensator is None:
             raise ValueError("必须同时注入 verifier 与 compensator（或连接器实现）")
@@ -161,6 +169,9 @@ class TicketRuntime:
         self._audit = audit or AuditGuard(store, alert_sink=self._alerts)
         self._sleep = sleep
         self._clock = clock or (lambda: datetime.now(tz=UTC))
+        self._metrics = metrics if metrics is not None else default_metrics_registry()
+        # 启动自检的第一次成对采样；之后每轮补偿再采一次（只取增量，不重复累计）
+        self._clock_mark = (monotonic(), wall_time())
 
     # -------------------------------------------------------------- 生命周期
     async def mark_preview(
@@ -489,6 +500,42 @@ class TicketRuntime:
         return float(self._backoff[index])
 
     # ---------------------------------------------------------------- 补偿
+    def _sample_clock(self) -> None:
+        """成对采样单调钟/墙钟；单调前进而墙钟后退就是回拨（skew 为负）。"""
+
+        tick, wall = monotonic(), wall_time()
+        last_tick, last_wall = self._clock_mark
+        self._clock_mark = (tick, wall)
+        try:
+            self._metrics.observe_clock_skew(
+                monotonic_delta_seconds=tick - last_tick,
+                wall_delta_seconds=wall - last_wall,
+            )
+        except Exception:
+            logger.warning("时钟偏移采样失败，本轮跳过", exc_info=True)
+
+    async def _observe_compensation(self) -> None:
+        """补偿轮次入口的指标写入。
+
+        只在轮次入口调一次（不在每个任务上写）；统计失败时只记日志、不写样本，
+        绝不写假 0，也绝不把补偿主流程带崩。
+        """
+
+        self._sample_clock()
+        try:
+            overdue, future_retry = await self._queue.metrics_counts()
+            self._metrics.set_compensation_overdue(overdue)
+            self._metrics.set_compensation_future_retry(future_retry)
+        except Exception:
+            logger.warning("补偿队列观测采集失败，本轮不写样本", exc_info=True)
+
+        # unresolved 是全局快照，按轮次写一次：挂到工单状态变更上会对每条工单各写
+        # 一次（写放大且无收益）；补偿轮次是按需触发的天然周期点，采样频率有界。
+        try:
+            self._metrics.set_unresolved(await self._store.count_unresolved())
+        except Exception:
+            logger.warning("未解决工单数采集失败，本轮不写样本", exc_info=True)
+
     async def compensate(
         self,
         ticket_id: UUID,
@@ -518,6 +565,8 @@ class TicketRuntime:
                 )
 
             owner_name = owner or "compensator"
+            # 观测旁路：每轮一次，先于认领，采集失败不影响后续补偿
+            await self._observe_compensation()
             # 启动/重试恢复入口：心跳过期的 running 先重新入队，再按 DESC 续跑
             reclaimed = await self._queue.reclaim_stale(
                 ticket_id, stale_after_seconds=self._comp_stale
@@ -533,10 +582,41 @@ class TicketRuntime:
                 )
 
             tasks = await self._queue.enqueue(ticket_id)
+            processed = 0
             for _ in range(len(tasks) * self._max_comp_attempts + 1):
                 task = await self._queue.claim_next(ticket_id, owner_name)
                 if task is None:
+                    # ``None`` 只说明「此刻没有可领取的行」，不等于「队列空了」：剩余行可能
+                    # 全在退避闸门内（``next_retry_at > now()``），而时钟回拨会让闸门看起来
+                    # 更远。两者必须分开留痕——前者本轮真的做完了；后者有一批任务本轮没被
+                    # 执行、``attempts`` 不涨，且工单随后因 ``counts.queued > 0`` 转
+                    # MANUAL_REQUIRED，下一轮不会自动接上（``compensate`` 要求工单仍在
+                    # 「补偿中」）。日志是唯一观测落点，不能让「为什么停」消失。
+                    remaining = await self._queue.counts(ticket_id)
+                    if remaining.queued:
+                        logger.warning(
+                            "补偿本轮停止 reason=backoff ticket=%s owner=%s processed=%d "
+                            "未处理=%d done=%d failed=%d running=%d",
+                            ticket_id,
+                            owner_name,
+                            processed,
+                            remaining.queued,
+                            remaining.done,
+                            remaining.failed,
+                            remaining.running,
+                        )
+                    else:
+                        logger.info(
+                            "补偿本轮停止 reason=empty ticket=%s owner=%s "
+                            "processed=%d done=%d failed=%d",
+                            ticket_id,
+                            owner_name,
+                            processed,
+                            remaining.done,
+                            remaining.failed,
+                        )
                     break
+                processed += 1
                 if task.attempts > self._max_comp_attempts:
                     await self._queue.mark_failed(
                         task.id,
@@ -564,6 +644,15 @@ class TicketRuntime:
                 await self._run_compensation(
                     ticket_id, task, owner=owner_name, trace_id=trace_id
                 )
+            else:
+                logger.warning(
+                    "补偿本轮停止 reason=budget ticket=%s owner=%s processed=%d "
+                    "上限=%d（未收敛，需人工核对是否退避/竞态卡住）",
+                    ticket_id,
+                    owner_name,
+                    processed,
+                    len(tasks) * self._max_comp_attempts + 1,
+                )
 
             counts = await self._queue.counts(ticket_id)
             steps = await self._store.list_steps(ticket_id)
@@ -572,21 +661,48 @@ class TicketRuntime:
                 and step.error_code == RECOVERY_THRESHOLD_ERROR
                 for step in steps
             )
-            if counts.failed or counts.running or counts.queued or recovery_threshold_hit:
-                failed = max(1, counts.failed)
+            pending = counts.queued + counts.running
+            order = tuple(task.compensate_seq for task in tasks)
+
+            # 停止原因决定状态：只有「剩余全是终态失败」或「恢复重试耗尽」才转人工。
+            # 仍在退避或被他人持有（pending>0）时必须保持「补偿中」——否则任何一次
+            # 可重试失败都会在第一次就把工单判死，而 ``compensate()`` 之后要求工单
+            # 仍在「补偿中」，重试路径永远走不到，只会每秒抛 RuntimeGuardError。
+            if recovery_threshold_hit or (counts.failed and not pending):
                 await self._store.transition(
                     ticket_id,
                     TicketState.MANUAL_REQUIRED,
                     "compensation_failed",
-                    context=TransitionContext(compensation_failed=failed),
+                    # 状态机要求该数非零；恢复阈值是硬停、任务行里可能没有 failed，
+                    # 只在上下文里兜 1。报告与指标一律只用库里的真实数字。
+                    context=TransitionContext(compensation_failed=counts.failed or 1),
                     trace_id=trace_id,
                 )
                 return CompensationReport(
                     ticket_id=ticket_id,
                     status=TicketState.MANUAL_REQUIRED,
-                    order=tuple(task.compensate_seq for task in tasks),
+                    order=order,
                     done=counts.done,
-                    failed=failed,
+                    failed=counts.failed,
+                )
+
+            if pending:
+                logger.warning(
+                    "补偿本轮结束、工单保持补偿中 ticket=%s pending=%d queued=%d "
+                    "running=%d failed=%d done=%d（退避到期后下一轮继续）",
+                    ticket_id,
+                    pending,
+                    counts.queued,
+                    counts.running,
+                    counts.failed,
+                    counts.done,
+                )
+                return CompensationReport(
+                    ticket_id=ticket_id,
+                    status=TicketState.COMPENSATING,
+                    order=order,
+                    done=counts.done,
+                    failed=counts.failed,
                 )
 
             await self._store.transition(
@@ -599,9 +715,9 @@ class TicketRuntime:
             return CompensationReport(
                 ticket_id=ticket_id,
                 status=TicketState.ROLLED_BACK,
-                order=tuple(task.compensate_seq for task in tasks),
+                order=order,
                 done=counts.done,
-                failed=0,
+                failed=counts.failed,
             )
         finally:
             if lease_task is not None and lease_stop is not None:

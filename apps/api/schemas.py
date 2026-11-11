@@ -60,6 +60,30 @@ class Page(BaseModel, Generic[T]):  # noqa: UP046 - 运行环境 Python 3.11 不
     next_cursor: str | None = None
 
 
+# --------------------------------------------------------------------------- 会话
+
+
+class SessionScopeOut(BaseModel):
+    """服务端从会话授权范围派生出的默认 scope（只读，不来自请求）。
+
+    ``org_id`` 多组织授权时为 ``None``，由前端让用户选择，服务端不猜；
+    ``period`` 仅在授权期内存在合法 ``YYYY-MM`` 时给出最新一个，否则 ``None``。
+    """
+
+    org_id: str | None = None
+    period: str | None = None
+    system_ids: list[str]
+
+
+class SessionOut(BaseModel):
+    """当前会话身份：前端只读这里，不再从构建期变量猜角色/用户。"""
+
+    user_id: UUID
+    tenant_id: UUID
+    roles: list[str]
+    default_scope: SessionScopeOut | None = None
+
+
 # --------------------------------------------------------------------------- 工单
 
 
@@ -108,6 +132,9 @@ class TicketDetailOut(TicketOut):
     required_roles: list[str]
     missing_roles: list[str]
     audit_image_count: int
+    #: 同步回滚入口是否开放（``ERP_ROLLBACK_SYNC_ENABLED``）。
+    #: false 时前端必须禁用按钮并说明原因，不能靠「点了报错」提示。
+    rollback_available: bool
 
 
 class ActionIn(BaseModel):
@@ -331,6 +358,17 @@ class ReconBatchOut(BaseModel):
     missing_items: list[MissingItemOut] = Field(default_factory=list)
     diff_count: int = 0
     created_by: UUID
+    created_at: datetime
+
+
+class ReconBatchSummaryOut(BaseModel):
+    """批次列表项。计数与详情同源；``None`` = 旧批次无可读投影，不伪造 0。"""
+
+    batch_id: UUID
+    status: str
+    line_count: int | None = None
+    diff_count: int | None = None
+    diff_amount: str | None = None
     created_at: datetime
 
 

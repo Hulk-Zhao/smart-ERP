@@ -50,6 +50,7 @@ from apps.api.recon_snapshot import (
     snapshot_from_batch,
 )
 from apps.api.recon_store import ReconConflict, ReconStore, SqlReconStore
+from apps.api.rollback_gate import sync_rollback_enabled
 from apps.api.schemas import (
     ActionIn,
     ActionOut,
@@ -66,6 +67,7 @@ from apps.api.schemas import (
     MissingItemOut,
     MoneyOut,
     ReconBatchOut,
+    ReconBatchSummaryOut,
     ReconDatasetIn,
     ReconDiffDetailOut,
     ReconDiffOut,
@@ -107,7 +109,7 @@ from apps.recon.models import (
     Money,
     ReconMetrics,
 )
-from apps.security.approvals import TicketFacts
+from apps.security.approvals import ApprovalRecord, TicketFacts
 from apps.security.gate import AccessGrant, AccessRequest
 from apps.security.identity import SessionToken, UserPrincipal
 from apps.security.roles import (
@@ -216,7 +218,7 @@ def _authorize(
     )
 
 
-def _require_ticket(
+async def _require_ticket(
     container: ApiContainer, session: SessionToken, ticket_id: UUID
 ) -> TicketRecord:
     """按 ``(tenant_id, ticket_id)`` 取工单；查不到统一 404。
@@ -225,7 +227,9 @@ def _require_ticket(
     存在性预言机。租户是查询条件，不是取到之后再判断的校验。
     """
 
-    ticket = container.tickets.get(tenant_id=session.tenant_id, ticket_id=ticket_id)
+    ticket = await container.tickets.get(
+        tenant_id=session.tenant_id, ticket_id=ticket_id
+    )
     if ticket is None:
         raise ProblemError(
             ErrorCode.RESOURCE_NOT_FOUND, f"工单 {ticket_id} 不存在", status_code=404
@@ -238,6 +242,13 @@ def _require_ticket_in_scope(ticket: TicketRecord, scope: Scope) -> None:
         raise ProblemError(
             ErrorCode.AUTHZ_SCOPE,
             f"工单 {ticket.ticket_no} 不在请求 scope（org={scope.org_id} period={scope.period}）",
+        )
+    if ticket.systems is None:
+        # 涉及系统未知：与列表同一口径，fail-closed 拒绝。
+        # 这里绝不能写成 ``is None or ...``——那等于把「未知」放行成「全部可见」。
+        raise ProblemError(
+            ErrorCode.AUTHZ_SCOPE,
+            f"工单 {ticket.ticket_no} 未登记涉及系统（systems 为空），按范围未知拒绝",
         )
     if not set(ticket.systems) <= set(scope.system_ids):
         raise ProblemError(
@@ -258,6 +269,24 @@ def _require_initiator(ticket: TicketRecord, session: SessionToken) -> None:
             ErrorCode.AUTHZ_SCOPE,
             "执行类工单动作须由发起人（执行体）提交；审批人请走 /approvals 接口",
         )
+
+
+async def _hydrate_approvals(container: ApiContainer, ticket: TicketRecord) -> None:
+    """把库里的审批记录整体水合进 ``ApprovalService`` 的进程内缓存。
+
+    ``AccessGate`` / ``WriteGateway`` 的审批判定是同步的（不能在中途查库），
+    所以每个请求入口在进入判定链之前先用库里的真源替换该工单的缓存：
+    容器重建后判定与 ``GET /tickets/{id}`` 的 ``approvals`` 都来自库，
+    ``missing_roles`` 不会因为进程内字典是空的而回到「全部缺失」。
+    """
+
+    store = container.approval_records
+    if store is None:
+        return  # 无库模式：进程内缓存即真源（单测默认）
+    records = await store.list_for(
+        tenant_id=ticket.tenant_id, ticket_id=ticket.ticket_id
+    )
+    container.approvals.replace(str(ticket.ticket_id), records)
 
 
 def _required_roles(container: ApiContainer, ticket: TicketRecord) -> tuple[str, ...]:
@@ -309,7 +338,7 @@ def _pending_field_whitelist(
 # --------------------------------------------------------------------------- 工单
 
 
-def list_tickets(
+async def list_tickets(
     container: ApiContainer,
     session: SessionToken,
     *,
@@ -324,7 +353,7 @@ def list_tickets(
 ) -> tuple[list[TicketOut], str | None]:
     assert_can_read_ticket(principal_of(session))
     scope = _require_scope(session, build_scope(scope_in))
-    rows, next_cursor = container.tickets.list(
+    rows, next_cursor = await container.tickets.list(
         tenant_id=session.tenant_id,
         scope=scope,
         state=state,
@@ -338,13 +367,14 @@ def list_tickets(
     return [_ticket_out(row) for row in rows], next_cursor
 
 
-def get_ticket(
+async def get_ticket(
     container: ApiContainer, session: SessionToken, *, scope_in: ScopeIn, ticket_id: UUID
 ) -> TicketDetailOut:
     assert_can_read_ticket(principal_of(session))
     scope = _require_scope(session, build_scope(scope_in))
-    ticket = _require_ticket(container, session, ticket_id)
+    ticket = await _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
+    await _hydrate_approvals(container, ticket)
     return _ticket_detail(container, ticket)
 
 
@@ -358,9 +388,10 @@ async def approve_ticket(
     """审批通过并执行写计划：四道闸 → WriteGateway.execute → 审计影像 → 状态推进。"""
 
     scope = _require_scope(session, build_scope(body.scope))
-    ticket = _require_ticket(container, session, ticket_id)
+    ticket = await _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     _require_initiator(ticket, session)
+    await _hydrate_approvals(container, ticket)
     if ticket.state is not TicketState.PENDING_APPROVAL:
         raise ProblemError(
             ErrorCode.STATE_ILLEGAL,
@@ -395,10 +426,19 @@ async def approve_ticket(
         "approved",
         TransitionContext(approved=True),
     )
+    # 不直接改投影：事件与投影同事务，审批与执行器共用 TicketStore.transition。
+    version = await container.tickets.transition(
+        tenant_id=session.tenant_id,
+        ticket_id=ticket.ticket_id,
+        target=TicketState.EXECUTING,
+        trigger="approved",
+        context=TransitionContext(approved=True),
+        actor_id=session.user_id,
+        payload={"pending_write": None},
+    )
     ticket.state = TicketState.EXECUTING
-    ticket.version += 1
+    ticket.version = version
     ticket.pending_write = None
-    container.tickets.save(ticket)
 
     return ActionOut(
         ticket_id=ticket.ticket_id,
@@ -475,7 +515,13 @@ async def _execute_pending_write(
         after_ref=result.write.after_ref,
     )
     step.audit_image_id = image.id
-    ticket.steps.append(step)
+    # 步骤也是链的一部分：落 ticket_step 行 + step 事件，不能只 append 到内存投影。
+    await container.tickets.record_step(
+        tenant_id=ticket.tenant_id,
+        ticket_id=ticket.ticket_id,
+        step=step,
+        request_hash=request_fingerprint(pending.payload),
+    )
     return step
 
 
@@ -489,7 +535,7 @@ def _object_id(
     return external_id or ticket.business_key or str(ticket.ticket_id)
 
 
-def reject_ticket(
+async def reject_ticket(
     container: ApiContainer,
     session: SessionToken,
     *,
@@ -499,8 +545,9 @@ def reject_ticket(
     """驳回：落审批记录并终止工单；无外部写入，因此不过写闸门。"""
 
     scope = _require_scope(session, build_scope(body.scope))
-    ticket = _require_ticket(container, session, ticket_id)
+    ticket = await _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
+    await _hydrate_approvals(container, ticket)
     if ticket.state is not TicketState.PENDING_APPROVAL:
         raise ProblemError(
             ErrorCode.STATE_ILLEGAL,
@@ -519,15 +566,27 @@ def reject_ticket(
         amount=ticket.amount,
         touches_fund=ticket.touches_fund,
     )
-    _record_decision(container, ticket, session, body.role, "rejected", body.comment)
+    record = _build_decision(
+        container, ticket, session, body.role, "rejected", body.comment
+    )
 
     resolve_transition(
         ticket.state, TicketState.REJECTED, "rejected", TransitionContext()
     )
+    version = await container.tickets.transition(
+        tenant_id=session.tenant_id,
+        ticket_id=ticket.ticket_id,
+        target=TicketState.REJECTED,
+        trigger="rejected",
+        context=TransitionContext(),
+        actor_id=session.user_id,
+        payload={"pending_write": None},
+        approval_record=record,
+    )
+    container.approvals.remember(record)
     ticket.state = TicketState.REJECTED
-    ticket.version += 1
+    ticket.version = version
     ticket.pending_write = None
-    container.tickets.save(ticket)
     return ActionOut(
         ticket_id=ticket.ticket_id,
         action="reject",
@@ -538,7 +597,7 @@ def reject_ticket(
     )
 
 
-def cancel_ticket(
+async def cancel_ticket(
     container: ApiContainer,
     session: SessionToken,
     *,
@@ -548,7 +607,7 @@ def cancel_ticket(
     """终止：只允许尚未产生外部写入的三个状态，且必须写明原因。"""
 
     scope = _require_scope(session, build_scope(body.scope))
-    ticket = _require_ticket(container, session, ticket_id)
+    ticket = await _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     if not body.comment.strip():
         raise ProblemError(ErrorCode.DATA_MISSING, "终止工单必须写明原因（comment）")
@@ -577,10 +636,18 @@ def cancel_ticket(
         touches_fund=ticket.touches_fund,
     )
     resolve_transition(ticket.state, TicketState.TERMINATED, trigger, context)
+    version = await container.tickets.transition(
+        tenant_id=session.tenant_id,
+        ticket_id=ticket.ticket_id,
+        target=TicketState.TERMINATED,
+        trigger=trigger,
+        context=context,
+        actor_id=session.user_id,
+        payload={"pending_write": None},
+    )
     ticket.state = TicketState.TERMINATED
-    ticket.version += 1
+    ticket.version = version
     ticket.pending_write = None
-    container.tickets.save(ticket)
     return ActionOut(
         ticket_id=ticket.ticket_id,
         action="cancel",
@@ -599,14 +666,23 @@ async def compensate_ticket(
     """触发补偿：先整单推导，再按系统分组经 WriteGateway 回写。"""
 
     scope = _require_scope(session, build_scope(body.scope))
-    ticket = _require_ticket(container, session, ticket_id)
+    ticket = await _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
+    await _hydrate_approvals(container, ticket)
     # C1：自己发起的工单可直接回滚；他人工单仅 IT/CIO 与 CFO，且必须带理由。
     rollback_other = assert_can_rollback(
         principal_of(session),
         initiator_id=ticket.initiator_id,
         reason=body.reason,
     )
+    # 开关放在鉴权之后：跨租户/无权重先 403，再谈「入口是否开放」——漏鉴权比漏开关严重。
+    # 这里之前的 scope 校验与取数都是纯读（进程内仓储），不碰连接器、不写库，关闭态依旧零副作用。
+    if not sync_rollback_enabled():
+        raise ProblemError(
+            ErrorCode.ROLLBACK_UNAVAILABLE,
+            "同步回滚入口已关闭（ERP_ROLLBACK_SYNC_ENABLED 未开启）："
+            "本期只读，未调用任何连接器，工单状态未改变。",
+        )
     if ticket.state not in (TicketState.EXECUTING, TicketState.COMPENSATING):
         raise ProblemError(
             ErrorCode.STATE_ILLEGAL,
@@ -660,7 +736,7 @@ async def compensate_ticket(
         )
         ticket.state = TicketState.COMPENSATING
         ticket.version += 1
-        container.tickets.save(ticket)
+        await container.tickets.save(ticket)
 
     executed: list[TicketStepOut] = []
     manual_tasks: list[str] = []
@@ -715,7 +791,7 @@ async def compensate_ticket(
         )
         ticket.state = TicketState.ROLLED_BACK
     ticket.version += 1
-    container.tickets.save(ticket)
+    await container.tickets.save(ticket)
 
     return ActionOut(
         ticket_id=ticket.ticket_id,
@@ -777,7 +853,7 @@ def _ticket_facts(ticket: TicketRecord) -> TicketFacts:
 # --------------------------------------------------------------------------- 审批
 
 
-def list_pending_approvals(
+async def list_pending_approvals(
     container: ApiContainer,
     session: SessionToken,
     *,
@@ -787,7 +863,7 @@ def list_pending_approvals(
     limit: int | None,
 ) -> tuple[list[ApprovalTaskOut], str | None]:
     scope = _require_scope(session, build_scope(scope_in))
-    rows, next_cursor = container.tickets.list(
+    rows, next_cursor = await container.tickets.list(
         tenant_id=session.tenant_id,
         scope=scope,
         state=TicketState.PENDING_APPROVAL.value,
@@ -797,6 +873,7 @@ def list_pending_approvals(
     )
     tasks: list[ApprovalTaskOut] = []
     for ticket in rows:
+        await _hydrate_approvals(container, ticket)
         required = _required_roles(container, ticket)
         if not required:
             continue
@@ -823,7 +900,7 @@ def list_pending_approvals(
     return tasks, next_cursor
 
 
-def decide_approval(
+async def decide_approval(
     container: ApiContainer,
     session: SessionToken,
     *,
@@ -834,8 +911,9 @@ def decide_approval(
     """审批人落审批记录；驳回同时终止工单，通过不代为执行（执行由发起人触发）。"""
 
     scope = _require_scope(session, build_scope(body.scope))
-    ticket = _require_ticket(container, session, ticket_id)
+    ticket = await _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
+    await _hydrate_approvals(container, ticket)
     if ticket.state is not TicketState.PENDING_APPROVAL:
         raise ProblemError(
             ErrorCode.STATE_ILLEGAL,
@@ -851,18 +929,32 @@ def decide_approval(
         amount=ticket.amount,
         touches_fund=ticket.touches_fund,
     )
-    record = _record_decision(
+    record = _build_decision(
         container, ticket, session, body.role, decision, body.comment
     )
 
     if decision == "rejected":
+        # 审批行与状态推进同一事务：任一侧失败都整体回滚，不会留下
+        # 「工单已驳回但审批记录没落库」或反之。
         resolve_transition(
             ticket.state, TicketState.REJECTED, "rejected", TransitionContext()
         )
+        version = await container.tickets.transition(
+            tenant_id=session.tenant_id,
+            ticket_id=ticket.ticket_id,
+            target=TicketState.REJECTED,
+            trigger="rejected",
+            context=TransitionContext(),
+            actor_id=session.user_id,
+            payload={"pending_write": None},
+            approval_record=record,
+        )
+        container.approvals.remember(record)
         ticket.state = TicketState.REJECTED
-        ticket.version += 1
+        ticket.version = version
         ticket.pending_write = None
-        container.tickets.save(ticket)
+    else:
+        await _persist_decision(container, ticket, record)
 
     required = _required_roles(container, ticket)
     return ApprovalDecisionOut(
@@ -883,15 +975,17 @@ def decide_approval(
     )
 
 
-def _record_decision(
+def _build_decision(
     container: ApiContainer,
     ticket: TicketRecord,
     session: SessionToken,
     role: str,
     decision: str,
     comment: str,
-):
-    return container.approvals.record(
+) -> ApprovalRecord:
+    """校验并构造审批记录；落库/入缓存由调用方按「通过 / 驳回」分别决定。"""
+
+    return container.approvals.build(
         ticket_id=str(ticket.ticket_id),
         role=role,
         approver=principal_of(session),
@@ -899,6 +993,17 @@ def _record_decision(
         decision=decision,  # type: ignore[arg-type]
         comment=comment,
     )
+
+
+async def _persist_decision(
+    container: ApiContainer, ticket: TicketRecord, record: ApprovalRecord
+) -> None:
+    """通过决定：先落库再进缓存；落库失败时不留下进程内「已审批」的假象。"""
+
+    store = container.approval_records
+    if store is not None:
+        await store.add(tenant_id=ticket.tenant_id, record=record)
+    container.approvals.remember(record)
 
 
 # --------------------------------------------------------------------------- 对账
@@ -1104,6 +1209,42 @@ async def get_recon_batch(
     scope = _require_scope(session, build_scope(scope_in))
     view = await _load_view(container, session, scope, batch_id)
     return ReconBatchOut.model_validate(view["batch"])
+
+
+async def list_recon_batches(
+    container: ApiContainer,
+    session: SessionToken,
+    *,
+    scope_in: ScopeIn,
+    cursor: str | None,
+    limit: int | None,
+) -> tuple[list[ReconBatchSummaryOut], str | None]:
+    """批次列表：租户/组织/期间/系统全部进查询条件，计数与详情同一份投影。
+
+    空列表 = 该 scope 下确实没有批次；scope 本身越权由 ``_require_scope`` 抛
+    ``E-AUTHZ-001``（403），绝不用空数组冒充「没有权限」。
+    """
+
+    scope = _require_scope(session, build_scope(scope_in))
+    rows, next_cursor = await _recon_store(container).list_batches(
+        tenant_id=session.tenant_id,
+        org_id=scope.org_id,
+        period=scope.period,
+        system_ids=frozenset(scope.system_ids),
+        cursor=cursor,
+        limit=page_bounds(limit),
+    )
+    return [
+        ReconBatchSummaryOut(
+            batch_id=row.batch_id,
+            status=row.status,
+            line_count=row.line_count,
+            diff_count=row.diff_count,
+            diff_amount=row.diff_amount,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ], next_cursor
 
 
 def _try_metering_policy(container: ApiContainer) -> MeteringPolicy | None:
@@ -1372,7 +1513,7 @@ async def list_audit_images(
 ) -> tuple[list[AuditImageOut], str | None]:
     assert_can_read_ticket(principal_of(session))
     scope = _require_scope(session, build_scope(scope_in))
-    ticket = _require_ticket(container, session, ticket_id)
+    ticket = await _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     size = page_bounds(limit)
     offset = read_offset(cursor)
@@ -1400,7 +1541,7 @@ async def audit_chain(
 ) -> AuditChainOut:
     assert_can_read_ticket(principal_of(session))
     scope = _require_scope(session, build_scope(scope_in))
-    ticket = _require_ticket(container, session, ticket_id)
+    ticket = await _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     verification = await container.ledger.verify(ticket.tenant_id)
     images = await container.ledger.list_images(
@@ -1433,7 +1574,7 @@ async def export_audit_csv(
     """
 
     scope = _require_scope(session, build_scope(scope_in))
-    ticket = _require_ticket(container, session, ticket_id)
+    ticket = await _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     # 角色闸放在租户取数之后：跨租户一律 404，不因角色不同泄露工单是否存在。
     assert_can_export_audit(principal_of(session))
@@ -1557,6 +1698,7 @@ def _ticket_detail(container: ApiContainer, ticket: TicketRecord) -> TicketDetai
         required_roles=list(_required_roles(container, ticket)),
         missing_roles=list(_missing_roles(container, ticket)),
         audit_image_count=len(ticket.steps),
+        rollback_available=sync_rollback_enabled(),
     )
 
 

@@ -1,0 +1,149 @@
+# smart-ERP 演示数据集
+
+面向演示的三套行业数据集，配套幂等加载、单文件导出与云服务器导入。数据落在独立的
+`demo` schema，同时把 API 真正读取的 `erp.*` 投影一起灌好，因此**不改前端渲染代码、
+不改 API 契约**，页面直接消费。
+
+## 目录
+
+```
+demo/
+├── README.md                  # 本文件：场景、口径、快速开始
+├── schema.sql                 # demo schema（33 张表，全部带 scenario 列）
+├── load.py                    # 幂等加载：--scenario / --all / --dry-run / --no-erp
+├── export.py                  # 一键导出：pg_dump -Fc + sha256 + --verify 回灌校验
+├── tools/build_datasets.py    # 确定性生成器（同 seed 重跑结果一致）
+├── scenarios/
+│   ├── index.json             # 三套场景的行数、自检结论总览
+│   └── <场景>/
+│       ├── *.csv              # 主数据 + 交易 + 特殊场景数据
+│       ├── erp_seed.json      # erp.* 投影（对账批次/差异/工单/审批/审计影像）
+│       └── manifest.json      # 行数、seed、时间窗、自检问题、逐文件 sha256
+└── cloud/
+    ├── import.sh              # 云服务器一条命令导入（先清后灌，可重复执行）
+    ├── provision-demo.sql     # 最小角色开通（PG15，无 pgvector）
+    └── README.md              # 云端导入、环境变量、校验与回退
+```
+
+## 三套场景
+
+时间窗统一为过去 12 个月：`2025-11-12 ~ 2026-11-11`，业务日期最晚到 2026-09-27，
+不存在未来时间戳。每套约 30 客户 / 80 供应商 / 600 物料 / 2000+ 订单行。
+
+### 1. 制造业多工厂 `manufacturing-multi-plant`
+
+- **故事线**：苏州总装、宁波精工、武汉电子三地工厂共用主数据。两层以上 BOM（FG→SF/RM，
+  SF→RM）驱动生产工单领料；采购收货按批次入库形成库龄；月末按供应商对账，差异走工单
+  审批、执行、校验与补偿回滚。
+- **给谁看**：制造业集团 IT/财务/供应链负责人，关心多组织隔离、BOM 与工单、批次库龄。
+- **推荐页面**：
+  - 工单列表/详情：11 种状态齐全，`TK-202609-0012`、`TK-202609-0013` 是两条完整补偿回滚链；
+  - 对账批次：`2026-07/08/09` 三个批次，每月 104 行里 80 条差异；
+  - 差异详情：前像/后像落在真实 PO/收货单上；
+  - 计量：按有效对账行出账。
+- **数据锚点**：5 仓、2 层 BOM 1270 行、工单 220 张、批次 787 个、GL 2040 行。
+
+### 2. 快消分销 `fmcg-distribution`
+
+- **故事线**：上海总部 + 杭州/南京分仓管理 30 家一级/二级经销商与 KA 直营。月度促销、
+  阶梯返利先计提后核销；账期与信用额度约束大量小额订单；月末以经销商结算单对账，重点
+  处理促销费用、数量短装与重复开单。
+- **给谁看**：快消品牌商/经销商集团的销售运营与财务共享中心，关心返利、信用、海量小单。
+- **推荐页面**：
+  - 总览：700 张订单、2081 行、客单价低，能体现"小单高频"；
+  - 对账批次与差异：促销/返利相关差异与容差内差异同屏；
+  - 工单与审批：待审批/已驳回/执行中/已回滚混合，演示审批与补偿；
+  - 计量：按有效对账行计费。
+- **数据锚点**：3 主体、3 仓、促销 24 条、返利计提 36 条、销售行 2081、采购行 775。
+
+### 3. 跨境多币种 `cross-border-multicurrency`
+
+- **故事线**：深圳、香港、新加坡三个主体做转口与本地交付。外币订单按成交日汇率折算；
+  进口报关计提关税与进口增值税；月末跨主体按内部转移价结算；供应商对账单同时出现汇率、
+  税率与单位换算差异。
+- **给谁看**：跨境供应链、国际结算与税务团队，关心多币种、汇率、关税、跨主体。
+- **推荐页面**：
+  - 对账差异：`tax` / `uom` / `rounding_tolerance` 差异集中出现；
+  - 对账批次：跨主体、跨币种批次；
+  - 工单详情：外币金额与补偿链路；
+  - 计量：多主体账单。
+- **数据锚点**：5 币种、48 条日汇率、120 张报关单、60 笔跨主体结算、销售行 2202。
+
+## 数据口径
+
+- **编码规则**
+  - 客户：`C-AUTO-0001`（制造）/ `C-DIST-0001`（分销）/ `C-OVR-0001`（跨境）；
+  - 供应商：`S-STL-0001`、`S-SUG-0001`、`S-BAT-0001`（按供应品类分段）；
+  - 物料：`FG-FRA-0001`、`RM-CRS-0001`、`PK-PAL-0001`、`SF-GBL-0001`——前缀是物料类型，
+    中段是**语义分类段**（如 FRA=前副车架、CRS=冷轧钢板、PAL=木托盘），末段是流水；
+  - BOM：`BOM-<父项编码>`；批次：`LOT-<流水>-<日期>-<订单序号>-<行号>`。
+- **勾稽**
+  - 销售：订单行金额合计 = 订单头；发货数量 ≤ 订单数量；开票 ≤ 发货；
+  - 采购：收货 ≤ 订单；发票 ≤ 收货；库存批次数量 = 收货行数量；
+  - 总账：每张凭证借贷相等，`gl_entry` 全表借贷合计相等。
+- **对账差异**：每个批次同时覆盖契约里的 8 类（`unit_price` / `qty` / `scrap` / `uom` /
+  `tax` / `missing_doc` / `duplicate` / `rounding_tolerance`），另含 `candidate` 与
+  `unparseable` 两个候选/解析失败态（API 分别归入 qty/uom）。差异行经 `recon_line_link`
+  指向真实工单，可查看前像/后像。
+- **工单**：覆盖 `待确认/待审批/已驳回/执行中/校验中/已完成/补偿中/已回滚/需人工处置/
+  已锁定/已终止` 11 种状态，其中 2 条是"执行中→校验失败→补偿中→已回滚"的完整链路。
+- **时间**：下单 < 发货/收货 < 开票 < 对账批次 < 工单事件，全部落在过去 12 个月内。
+
+## 快速开始
+
+```bash
+# 1) 重新生成（可选；仓库已带生成结果，确定性重跑字节级一致）
+python demo/tools/build_datasets.py
+
+# 2) 只看统计与自检，不连库
+python demo/load.py --scenario manufacturing-multi-plant --dry-run
+
+# 3) 单套加载（幂等，可重复执行）
+python demo/load.py --scenario manufacturing-multi-plant --dsn "$DEMO_DSN"
+
+# 4) 一次全灌（三套场景各用独立 tenant_id，互不覆盖）
+python demo/load.py --all --dsn "$DEMO_DSN"
+```
+
+`load.py` 的事务语义：任一场景失败整批回滚；`demo.*` 先按 scenario 删除再插入；
+`erp.*` 先按 tenant_id 删除再插入（append-only 表需临时关闭用户触发器，请用表属主/迁移
+账号执行）。
+
+## 打包与云端导入
+
+```bash
+# 导出单个可传输文件（含 demo + erp 两个 schema 的结构与数据）
+python demo/export.py --dsn "$DEMO_DSN" --docker-container <pg 容器名> --out demo/dist --verify
+
+# 云服务器（一条命令，重复执行即重灌）
+PGDATABASE=smart_erp PGHOST=<pg-host> PGPORT=5432 PGUSER=erp_migrator PGPASSWORD=<pwd> \
+  bash demo/cloud/import.sh smart-erp-demo-YYYYMMDD-HHMM.dump
+```
+
+细节见 [cloud/README.md](cloud/README.md)。
+
+## 与前端/契约的关系
+
+- 前端当前走 `web/src/api/mock.ts`；本数据集**不替换 mock 的字段形状**，而是把同一份契约
+  背后的 `erp.*` 表灌满，API 接通数据库后页面自然显示真实数据，渲染代码零改动。
+- `demo.*` 是"源业务系统"明细，用于讲解订单→发货→开票→对账的来龙去脉，以及和 BI 对拍；
+  API 只读 `erp.*` 投影。
+- 三套场景各自独立 `tenant_id`，可同时存在；前端会话必须指向对应 tenant（见下方缺口①）。
+
+## 已知契约/部署缺口（已在台账登记，未自行扩契约）
+
+1. **无 session bootstrap**：`/v1/*` 全部要求 `X-Session-Token`，仓库没有签发入口。
+   演示环境需要集成侧提供登录换 token，或使用验收脚本注入会话。
+2. **审计影像未接数据库**：`/v1/audit/images`、`/v1/audit/chain` 仍是内存态 `AuditLedger`，
+   `erp.audit_image` 已灌数据但页面不会展示；如要演示影像链路，需集成把该接口切到 SQL。
+3. **部署脚本依赖 pgvector**：`deploy/smart-erp/db/00-provision.sql` 会 `CREATE EXTENSION vector`，
+   与"演示库不用 pgvector"冲突。本目录提供 `cloud/provision-demo.sql`（无 vector），
+   是否给 demo 档拆一份开通脚本请集成决定。
+4. **场景类别只注册了 `ag2_processing_fee`**：审批流只认这一种 scene_code，本数据集已统一使用；
+   若演示需要更多场景类别，需先扩注册表。
+
+## 依赖与许可
+
+- Python 3.12（`demo/` 下脚本仅标准库；加载器额外使用 asyncpg，Apache-2.0）。
+- PostgreSQL 15（导出端 15.19），UTF-8，`Asia/Shanghai`，不使用 pgvector。
+- 生成器为确定性：`manifest.json` 里的 `seed` 固定，除 `generated_at` 外重跑结果一致。
