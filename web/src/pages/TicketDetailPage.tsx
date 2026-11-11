@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { api, downloadText, type TicketAction, type TicketActionPayload } from '../api/client';
 import { useApiConfig, type ApprovalRole } from '../api/config';
+import { useSession } from '../api/session';
 import { LevelBadge, StateBadge } from '../components/Badges';
 import { ApprovalOpinions } from '../components/ApprovalOpinions';
 import { ErrorPanel } from '../components/ErrorPanel';
@@ -44,6 +45,7 @@ function availableActions(state: string): TicketAction[] {
 export function TicketDetailPage() {
   const { ticketId = '' } = useParams();
   const config = useApiConfig();
+  const session = useSession();
   const queryClient = useQueryClient();
   const [activeAction, setActiveAction] = useState<TicketAction | null>(null);
   const [comment, setComment] = useState('');
@@ -59,17 +61,18 @@ export function TicketDetailPage() {
   const ticket = useQuery({
     queryKey: ['ticket', ticketId],
     queryFn: () => api.getTicket(ticketId),
-    enabled: Boolean(ticketId),
+    // 与设置面板同一套规则：范围未确认前不发业务请求，避免用占位 org 拿 403。
+    enabled: session.canQuery && Boolean(ticketId),
   });
   const images = useQuery({
     queryKey: ['ticket', ticketId, 'images'],
     queryFn: () => api.listAuditImages(ticketId, { limit: 100 }),
-    enabled: Boolean(ticketId),
+    enabled: session.canQuery && Boolean(ticketId),
   });
   const chain = useQuery({
     queryKey: ['ticket', ticketId, 'chain'],
     queryFn: () => api.getAuditChain(ticketId),
-    enabled: Boolean(ticketId),
+    enabled: session.canQuery && Boolean(ticketId),
   });
 
   const mutation = useMutation({
@@ -114,7 +117,7 @@ export function TicketDetailPage() {
     return <ErrorPanel error={{ status: 422, code: 'E-DATA-MISSING', detail: '缺少工单 ID' }} />;
   }
 
-  if (ticket.isLoading) {
+  if (ticket.isPending) {
     return (
       <div className="space-y-3">
         <div className="skeleton h-20 w-full" />
@@ -268,7 +271,7 @@ export function TicketDetailPage() {
                 </div>
                 {images.error ? (
                   <ErrorPanel error={images.error} compact onRetry={() => void images.refetch()} onOpenSettings={openSettingsPanel} />
-                ) : images.isLoading ? (
+                ) : images.isPending ? (
                   <div className="space-y-2">{[0, 1].map((key) => <div key={key} className="skeleton h-16 w-full" />)}</div>
                 ) : (
                   <StepTimeline steps={detail.steps} images={imagesList} />
@@ -518,7 +521,7 @@ export function TicketDetailPage() {
             <div className="card-head">
               <h2 className="section-title">审计链</h2>
               <span className={`badge ${auditChain?.ok ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-rose-50 text-rose-700 ring-rose-200'}`}>
-                {chain.isLoading ? '校验中' : auditChain?.ok ? '完整' : '异常'}
+                {chain.isPending ? '校验中' : auditChain?.ok ? '完整' : '异常'}
               </span>
             </div>
             <div className="card-body space-y-1.5 text-[11px] text-slate-500">

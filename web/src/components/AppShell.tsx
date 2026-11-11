@@ -3,7 +3,9 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { configureApi, useApiConfig, type ScopeSource } from '../api/config';
+import { setBusinessQueriesPaused } from '../api/query-pause';
 import { useSession, type SessionState } from '../api/session';
+import type { SessionScopeOut } from '../api/generated/contract';
 import { CONTRACT_PATH_COUNT, CONTRACT_VERSION } from '../api/types';
 import { OPEN_SETTINGS_EVENT } from '../lib/settings';
 import { shortId } from '../lib/format';
@@ -104,7 +106,14 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [viewerName, setViewerName] = useState(config.viewerName);
   // 用户动过 scope 三项后就不再被会话默认范围覆盖，避免手打一半被重置。
   const [scopeEdited, setScopeEdited] = useState(false);
+  const [saving, setSaving] = useState(false);
   const session = useSession();
+
+  // 面板打开期间暂停页面业务查询：会话一返回也不许页面先拿还没确认的范围取数。
+  useEffect(() => {
+    setBusinessQueriesPaused(true);
+    return () => setBusinessQueriesPaused(false);
+  }, []);
 
   const defaultScope = session.session?.default_scope ?? null;
   const scopeState: ScopePanelState =
@@ -133,15 +142,38 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
     setSystems(systemsText);
   }, [config.scope.org_id, config.scope.period, systemsText, scopeEdited]);
 
-  /** 粘完令牌就探测会话：默认范围随令牌返回，不需要用户再点一次「获取」。 */
+  /** 用给定令牌取一次会话（命中同一 queryKey 缓存就不重复请求），返回 default_scope。 */
+  const resolveDefaultScope = async (nextToken: string): Promise<SessionScopeOut | null> => {
+    configureApi({ token: nextToken, scopeSource: 'pending' });
+    try {
+      const data = await queryClient.fetchQuery({
+        queryKey: ['auth', 'session', nextToken],
+        queryFn: () => api.getSession(),
+        staleTime: Infinity,
+        retry: false,
+      });
+      return data.default_scope ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  /** 输入即去抖探测（不依赖 blur）；保存时还会再取一次，正确性不靠时序。 */
+  useEffect(() => {
+    const next = token.trim();
+    if (next === config.token) return;
+    const timer = window.setTimeout(() => {
+      configureApi({ token: next, scopeSource: 'pending' });
+      void queryClient.invalidateQueries({ queryKey: ['auth', 'session'] });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [token, config.token, queryClient]);
+
+  /** 失焦立即探测，省去等去抖的 400ms。 */
   const probeSession = () => {
     const next = token.trim();
     if (next === config.token) return;
-    configureApi({
-      token: next,
-      // 换令牌就是换一次会话：重新等 default_scope 落地，避免旧范围被当成新令牌的事实。
-      scopeSource: 'pending',
-    });
+    configureApi({ token: next, scopeSource: 'pending' });
     void queryClient.invalidateQueries({ queryKey: ['auth', 'session'] });
   };
 
@@ -154,25 +186,43 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   // org_id 为空时禁止保存：多组织是服务端明确交给用户的选择，不能用默认值替代。
   const canSave = org !== '' && periodValue !== '';
 
-  const save = () => {
-    if (!canSave) return;
-    const sameAsDefault =
-      !!defaultScope &&
-      (defaultScope.org_id ?? '') === org &&
-      (defaultScope.period ?? '') === periodValue &&
-      defaultScope.system_ids.join(',') === systemIds.join(',');
-    // 与会话默认范围一致就不落本地存储，下次启动继续跟随令牌；不一致则是用户核对后确认的范围。
-    // 保存动作本身就是确认：未确认的旧默认值只有经过这一步才会被当成可用范围。
-    const scopeSource: ScopeSource = sameAsDefault ? 'session' : 'manual';
+  const save = async () => {
+    if (!canSave || saving) return;
+    setSaving(true);
+    const nextToken = token.trim();
+    const tokenChanged = nextToken !== config.token;
+    let scope = {
+      org_id: org,
+      period: periodValue,
+      system_ids: systemIds.length > 0 ? systemIds : config.scope.system_ids,
+    };
+    let scopeSource: ScopeSource = 'manual';
+
+    // 没手改且来源不是「用户已确认的手动范围」时，保存前先用输入框里的令牌取一次会话，
+    // 再决定用哪套范围：这样「粘完直接点保存」不依赖 blur/请求返回的先后顺序。
+    if (!scopeEdited && (config.scopeSource !== 'manual' || tokenChanged)) {
+      const resolved = await resolveDefaultScope(nextToken);
+      if (resolved) {
+        if (!resolved.org_id || !resolved.period) {
+          // 多组织 / 无账期：切到选择态，面板保持打开等用户决定，不替用户猜。
+          setSaving(false);
+          return;
+        }
+        scope = {
+          org_id: resolved.org_id,
+          period: resolved.period,
+          system_ids: resolved.system_ids.length > 0 ? resolved.system_ids : scope.system_ids,
+        };
+        scopeSource = 'session';
+      }
+      // resolved 为 null（端点未启用 / 401 / 异常）：按当前字段保存为 manual，由用户核对确认。
+    }
+
     configureApi({
       baseUrl: baseUrl.trim() || '/erp/api',
-      token: token.trim(),
+      token: nextToken,
       viewerName: viewerName.trim() || '当前用户',
-      scope: {
-        org_id: org,
-        period: periodValue,
-        system_ids: systemIds.length > 0 ? systemIds : config.scope.system_ids,
-      },
+      scope,
       scopeSource,
     });
     queryClient.invalidateQueries();
@@ -376,11 +426,11 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
               type="button"
               className="btn btn-primary"
               onClick={save}
-              disabled={!canSave}
+              disabled={!canSave || saving}
               title={canSave ? undefined : 'org_id 与 period 不能为空'}
               data-testid="save-settings"
             >
-              保存并刷新
+              {saving ? '正在获取默认范围…' : '保存并刷新'}
             </button>
           </div>
         </div>

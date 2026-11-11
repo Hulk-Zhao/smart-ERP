@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api/client';
+import { useSession } from '../api/session';
 import { DIFF_TYPES } from '../api/types';
 import type { DiffTypeCode } from '../api/types';
 import { DiffTypeBadge } from '../components/Badges';
@@ -43,6 +44,7 @@ function phaseIndex(status: string): number {
 
 export function ReconBatchPage() {
   const { batchId = '' } = useParams();
+  const session = useSession();
   const [diffType, setDiffType] = useState<DiffTypeCode | ''>('');
   const [needsManual, setNeedsManual] = useState(false);
   const [supplier, setSupplier] = useState('');
@@ -51,7 +53,7 @@ export function ReconBatchPage() {
   const batch = useQuery({
     queryKey: ['recon', batchId],
     queryFn: () => api.getReconRun(batchId),
-    enabled: Boolean(batchId),
+    enabled: session.canQuery && Boolean(batchId),
   });
 
   const diffs = useQuery({
@@ -65,7 +67,7 @@ export function ReconBatchPage() {
         cursor: cursor ?? undefined,
         limit: 20,
       }),
-    enabled: Boolean(batchId),
+    enabled: session.canQuery && Boolean(batchId),
   });
 
   if (!batchId) {
@@ -151,7 +153,7 @@ export function ReconBatchPage() {
         />
       ) : null}
 
-      {batch.isLoading ? (
+      {batch.isPending ? (
         <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
           {[0, 1, 2, 3, 4, 5, 6, 7].map((key) => <div key={key} className="skeleton h-16 w-full" />)}
         </div>
@@ -246,7 +248,7 @@ export function ReconBatchPage() {
                 </div>
               ) : null}
 
-              {diffs.isLoading ? (
+              {diffs.isPending ? (
                 <div className="space-y-2 p-3">{[0, 1, 2, 3, 4].map((key) => <div key={key} className="skeleton h-9 w-full" />)}</div>
               ) : diffItems.length === 0 ? (
                 <div className="p-3">

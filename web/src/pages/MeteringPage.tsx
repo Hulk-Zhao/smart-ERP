@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { api, downloadText, type MeteringExport } from '../api/client';
+import { useSession } from '../api/session';
 import type { BillingBucket, MeteringDataGapOut, MeteringStatementOut } from '../api/types';
 import { DiffTypeBadge } from '../components/Badges';
 import { EmptyState } from '../components/EmptyState';
@@ -237,6 +238,7 @@ type DigestState =
   | { status: 'done'; local: string; match: boolean | null };
 
 export function MeteringPage() {
+  const session = useSession();
   const { batchId = '' } = useParams();
   const [exported, setExported] = useState<
     (MeteringExport & { downloadedAt: string; digest?: DigestState }) | null
@@ -247,7 +249,7 @@ export function MeteringPage() {
   const statement = useQuery({
     queryKey: ['metering', batchId],
     queryFn: () => api.getMeteringStatement(batchId),
-    enabled: Boolean(batchId),
+    enabled: session.canQuery && Boolean(batchId),
   });
 
   const csv = useMutation({
@@ -277,7 +279,7 @@ export function MeteringPage() {
     return <ErrorPanel error={{ status: 422, code: 'E-DATA-MISSING', detail: '缺少 batch_id' }} />;
   }
 
-  if (statement.isLoading) {
+  if (statement.isPending) {
     return (
       <div className="space-y-3">
         <div className="skeleton h-16 w-full" />

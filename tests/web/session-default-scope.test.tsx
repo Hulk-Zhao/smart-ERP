@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { configureApi, resetApiConfig } from '../../web/src/api/config';
 import { OverviewPage } from '../../web/src/pages/OverviewPage';
+import { TicketsPage } from '../../web/src/pages/TicketsPage';
 import { approvalTask } from './helpers/fixtures';
 import { renderShell } from './helpers/render';
 import { problem, startApi, type Reply, type TestApi } from './helpers/server';
@@ -107,6 +108,11 @@ describe('default_scope 齐全：只粘一次令牌', () => {
     // 可见、可改：自动带出不是只读展示。
     expect(screen.getByTestId('scope-org')).not.toBeDisabled();
     expect(screen.getByTestId('scope-period')).not.toBeDisabled();
+
+    // 面板还开着、用户还没保存：页面业务查询必须全部暂缓，只允许会话请求。
+    expect(paths(server)).not.toContain('/v1/approvals/pending');
+    expect(paths(server)).not.toContain('/v1/tickets');
+    expect(paths(server)).not.toContain('/v1/recon/batches');
 
     // 交互到此为止：粘令牌 + 保存，共 2 次。
     fireEvent.click(screen.getByTestId('save-settings'));
@@ -236,5 +242,132 @@ describe('default_scope.period 为 null：不猜账期', () => {
     expect(screen.getByTestId('scope-period')).toHaveValue('');
     expect(screen.getByTestId('save-settings')).toBeDisabled();
     expect(paths(server)).not.toContain('/v1/tickets');
+  });
+});
+
+describe('冷刷新 /tickets：第一条查询就带会话范围', () => {
+  let server: TestApi;
+
+  beforeEach(async () => {
+    globalThis.localStorage?.clear();
+    server = await startApi((request) => {
+      const token = String(request.headers['x-session-token'] ?? '');
+      if (request.path === '/v1/auth/session') {
+        return token === 'demo-token'
+          ? sessionBody({ org_id: 'ORG-7', period: '2026-09', system_ids: ['u8'] })
+          : problem(401, 'E-AUTHZ-001', '缺少会话令牌（请求头 X-Session-Token）');
+      }
+      if (request.path === '/v1/tickets') {
+        // 真实后端按 G-05 校验范围：用占位 ORG-1 打过来就是 403。
+        if (request.query.org_id?.[0] !== 'ORG-7') {
+          return problem(403, 'E-AUTHZ-003', `org ${request.query.org_id?.[0] ?? '空'} 不在授权范围`);
+        }
+        return { body: { items: [], next_cursor: null } };
+      }
+      return problem(404, 'E-RESOURCE-NOTFOUND', `unexpected ${request.path}`);
+    });
+    resetApiConfig();
+    // 模拟「上次已保存令牌」后冷刷新：令牌在，范围还没由会话确认。
+    configureApi({ baseUrl: server.baseUrl, token: 'demo-token', mock: false, scopeSource: 'pending' });
+  });
+
+  afterEach(async () => {
+    resetApiConfig();
+    globalThis.localStorage?.clear();
+    await server.close();
+  });
+
+  it('不发默认 ORG-1 的 403，只发会话带出的 ORG-7', async () => {
+    renderShell(<TicketsPage />, { route: '/tickets' });
+
+    await waitFor(() => expect(paths(server)).toContain('/v1/tickets'));
+
+    const ticketsRequests = server.requests.filter((request) => request.path === '/v1/tickets');
+    expect(ticketsRequests.length).toBeGreaterThan(0);
+    for (const request of ticketsRequests) {
+      expect(request.query.org_id).toEqual(['ORG-7']);
+      expect(request.query.period).toEqual(['2026-09']);
+      expect(request.headers['x-session-token']).toBe('demo-token');
+    }
+  });
+});
+
+describe('粘贴令牌后直接保存：不依赖 blur 时序', () => {
+  let server: TestApi;
+
+  beforeEach(async () => {
+    globalThis.localStorage?.clear();
+    server = await bootApi((token) =>
+      token === 'demo-token'
+        ? sessionBody({ org_id: 'ORG-7', period: '2026-09', system_ids: ['u8'] })
+        : problem(401, 'E-AUTHZ-001', '缺少会话令牌（请求头 X-Session-Token）'),
+    );
+  });
+
+  afterEach(async () => {
+    resetApiConfig();
+    globalThis.localStorage?.clear();
+    await server.close();
+  });
+
+  it('只 change 不 blur 直接点保存，仍按会话范围加载', async () => {
+    renderShell(<OverviewPage />);
+    await openSettings();
+    await waitScopeState('unavailable');
+
+    fireEvent.change(screen.getByTestId('session-token'), { target: { value: 'demo-token' } });
+    // 关键：不失焦、不等 400ms 去抖，直接保存；正确性由保存路径自己取会话保证。
+    fireEvent.click(screen.getByTestId('save-settings'));
+
+    await waitFor(() => expect(screen.queryByTestId('connection-settings')).toBeNull());
+    await waitFor(() => expect(within(kpi('待你决策')).getByText('1')).toBeTruthy());
+
+    const pending = lastRequest(server, '/v1/approvals/pending');
+    expect(pending?.query.org_id).toEqual(['ORG-7']);
+    expect(pending?.query.period).toEqual(['2026-09']);
+    expect(pending?.headers['x-session-token']).toBe('demo-token');
+    // 全程没有用旧的 ORG-1 发过任何待办请求。
+    const pendingRequests = server.requests.filter((request) => request.path === '/v1/approvals/pending');
+    expect(pendingRequests.every((request) => request.query.org_id?.[0] === 'ORG-7')).toBe(true);
+  });
+});
+
+describe('多组织令牌 + 立刻保存：先取会话再决定，不替用户猜', () => {
+  let server: TestApi;
+
+  beforeEach(async () => {
+    globalThis.localStorage?.clear();
+    server = await bootApi((token) =>
+      token === 'multi-org-token'
+        ? sessionBody({ org_id: null, period: '2026-10', system_ids: ['u8', 'statement'] })
+        : problem(401, 'E-AUTHZ-001', '缺少会话令牌（请求头 X-Session-Token）'),
+    );
+  });
+
+  afterEach(async () => {
+    resetApiConfig();
+    globalThis.localStorage?.clear();
+    await server.close();
+  });
+
+  it('保存时发现 org_id 为 null：面板保持打开进入选择态，补齐后才加载', async () => {
+    renderShell(<OverviewPage />);
+    await openSettings();
+    await waitScopeState('unavailable');
+
+    fireEvent.change(screen.getByTestId('session-token'), { target: { value: 'multi-org-token' } });
+    fireEvent.click(screen.getByTestId('save-settings'));
+
+    const state = await waitScopeState('multi-org');
+    expect(state.textContent).toContain('授权了多个组织');
+    await waitFor(() => expect(screen.getByTestId('scope-org')).toHaveValue(''));
+    expect(screen.getByTestId('connection-settings')).toBeTruthy();
+    expect(screen.getByTestId('save-settings')).toBeDisabled();
+    expect(paths(server)).not.toContain('/v1/approvals/pending');
+
+    fireEvent.change(screen.getByTestId('scope-org'), { target: { value: 'ORG-2' } });
+    fireEvent.click(screen.getByTestId('save-settings'));
+    await waitFor(() => expect(within(kpi('待你决策')).getByText('1')).toBeTruthy());
+    expect(lastRequest(server, '/v1/approvals/pending')?.query.org_id).toEqual(['ORG-2']);
   });
 });
