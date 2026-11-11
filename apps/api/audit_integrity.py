@@ -3,27 +3,12 @@
 问题定性：``ticket_step.audit_image_id`` 没有外键（见 0010 迁移的说明），
 当它指向不存在的 ``erp.audit_image`` 行时，**审计链会显示某一步有外部证据，
 但该证据行不存在**——属于审计证据完整性问题（无法自证），不是状态机错误。
-API 容器默认用进程内 ``AuditLedger`` 时，这一步从出生起就悬空；本巡检是
-当前唯一会发现它的地方。
+容器装配一旦回退到进程内台账，这一步从出生起就悬空；本巡检是当前唯一会
+发现它的地方。
 
-一条 SQL 同时给出「孤儿数」与「样本」：
-
-.. code-block:: sql
-
-    WITH orphan AS (
-        SELECT s.id AS step_id, s.ticket_id, s.audit_image_id
-          FROM erp.ticket_step AS s
-         WHERE s.audit_image_id IS NOT NULL
-           AND NOT EXISTS (
-               SELECT 1 FROM erp.audit_image AS i WHERE i.id = s.audit_image_id
-           )
-    )
-    SELECT (SELECT count(*) FROM orphan) AS orphan_count,
-           (SELECT json_agg(sample)::text
-              FROM (SELECT step_id, ticket_id, audit_image_id
-                      FROM orphan
-                     ORDER BY ticket_id, step_id
-                     LIMIT :sample_limit) AS sample) AS samples
+一条 SQL 同时给出「孤儿数」与「样本」；SQL 本身与读路径共用
+``apps/audit/image_link.py`` 的 ``ORPHAN_SQL`` / ``STEP_IMAGE_PREDICATE``，
+这里不再复写一份，避免孤儿定义与影像列表分叉。
 
 索引与代价：``NOT EXISTS`` 的探测走 ``erp.audit_image`` 的 ``id`` 前缀索引
 （主键或 ``audit_image_id_tenant_uniq``）；``erp.ticket_step`` 的
@@ -54,8 +39,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import text
-
+from apps.audit.image_link import ORPHAN_SQL
 from observability.metrics import MetricsRegistry
 
 logger = logging.getLogger("erp.audit.integrity")
@@ -63,25 +47,6 @@ logger = logging.getLogger("erp.audit.integrity")
 DEFAULT_INTERVAL_SECONDS = 900.0
 DEFAULT_STARTUP_DELAY_SECONDS = 5.0
 DEFAULT_SAMPLE_LIMIT = 20
-
-_ORPHAN_SQL = text(
-    """
-    WITH orphan AS (
-        SELECT s.id AS step_id, s.ticket_id, s.audit_image_id
-          FROM erp.ticket_step AS s
-         WHERE s.audit_image_id IS NOT NULL
-           AND NOT EXISTS (
-               SELECT 1 FROM erp.audit_image AS i WHERE i.id = s.audit_image_id
-           )
-    )
-    SELECT (SELECT count(*) FROM orphan) AS orphan_count,
-           (SELECT json_agg(sample)::text
-              FROM (SELECT step_id, ticket_id, audit_image_id
-                      FROM orphan
-                     ORDER BY ticket_id, step_id
-                     LIMIT :sample_limit) AS sample) AS samples
-    """
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +79,7 @@ class AuditIntegrityScanner:
         started = time.perf_counter()
         async with self._factory()() as session:
             row = (
-                await session.execute(_ORPHAN_SQL, {"sample_limit": self.sample_limit})
+                await session.execute(ORPHAN_SQL, {"sample_limit": self.sample_limit})
             ).one()
         count = int(row.orphan_count or 0)
         samples = tuple(json.loads(row.samples or "[]"))

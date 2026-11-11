@@ -49,7 +49,14 @@ async def list_images(
     "/tickets/{ticket_id}/chain",
     response_model=AuditChainOut,
     summary="按工单校验审计链",
-    description="校验租户链完整性（append-only + 前向哈希），并返回该工单影像数与链尾哈希。",
+    description=(
+        "**租户范围**：按租户验链（`tenant_id` 是链的隔离边界），不做跨租户全局链；"
+        "截断判定以该租户链尾为准，其他租户的行不参与。\n\n"
+        "校验只看 `erp.audit_image` 已写入行的 `prev_hash`/`hash` 衔接，"
+        "不读 `anchor_day()`，也不拿进程时钟的 `created_at` 做日切判据——"
+        "日切/锚点若将来接入调度，必须先把判据换成 `chain_seq` 边界。\n\n"
+        "返回该工单**被步骤引用**的影像数与最后一个影像的哈希。"
+    ),
 )
 async def chain(
     ticket_id: UUID,
