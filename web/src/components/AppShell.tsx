@@ -59,11 +59,20 @@ function pageMeta(pathname: string): { title: string; crumbs: string[] } {
   return { title: '工作台', crumbs: ['工作台'] };
 }
 
-type ScopePanelState = 'loading' | 'ready' | 'multi-org' | 'missing-period' | 'missing' | 'unavailable' | 'error';
+type ScopePanelState =
+  | 'loading'
+  | 'ready'
+  | 'manual'
+  | 'multi-org'
+  | 'missing-period'
+  | 'missing'
+  | 'unavailable'
+  | 'error';
 
 const SCOPE_BADGE: Record<ScopePanelState, string> = {
   loading: '获取中',
   ready: '已从会话带出',
+  manual: '手动填写（优先）',
   'multi-org': '待选择组织',
   'missing-period': '待补全账期',
   missing: '当前无法获取默认范围',
@@ -74,6 +83,7 @@ const SCOPE_BADGE: Record<ScopePanelState, string> = {
 const SCOPE_HINT: Record<ScopePanelState, string> = {
   loading: '正在用当前令牌获取会话默认范围…',
   ready: '三项已由 GET /v1/auth/session 的 default_scope 带出，直接保存即可；需要时仍可修改。',
+  manual: '当前三项是手动填写的范围，优先于会话默认范围；改成与会话一致的值保存即恢复自动跟随。',
   'multi-org':
     '该令牌授权了多个组织，服务端不替你选择。请填写要使用的 org_id，保存后才会加载数据。',
   'missing-period': '该令牌的授权期内没有可用账期（period 为 null），请手动填写 period。',
@@ -105,7 +115,9 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
           ? 'multi-org'
           : !defaultScope.period
             ? 'missing-period'
-            : 'ready'
+            : config.scopeSource === 'manual'
+              ? 'manual'
+              : 'ready'
       : session.status === 'loading'
         ? 'loading'
         : session.unavailable
@@ -127,8 +139,8 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
     if (next === config.token) return;
     configureApi({
       token: next,
-      // 换了令牌就重新等待服务端给范围；手填过的范围继续尊重。
-      scopeSource: config.scopeSource === 'manual' ? 'manual' : 'pending',
+      // 换令牌就是换一次会话：重新等 default_scope 落地，避免旧范围被当成新令牌的事实。
+      scopeSource: 'pending',
     });
     void queryClient.invalidateQueries({ queryKey: ['auth', 'session'] });
   };
@@ -223,7 +235,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
             className={`min-w-0 rounded-lg border px-3 py-2.5 ${
               scopeState === 'ready'
                 ? 'border-emerald-200 bg-emerald-50/70'
-                : scopeState === 'loading'
+                : scopeState === 'loading' || scopeState === 'manual'
                   ? 'border-slate-200 bg-slate-50'
                   : 'border-amber-200 bg-amber-50/70'
             }`}
@@ -236,7 +248,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
                 className={`badge ${
                   scopeState === 'ready'
                     ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
-                    : scopeState === 'loading'
+                    : scopeState === 'loading' || scopeState === 'manual'
                       ? 'bg-slate-100 text-slate-600 ring-slate-200'
                       : 'bg-amber-50 text-amber-700 ring-amber-200'
                 }`}
