@@ -52,6 +52,48 @@ class ChainVerification:
     detail: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class PageVerification:
+    """一页链的校验结果；``verification`` 非空即断链。
+
+    ``checked`` 是**本页**实际校验通过的行数（断点之前），``next_cursor`` 是下一页
+    的起点，``last_hash`` 是本页通过部分的链尾——扫描任务靠这三个值跨页续扫，
+    不需要把整条链读进内存。
+    """
+
+    verification: ChainVerification | None
+    checked: int
+    next_cursor: int
+    last_hash: str
+    exhausted: bool
+
+    @property
+    def ok(self) -> bool:
+        return self.verification is None
+
+
+def _check_row(prev: str, index: int, image: AuditImage) -> ChainVerification | None:
+    """单行判定（全链 ``verify`` 与分页巡检共用同一套口径，禁止各写一份）。"""
+
+    if image.prev_hash != prev:
+        return ChainVerification(
+            tenant_id=image.tenant_id,
+            ok=False,
+            checked=index,
+            broken_at=index,
+            detail=f"第 {index} 条 prev_hash 与链尾不连续",
+        )
+    if compute_image_hash(prev, image.model_dump(mode="python")) != image.hash:
+        return ChainVerification(
+            tenant_id=image.tenant_id,
+            ok=False,
+            checked=index,
+            broken_at=index,
+            detail=f"第 {index} 条记录内容与 hash 不一致（疑似篡改）",
+        )
+    return None
+
+
 class SnapshotStore(Protocol):
     """前像/后像快照存储（生产为 MinIO/WORM，测试为内存）。"""
 
@@ -239,30 +281,64 @@ class AuditLedger:
     async def list_images(self, query: AuditQuery) -> list[AuditImage]:
         return await self._store.list_images(query)
 
+    async def tenant_ids(self) -> list[UUID]:
+        return await self._store.tenant_ids()
+
     async def verify(self, tenant_id: UUID) -> ChainVerification:
-        """按追加顺序重算整条链；返回首个断裂位置。"""
+        """按追加顺序重算整条链；返回首个断裂位置。
+
+        注意：这是全链一次性加载（O(N) 内存 + O(N) 哈希），只适合离线/小租户；
+        周期巡检走 :meth:`verify_page`，判定口径由 ``_check_row`` 共用。
+        """
 
         images = await self._store.chain(tenant_id)
         prev = ""
         for index, image in enumerate(images):
-            if image.prev_hash != prev:
-                return ChainVerification(
-                    tenant_id=tenant_id,
-                    ok=False,
-                    checked=index,
-                    broken_at=index,
-                    detail=f"第 {index} 条 prev_hash 与链尾不连续",
-                )
-            if compute_image_hash(prev, image.model_dump(mode="python")) != image.hash:
-                return ChainVerification(
-                    tenant_id=tenant_id,
-                    ok=False,
-                    checked=index,
-                    broken_at=index,
-                    detail=f"第 {index} 条记录内容与 hash 不一致（疑似篡改）",
-                )
+            broken = _check_row(prev, index, image)
+            if broken is not None:
+                return broken
             prev = image.hash
         return ChainVerification(tenant_id=tenant_id, ok=True, checked=len(images))
+
+    async def verify_page(
+        self,
+        tenant_id: UUID,
+        *,
+        cursor: int,
+        prev_hash: str,
+        limit: int,
+        start_index: int = 0,
+    ) -> PageVerification:
+        """分页校验一段链：只把一页读进内存，跨页由调用方携带 ``prev_hash``。
+
+        ``start_index`` 是本页第一行在**本轮全链校验**中的序号，仅用于把断裂位置
+        定位成「第 N 条」，不影响判定。
+        """
+
+        rows, next_cursor = await self._store.chain_page(
+            tenant_id, cursor=cursor, limit=limit
+        )
+        prev = prev_hash
+        checked = 0
+        for offset, image in enumerate(rows):
+            broken = _check_row(prev, start_index + offset, image)
+            if broken is not None:
+                return PageVerification(
+                    verification=broken,
+                    checked=checked,
+                    next_cursor=next_cursor,
+                    last_hash=prev,
+                    exhausted=False,
+                )
+            prev = image.hash
+            checked += 1
+        return PageVerification(
+            verification=None,
+            checked=checked,
+            next_cursor=next_cursor,
+            last_hash=prev,
+            exhausted=len(rows) < limit,
+        )
 
     async def assert_intact(self, tenant_id: UUID) -> ChainVerification:
         result = await self.verify(tenant_id)
