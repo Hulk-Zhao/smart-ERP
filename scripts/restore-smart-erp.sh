@@ -162,8 +162,7 @@ db_objects() {
            end || ' ' || n.nspname || '.' || c.relname
       from pg_class c
       join pg_namespace n on n.oid = c.relnamespace
-     where n.nspname not in ('pg_catalog','information_schema','pg_toast')
-       and n.nspname not like 'pg_temp%' and n.nspname not like 'pg_toast_temp%'
+     where n.nspname in ('erp','public')
        and c.relkind in ('r','p','S','v','m','f')
        and not exists (select 1 from pg_depend d
                         where d.classid = 'pg_class'::regclass
@@ -173,8 +172,7 @@ db_objects() {
       from pg_constraint con
       join pg_class c on c.oid = con.conrelid
       join pg_namespace n on n.oid = c.relnamespace
-     where n.nspname not in ('pg_catalog','information_schema','pg_toast')
-       and n.nspname not like 'pg_temp%' and n.nspname not like 'pg_toast_temp%'
+     where n.nspname in ('erp','public')
        and con.contype = 'f'" \
     | sed '/^$/d' | sort -u
 }
