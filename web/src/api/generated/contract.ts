@@ -1,13 +1,13 @@
 /**
  * 本文件由 `node scripts/gen-api-types.mjs` 从 C16 冻结契约生成，请勿手改。
  * 源文件：contracts/api/product_api.openapi.v1.json
- * 契约 sha256：3d27c6cd05d38d538266880242fbbc3a2ae3c3cd677441d88f32075cf9a0905f
+ * 契约 sha256：87cab47a12ce4cd0f8dc0fb5a242aa3c6fc283ead9eaf71c40e63875c677132d
  * 契约版本：1.0.0 · C16
  *
  * 契约变更流程：后端重新生成契约 → 执行 `npm run gen:api` → 评审类型差异。
  */
 
-export const CONTRACT_SHA256 = "3d27c6cd05d38d538266880242fbbc3a2ae3c3cd677441d88f32075cf9a0905f";
+export const CONTRACT_SHA256 = "87cab47a12ce4cd0f8dc0fb5a242aa3c6fc283ead9eaf71c40e63875c677132d";
 export const CONTRACT_VERSION = "1.0.0";
 export const CONTRACT_PATH_COUNT = 19;
 
