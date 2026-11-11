@@ -260,7 +260,7 @@
       "phase": "startup",
       "default": "4",
       "defaultsByService": {
-        "api": "4",
+        "api": "0",
         "compensation": "0",
         "scheduler": "0",
         "worker": "0",

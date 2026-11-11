@@ -78,6 +78,10 @@
 > `./inbox:/data/inbox:ro` 只读挂载；local / full / prod 留空 = 不启用。
 > 显式设置但目录不存在/不可读时 connector-gw 启动失败，不静默降级成「少挂一个连接器」。
 
+> `ERP_DB_MAX_OVERFLOW`：compose 里 **api 固定注入 `${ERP_DB_MAX_OVERFLOW:-0}`**——单 api 进程内有多个
+> 独立引擎共用 `erp_app` 的 20 连接上限，overflow 必须为 0；上面 demo/prod 的 `4` 只对
+> worker / scheduler / compensation 生效。多副本部署要按 `erp_app` 连接上限重新核算，不要直接放开。
+
 ## 3. 差异点与原因
 
 | 差异 | local | demo | prod | 原因 |
