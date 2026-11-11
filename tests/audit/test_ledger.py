@@ -247,6 +247,47 @@ def test_daily_anchor_detects_truncation():
         run(ledger.anchor_day(TENANT, date(2026, 11, 10)))
 
 
+def test_anchor_boundary_survives_cross_day_clock_rollback():
+    """跨日时钟回拨：晚写的行带着昨天的 created_at 落库，次日重算不得报错。
+
+    旧实现每次调用都用 ``created_at.date() <= day`` 重新筛前缀，于是这条晚写的
+    行会在下一次调用时被补进旧日前缀，``record_count`` 与已存锚点不一致 →
+    ``AuditChainError``（安全告警被时钟回拨变成噪声，看板 B-ANCHOR）。
+    新实现把边界固化成写入时刻的 ``(record_count, last_hash)``，之后只按存储值比较。
+
+    方向差异：内存实现的边界是列表长度（下标 0 起），PG 实现是 ``chain_seq``
+    （全局 identity，跨租户跳过）；两者都表示「链的前缀长度」，语义同向，
+    但 PG 的游标值本身不能拿来当 record_count，也不能跨实现复用。
+    """
+
+    def append(stamp: datetime, object_id: str) -> AuditImage:
+        return run(
+            ledger.append_image(
+                tenant_id=TENANT,
+                ticket_id=TICKET,
+                step_id=uuid4(),
+                system="fake",
+                object_type="invoice_draft",
+                object_id=object_id,
+                before={"amount": "100.00", "status": "new"},
+                after={"amount": "120.00", "status": "draft"},
+                created_at=stamp,
+            )
+        )
+
+    ledger = AuditLedger(clock=lambda: datetime(2026, 11, 11, 0, 0, 10, tzinfo=UTC))
+    first = append(datetime(2026, 11, 10, 23, 59, 30, tzinfo=UTC), "D-1")
+
+    anchor = run(ledger.anchor_day(TENANT, date(2026, 11, 10)))
+    assert (anchor.record_count, anchor.last_hash) == (1, first.hash)
+
+    # 真实时间已过零点 10 秒，进程时钟被回拨到昨天 23:59:50：这条晚写的行盖的是旧日期。
+    append(datetime(2026, 11, 10, 23, 59, 50, tzinfo=UTC), "D-2")
+
+    assert run(ledger.anchor_day(TENANT, date(2026, 11, 10))) == anchor
+    assert run(ledger.verify_against_anchor(anchor)).ok is True
+
+
 class RacedOnceStore(InMemoryAuditStore):
     """模拟并发：第一次追加时链尾已被别人占了（唯一约束触发 IntegrityError）。"""
 
