@@ -451,12 +451,16 @@ function detail(row: TicketOut): TicketDetailOut {
   const approvals = approvalsFor(row, required);
   const approved = new Set(approvals.filter((item) => item.decision === 'approved').map((item) => item.role));
   const pending = row.state === '待审批' || row.state === '待确认';
+  const missing = pending ? required.filter((role) => !approved.has(role)) : [];
   return {
     ...row,
     steps: stepsFor(row),
     approvals,
-    required_roles: required,
-    missing_roles: pending ? required.filter((role) => !approved.has(role)) : [],
+    approval_required_roles: required,
+    approval_missing_roles: missing,
+    // mock 连接器按 A 级处理：无强制双签，执行组与审批组一致。
+    execution_required_roles: required,
+    execution_missing_roles: missing,
     audit_image_count: imagesFor(row).length,
     // 与后端默认一致：同步回滚入口关闭，前端据此禁用按钮。
     rollback_available: false,
@@ -689,8 +693,10 @@ function pendingTasks(): ApprovalTaskOut[] {
       amount: row.amount,
       touches_fund: row.touches_fund,
       initiator_id: row.initiator_id,
-      required_roles: required,
-      missing_roles: row.ticket_id === T_DUAL ? ['approver'] : required,
+      approval_required_roles: required,
+      approval_missing_roles: row.ticket_id === T_DUAL ? ['approver'] : required,
+      execution_required_roles: required,
+      execution_missing_roles: row.ticket_id === T_DUAL ? ['approver'] : required,
       created_at: row.created_at,
     };
   });
@@ -734,8 +740,10 @@ function action(ticketId: string, kind: string, body: Record<string, unknown>) {
       action: 'approve',
       state: row.state,
       version: row.version,
-      required_roles: [],
-      missing_roles: [],
+      approval_required_roles: [],
+      approval_missing_roles: [],
+      execution_required_roles: [],
+      execution_missing_roles: [],
       executed_steps: stepsFor(row),
       manual_tasks: [],
     };
@@ -793,8 +801,10 @@ function decide(ticketId: string, decision: 'approve' | 'reject', body: Record<s
     decision: decision === 'approve' ? 'approved' : 'rejected',
     decided_at: new Date().toISOString(),
     satisfied: row.ticket_id !== T_DUAL || body.role === 'approver',
-    required_roles: row.ticket_id === T_DUAL ? ['reviewer', 'approver'] : ['reviewer'],
-    missing_roles: row.ticket_id === T_DUAL && body.role !== 'approver' ? ['approver'] : [],
+    approval_required_roles: row.ticket_id === T_DUAL ? ['reviewer', 'approver'] : ['reviewer'],
+    approval_missing_roles: row.ticket_id === T_DUAL && body.role !== 'approver' ? ['approver'] : [],
+    execution_required_roles: row.ticket_id === T_DUAL ? ['reviewer', 'approver'] : ['reviewer'],
+    execution_missing_roles: row.ticket_id === T_DUAL && body.role !== 'approver' ? ['approver'] : [],
     ticket_state: row.state,
   };
   return { status: 200, body: out };

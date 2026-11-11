@@ -153,7 +153,15 @@ function emptyReply(pageName: string, request: CapturedRequest): Reply {
   if (pageName === '工单详情') {
     if (path === `/v1/tickets/${W3_TICKET_ID}`) {
       return {
-        body: ticketDetail({ steps: [], approvals: [], required_roles: [], missing_roles: [], audit_image_count: 0 }),
+        body: ticketDetail({
+          steps: [],
+          approvals: [],
+          approval_required_roles: [],
+          approval_missing_roles: [],
+          execution_required_roles: [],
+          execution_missing_roles: [],
+          audit_image_count: 0,
+        }),
       };
     }
     if (path.endsWith('/images')) return { body: { items: [], next_cursor: null } };

@@ -1,13 +1,13 @@
 /**
  * 本文件由 `node scripts/gen-api-types.mjs` 从 C16 冻结契约生成，请勿手改。
  * 源文件：contracts/api/product_api.openapi.v1.json
- * 契约 sha256：94f9914154a275dbbc81120cdf5fd7baa9c3f2a3091f788e26bae72dd78a96bf
+ * 契约 sha256：34241bf0df2391d22ad36e9348c7fb6eb0b18bf1e592e668f9663da83686c457
  * 契约版本：1.0.0 · C16
  *
  * 契约变更流程：后端重新生成契约 → 执行 `npm run gen:api` → 评审类型差异。
  */
 
-export const CONTRACT_SHA256 = "94f9914154a275dbbc81120cdf5fd7baa9c3f2a3091f788e26bae72dd78a96bf";
+export const CONTRACT_SHA256 = "34241bf0df2391d22ad36e9348c7fb6eb0b18bf1e592e668f9663da83686c457";
 export const CONTRACT_VERSION = "1.0.0";
 export const CONTRACT_PATH_COUNT = 20;
 
@@ -31,10 +31,12 @@ export interface ActionIn {
 
 export interface ActionOut {
   action: "approve" | "reject" | "cancel" | "compensate";
+  approval_missing_roles?: string[]; /** 审批链还缺的票（approval_required_roles 求差）。 */
+  approval_required_roles?: string[]; /** 审批链要求的角色：由写等级/金额/资金属性推出（ApprovalService.required_roles，force_dual=False），决定 ApprovalDecisionOut.satisfied。不含执行期凭据附加项。 */
   executed_steps?: TicketStepOut[];
+  execution_missing_roles?: string[]; /** 执行闸还缺的票，为空才可执行。approval_missing_roles 为空而此字段非空时，表示审批链已满足、执行仍会被 409 E-POLICY-APPROVAL 拦截。 */
+  execution_required_roles?: string[]; /** 执行闸要求的角色：同一策略函数，但 force_dual 取「目标连接器是否 B 级」（与 AccessGate 同一判据）。B 级连接器在审批阈值外强制双签，因此可能比 approval_required_roles 多一票；两者不可互相替代。 */
   manual_tasks?: string[];
-  missing_roles?: string[];
-  required_roles?: string[];
   state: string;
   ticket_id: string;
   version: number;
@@ -47,10 +49,12 @@ export interface ApprovalDecisionIn {
 }
 
 export interface ApprovalDecisionOut {
+  approval_missing_roles: string[]; /** 审批链还缺的票（approval_required_roles 求差）。 */
+  approval_required_roles: string[]; /** 审批链要求的角色：由写等级/金额/资金属性推出（ApprovalService.required_roles，force_dual=False），决定 ApprovalDecisionOut.satisfied。不含执行期凭据附加项。 */
   decided_at: string;
   decision: "approved" | "rejected";
-  missing_roles: string[];
-  required_roles: string[];
+  execution_missing_roles: string[]; /** 执行闸还缺的票，为空才可执行。approval_missing_roles 为空而此字段非空时，表示审批链已满足、执行仍会被 409 E-POLICY-APPROVAL 拦截。 */
+  execution_required_roles: string[]; /** 执行闸要求的角色：同一策略函数，但 force_dual 取「目标连接器是否 B 级」（与 AccessGate 同一判据）。B 级连接器在审批阈值外强制双签，因此可能比 approval_required_roles 多一票；两者不可互相替代。 */
   role: string;
   satisfied: boolean;
   ticket_id: string;
@@ -67,11 +71,13 @@ export interface ApprovalOut {
 
 export interface ApprovalTaskOut {
   amount: string;
+  approval_missing_roles: string[]; /** 审批链还缺的票（approval_required_roles 求差）。 */
+  approval_required_roles: string[]; /** 审批链要求的角色：由写等级/金额/资金属性推出（ApprovalService.required_roles，force_dual=False），决定 ApprovalDecisionOut.satisfied。不含执行期凭据附加项。 */
   business_key: string;
   created_at: string;
+  execution_missing_roles: string[]; /** 执行闸还缺的票，为空才可执行。approval_missing_roles 为空而此字段非空时，表示审批链已满足、执行仍会被 409 E-POLICY-APPROVAL 拦截。 */
+  execution_required_roles: string[]; /** 执行闸要求的角色：同一策略函数，但 force_dual 取「目标连接器是否 B 级」（与 AccessGate 同一判据）。B 级连接器在审批阈值外强制双签，因此可能比 approval_required_roles 多一票；两者不可互相替代。 */
   initiator_id: string;
-  missing_roles: string[];
-  required_roles: string[];
   scene_code: string;
   state: string;
   ticket_id: string;
@@ -467,15 +473,17 @@ export interface SupplierMasterIn {
 
 export interface TicketDetailOut {
   amount: string;
+  approval_missing_roles: string[]; /** 审批链还缺的票（approval_required_roles 求差）。 */
+  approval_required_roles: string[]; /** 审批链要求的角色：由写等级/金额/资金属性推出（ApprovalService.required_roles，force_dual=False），决定 ApprovalDecisionOut.satisfied。不含执行期凭据附加项。 */
   approvals: ApprovalOut[];
   audit_image_count: number;
   business_key: string;
   created_at: string;
+  execution_missing_roles: string[]; /** 执行闸还缺的票，为空才可执行。approval_missing_roles 为空而此字段非空时，表示审批链已满足、执行仍会被 409 E-POLICY-APPROVAL 拦截。 */
+  execution_required_roles: string[]; /** 执行闸要求的角色：同一策略函数，但 force_dual 取「目标连接器是否 B 级」（与 AccessGate 同一判据）。B 级连接器在审批阈值外强制双签，因此可能比 approval_required_roles 多一票；两者不可互相替代。 */
   initiator_id: string;
-  missing_roles: string[];
   org_id: string;
   period: string;
-  required_roles: string[];
   rollback_available: boolean;
   scene_code: string;
   state: TicketStateCode;

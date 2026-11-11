@@ -126,11 +126,31 @@ class TicketOut(BaseModel):
     updated_at: datetime
 
 
+_APPROVAL_REQUIRED_DESC = (
+    "审批链要求的角色：由写等级/金额/资金属性推出（ApprovalService.required_roles，"
+    "force_dual=False），决定 ApprovalDecisionOut.satisfied。不含执行期凭据附加项。"
+)
+_APPROVAL_MISSING_DESC = "审批链还缺的票（approval_required_roles 求差）。"
+_EXECUTION_REQUIRED_DESC = (
+    "执行闸要求的角色：同一策略函数，但 force_dual 取「目标连接器是否 B 级」"
+    "（与 AccessGate 同一判据）。B 级连接器在审批阈值外强制双签，"
+    "因此可能比 approval_required_roles 多一票；两者不可互相替代。"
+)
+_EXECUTION_MISSING_DESC = (
+    "执行闸还缺的票，为空才可执行。approval_missing_roles 为空而此字段非空时，"
+    "表示审批链已满足、执行仍会被 409 E-POLICY-APPROVAL 拦截。"
+)
+
+
 class TicketDetailOut(TicketOut):
     steps: list[TicketStepOut]
     approvals: list[ApprovalOut]
-    required_roles: list[str]
-    missing_roles: list[str]
+    approval_required_roles: list[str] = Field(
+        description=_APPROVAL_REQUIRED_DESC
+    )
+    approval_missing_roles: list[str] = Field(description=_APPROVAL_MISSING_DESC)
+    execution_required_roles: list[str] = Field(description=_EXECUTION_REQUIRED_DESC)
+    execution_missing_roles: list[str] = Field(description=_EXECUTION_MISSING_DESC)
     audit_image_count: int
     #: 同步回滚入口是否开放（``ERP_ROLLBACK_SYNC_ENABLED``）。
     #: false 时前端必须禁用按钮并说明原因，不能靠「点了报错」提示。
@@ -159,8 +179,18 @@ class ActionOut(BaseModel):
     action: TicketAction
     state: str
     version: int
-    required_roles: list[str] = Field(default_factory=list)
-    missing_roles: list[str] = Field(default_factory=list)
+    approval_required_roles: list[str] = Field(
+        default_factory=list, description=_APPROVAL_REQUIRED_DESC
+    )
+    approval_missing_roles: list[str] = Field(
+        default_factory=list, description=_APPROVAL_MISSING_DESC
+    )
+    execution_required_roles: list[str] = Field(
+        default_factory=list, description=_EXECUTION_REQUIRED_DESC
+    )
+    execution_missing_roles: list[str] = Field(
+        default_factory=list, description=_EXECUTION_MISSING_DESC
+    )
     executed_steps: list[TicketStepOut] = Field(default_factory=list)
     manual_tasks: list[str] = Field(default_factory=list)
 
@@ -178,8 +208,12 @@ class ApprovalTaskOut(BaseModel):
     amount: str
     touches_fund: bool
     initiator_id: UUID
-    required_roles: list[str]
-    missing_roles: list[str]
+    approval_required_roles: list[str] = Field(
+        description=_APPROVAL_REQUIRED_DESC
+    )
+    approval_missing_roles: list[str] = Field(description=_APPROVAL_MISSING_DESC)
+    execution_required_roles: list[str] = Field(description=_EXECUTION_REQUIRED_DESC)
+    execution_missing_roles: list[str] = Field(description=_EXECUTION_MISSING_DESC)
     created_at: datetime
 
 
@@ -196,9 +230,14 @@ class ApprovalDecisionOut(BaseModel):
     role: str
     decision: Literal["approved", "rejected"]
     decided_at: datetime
+    #: 只表示「审批链是否已满足」；能否执行还要看 ``execution_missing_roles``。
     satisfied: bool
-    required_roles: list[str]
-    missing_roles: list[str]
+    approval_required_roles: list[str] = Field(
+        description=_APPROVAL_REQUIRED_DESC
+    )
+    approval_missing_roles: list[str] = Field(description=_APPROVAL_MISSING_DESC)
+    execution_required_roles: list[str] = Field(description=_EXECUTION_REQUIRED_DESC)
+    execution_missing_roles: list[str] = Field(description=_EXECUTION_MISSING_DESC)
     ticket_state: str
 
 

@@ -225,7 +225,7 @@ def test_permission_matrix_cell(env, role, op, ownership, verdict, status):
     if verdict == "dual":
         body = response.json()
         assert body["satisfied"] is False
-        assert body["missing_roles"], "双人复核未满足时必须明确缺少哪个角色"
+        assert body["approval_missing_roles"], "双人复核未满足时必须明确缺少哪个角色"
 
     if verdict == "deny":
         assert response.headers["content-type"].startswith("application/problem+json")

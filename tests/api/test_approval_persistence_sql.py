@@ -4,7 +4,7 @@
 
 1. **重启语义**：审批决定落 ``erp.approval_record`` 之后，换一个**新容器实例**
    读同一个库，``GET /v1/tickets/{id}`` 的 ``approvals`` 与重启前逐字段相同，
-   ``missing_roles`` 不回到「全部缺失」，``state`` / ``version`` 不变；
+   ``approval_missing_roles`` 不回到「全部缺失」，``state`` / ``version`` 不变；
 2. **两个 approve 入口不是同一动作**：``POST /approvals/{id}/approve`` 只登记
    审批意见（不写状态、不加事件），``POST /tickets/{id}/actions/approve`` 才是
    发起人推进工单（写状态、加事件、执行写计划）；
@@ -194,8 +194,8 @@ def test_approvals_survive_container_rebuild(env, session_factory):
 
     before = _detail(env, created.ticket_id)
     assert len(before["approvals"]) == 1
-    assert before["missing_roles"] == []
-    assert before["required_roles"] == ["reviewer"]
+    assert before["approval_missing_roles"] == []
+    assert before["approval_required_roles"] == ["reviewer"]
 
     # 新实例：内存审批缓存必须是空的，证明后面读到的记录只可能来自库。
     second = _new_instance(env, session_factory)
@@ -222,8 +222,8 @@ def test_approvals_survive_container_rebuild(env, session_factory):
     after = response.json()
     # 逐字段相同：审批人、角色、决定、意见、时间都从库里还原。
     assert after["approvals"] == before["approvals"]
-    assert after["missing_roles"] == []
-    assert after["required_roles"] == ["reviewer"]
+    assert after["approval_missing_roles"] == []
+    assert after["approval_required_roles"] == ["reviewer"]
     # 审批意见不推进状态：重建前后 state / version 一致。
     assert after["state"] == before["state"] == TicketState.PENDING_APPROVAL.value
     assert after["version"] == before["version"]
@@ -280,7 +280,7 @@ def test_decision_endpoint_and_ticket_approve_are_different_actions(
         "created",
         "transition",
     ]
-    assert after_decision["missing_roles"] == []
+    assert after_decision["approval_missing_roles"] == []
     assert after_decision["approvals"][0]["decision"] == "approved"
 
     approved = env.client.post(

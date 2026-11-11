@@ -53,7 +53,7 @@ def test_approval_not_satisfied_blocks_execution(env):
     )
     assert seed.status_code == 200, seed.text
     assert seed.json()["satisfied"] is False
-    assert seed.json()["missing_roles"] == ["approver"]
+    assert seed.json()["approval_missing_roles"] == ["approver"]
 
     response = env.client.post(
         f"{PREFIX}/tickets/{env.tickets['dual']}/actions/approve",

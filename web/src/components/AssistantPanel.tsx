@@ -117,7 +117,7 @@ export function AssistantPanel({ onClose }: AssistantPanelProps) {
       total: items.length,
       touchesFund: items.filter((item) => item.touches_fund).length,
       w3: items.filter((item) => item.write_level === 'W3').length,
-      missingRole: items.filter((item) => item.missing_roles.length > 0).length,
+      missingRole: items.filter((item) => item.approval_missing_roles.length > 0).length,
     };
   }, [approvals.data]);
 
