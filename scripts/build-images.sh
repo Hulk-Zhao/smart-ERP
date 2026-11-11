@@ -22,6 +22,12 @@
 #   确认只用于本地验证时才加 --allow-dirty：tag 自动追加 "-dirty"，deploy-images.sh
 #   会因 tag 不是 40 位 sha 拒绝下发。
 #
+# Git Bash（MSYS）路径改写：MSYS 会把 `--build-arg ERP_WEB_BASE=/` 的 `/` 改写成 Git
+#   安装根，产物 index.html 引用 /Program Files/Git/assets/*，容器里 404、页面空白。
+#   因此只在 build 子进程上设 MSYS_NO_PATHCONV=1（见 build_one 的 `env ... docker build`），
+#   不 export 到全局：全局关掉会让同脚本里的 `git -C /e/...` 失去路径转换而直接失败。
+#   关掉转换后 docker 不认 /e/... 形式，故 Dockerfile 与 context 用 cygpath -w 转 Windows 路径。
+#
 # 退出码：0 成功；2 参数/前置条件不满足（含工作树不干净）；其它为 docker 自身错误。
 # =============================================================================
 set -euo pipefail
