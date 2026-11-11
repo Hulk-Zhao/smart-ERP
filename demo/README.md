@@ -112,6 +112,26 @@ python -m pytest tests/demo/test_seed_audit_chain.py -q
 python demo/verify_audit_chain.py --all --dsn "$DEMO_DSN"
 ```
 
+### 演示前检查（照做，别跳）
+
+```bash
+# 1) 重灌（三套或单套），用表属主/迁移账号
+python demo/load.py --all --dsn "$DEMO_DSN"
+
+# 2) 重灌后必须重启 API（原因见下，跳了会在台上 409）
+docker restart erp_api
+
+# 3) 清桩，回到干净起点：reset 同时归零单号，下一单从 PO-STUB-000001 起
+curl -X POST http://127.0.0.1:8013/stub/reset
+```
+
+**为什么重灌后必须重启 `erp_api`**：种子把工单的 `pending_write.idem_key` 固定成
+`demo-demo-w2-write-9001`，而写结果的幂等缓存在 **API 进程内**
+（`erp.connector_idempotency` 表为空可证）。不重启时，重灌后再执行会命中
+`REPLAY`：直接返回上次的回执、**不向桩发 POST**；此时桩已被 reset，
+随后的 verify 按 `source_doc_no` 查不到 → `409 E-VERIFY-MISMATCH（F6）`。
+重灌 + 重启 API + reset 桩，三步缺一不可。
+
 ### 库内审计链复验（一条命令）
 
 ```bash
@@ -225,6 +245,27 @@ curl -X POST http://127.0.0.1:8013/stub/fault -H 'Content-Type: application/json
 多身份配置上线后，验收不看「某个令牌能不能用」，而看**有效身份集合与文档声明逐条对齐**：
 身份数量、每个 `user_id`、每个角色都必须与本文和部署清单一致，**多一个少一个都算不通过**。
 （单令牌阶段的「发起人令牌必须 401」只适用于尚未启用多身份的栈，届时不再作为验收项。）
+
+## 运维口径：live 库是长期累积运行态
+
+演示库不是「跑一遍种子就回到已知状态」的产物：它承载排练、手工点击和多次运行，
+表里会留下种子之外的行。实测样例：本次重灌前，`DEMO-W2-WRITE-9001` 上有两条
+种子中不存在的审批记录（`bbbbbbbb` 的 `demo review`、`cccccccc` 的
+`demo approve`，时间 10:11Z）；仓库种子里没有这段文案，`cccccccc` 也不在
+当前身份配置里——**来源不明**，不要归因为种子或某个人。它只能说明：
+**live 库无法从种子复现**。
+
+因此重灌前必须留底，作为「重灌前后差额」的唯一依据。模板：
+
+| 指标 | 重灌前 | 重灌后 |
+|---|---|---|
+| `erp.audit_image` 条数 / `max(chain_seq)` | | |
+| 目标工单 `approval_record` 条数 | | |
+| `erp.ticket` 总数 | | |
+| 桩 `receipts` / `requests` / `reversals` | | |
+
+实测样例（2026-11-11）：`56 / 146`、`3`、`51`、`1 / 137 / 0` →
+重灌后 `54`、`1`、`54`、`0 / 0 / 0`。
 
 ## 与前端/契约的关系
 

@@ -121,6 +121,7 @@ class StubState:
         return None
 
     def reset(self) -> None:
+        """回到干净起点：等同于一次新进程启动，单号从 000001 重新开始。"""
         with self.lock:
             self.requests.clear()
             self.receipts.clear()
@@ -128,6 +129,7 @@ class StubState:
             self._by_idem.clear()
             self.fail_posts = 0
             self.delay_seconds = 0.0
+            self._seq = 0
 
 
 class _Handler(BaseHTTPRequestHandler):

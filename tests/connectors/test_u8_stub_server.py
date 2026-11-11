@@ -53,6 +53,18 @@ def test_get_filters_by_source_doc_no_and_delete_leaves_reversal() -> None:
         assert reversals[0]["simulated"] is True
 
 
+def test_reset_restores_clean_start_including_sequence() -> None:
+    with StubU8Server() as stub, httpx.Client(base_url=stub.base_url) as client:
+        first = client.post("/u8/api/purchase-order-drafts", json=_PAYLOAD)
+        assert first.json()["cCode"] == "PO-STUB-000001"
+
+        assert client.post("/stub/reset").status_code == 200
+        again = client.post("/u8/api/purchase-order-drafts", json=_PAYLOAD)
+        assert again.json()["cCode"] == "PO-STUB-000001"
+        assert len(stub.state.receipts) == 1
+        assert stub.state.reversals == []
+
+
 def test_fault_injection_returns_5xx_without_receipt() -> None:
     with StubU8Server() as stub, httpx.Client(base_url=stub.base_url) as client:
         client.post("/stub/fault", json={"fail_posts": 1})
