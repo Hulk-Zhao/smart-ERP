@@ -176,6 +176,7 @@ PGDATABASE=smart_erp PGHOST=<pg-host> PGPORT=5432 PGUSER=erp_migrator PGPASSWORD
   栈；生成器复用生产审计契约 `apps.platform.contracts.audit`，因此与 API 使用同一份
   哈希实现，不另写算法）。
 - PostgreSQL 15（导出端 15.19），UTF-8，`Asia/Shanghai`，不使用 pgvector。
-- 生成器为确定性：`manifest.json` 里的 `seed` 固定，除 `generated_at` 外重跑结果一致。
+- 生成器为确定性：`manifest.json` 里的 `seed` 固定，除 `generated_at` 外重跑结果一致；
+  CSV/JSON 显式以 `\n` 写出，不同平台生成的字节一致。
 - 审计影像 `created_at` 以 UTC 存储并参与哈希：PG 往返后 asyncpg 按 UTC 返回 datetime，
   种子若用 `+08:00` 参与哈希，同一时刻会算出另一个 digest（演示页会报「疑似篡改」）。
