@@ -45,14 +45,11 @@ jobs:
   # ---------------------------------------------------------------------------
   # 0. 变更范围：决定镜像构建是否需要跑
   #    `on.paths` 会过滤整条流水线（docs 改动就不跑 lint/测试了），所以路径过滤
-  #    放在 job 级：只有下列路径变化才构建镜像。
-  #    deploy/**                 compose / .env.example / 发布清单
-  #    projects/smart-ERP/docker/**  四个 Dockerfile 与 nginx 配置
-  #    contracts/**              web 构建期要拷进去的契约
-  #    web/**                    web 镜像源码
-  #    apps/**                   三个 Python 镜像的源码
-  #    tests/**                  部署面测试变化往往伴随编排/镜像变化
-  #    pyproject.toml            依赖变更会影响全部 Python 镜像
+  #    放在 job 级：只有镜像相关路径变化才构建镜像。
+  #    「哪些路径算镜像相关」只有一处事实：scripts/image_trigger_paths.py 的
+  #    TRIGGER_PREFIXES/TRIGGER_FILES，不再在 YAML 里维护第二份正则
+  #    （曾经漏过 domain/、core/、db/ 这类顶层目录，且没有任何红灯）。
+  #    新增顶层目录由下面的 build-scope job 兜底报红。
   # ---------------------------------------------------------------------------
   changes:
     name: 变更范围
@@ -91,11 +88,28 @@ jobs:
           echo "基线：$base"
           echo "变更文件："
           printf '%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -Eq '^(deploy/|projects/smart-ERP/docker/|contracts/|web/|apps/|tests/|pyproject\.toml$)'; then
-            echo "images=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "images=false" >> "$GITHUB_OUTPUT"
-          fi
+          images="$(printf '%s\n' "$changed" | python3 scripts/image_trigger_paths.py match)"
+          echo "images=$images" >> "$GITHUB_OUTPUT"
+          echo "镜像构建：$images"
+
+  # ---------------------------------------------------------------------------
+  # 0.1 触发范围自检：仓库根出现新的顶层目录/根文件、却没进触发表 → 直接红
+  #     这类「代码变了但镜像没重建」的洞没有声音，必须由本 job 出声；
+  #     结果同时写进 job summary，方便判断该加触发项还是该写豁免理由。
+  # ---------------------------------------------------------------------------
+  build-scope:
+    name: 镜像触发范围自检
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 对照仓库顶层条目与触发表
+        run: python scripts/image_trigger_paths.py check
 
   # ---------------------------------------------------------------------------
   # 1. 部署面静态校验：compose 能解析、内存预算不超标、变量齐全、探针路径真实
