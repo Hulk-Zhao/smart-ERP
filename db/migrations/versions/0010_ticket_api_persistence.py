@@ -85,9 +85,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("ALTER TABLE erp.ticket_step DROP COLUMN IF EXISTS executed_at")
-    op.execute(
-        "ALTER TABLE erp.ticket_step DROP COLUMN IF EXISTS audit_image_id"
-    )
+    op.execute("ALTER TABLE erp.ticket_step DROP COLUMN IF EXISTS audit_image_id")
     op.execute("ALTER TABLE erp.ticket_step DROP COLUMN IF EXISTS object_id")
     op.execute("ALTER TABLE erp.ticket_step DROP COLUMN IF EXISTS object_type")
 
@@ -95,9 +93,7 @@ def downgrade() -> None:
     op.execute(
         "ALTER TABLE erp.ticket DROP CONSTRAINT IF EXISTS ck_ticket_amount_non_negative"
     )
-    op.execute(
-        "ALTER TABLE erp.ticket DROP CONSTRAINT IF EXISTS ck_ticket_write_level"
-    )
+    op.execute("ALTER TABLE erp.ticket DROP CONSTRAINT IF EXISTS ck_ticket_write_level")
     op.execute(
         """
         ALTER TABLE erp.ticket
