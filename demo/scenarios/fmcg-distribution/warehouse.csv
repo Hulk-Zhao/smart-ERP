@@ -1,0 +1,4 @@
+scenario,wh_code,org_code,wh_name,wh_type,province,city,address
+fmcg-distribution,WH-SH-01,ORG-SH,上海松江中心仓,成品仓,上海市,上海市,上海市松江区新桥镇新格路 905 号
+fmcg-distribution,WH-HZ-01,ORG-HZ,杭州余杭分拨仓,成品仓,浙江省,杭州市,杭州市余杭区良渚街道通运街 168 号
+fmcg-distribution,WH-NJ-01,ORG-NJ,南京江宁分拨仓,成品仓,江苏省,南京市,南京市江宁区秣陵街道天元中路 128 号

@@ -1,0 +1,2 @@
+scenario,display_name,industry,story,base_currency,timezone,generated_at,seed
+cross-border-multicurrency,瀚海跨境 · 多主体多币种结算,跨境供应链（消费电子 / 家居 / 户外）,深圳、香港、新加坡三个主体做转口与本地交付；外币订单按成交日汇率折算，进口报关计提关税与进口增值税，月末跨主体按内部转移价结算，供应商对账单同时出现汇率、税率与单位换算差异。,CNY,Asia/Shanghai,2026-11-11T09:00:00+08:00,175594653851488

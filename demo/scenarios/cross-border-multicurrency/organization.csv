@@ -1,0 +1,4 @@
+scenario,timezone,org_code,org_name,legal_entity,country,base_currency
+cross-border-multicurrency,Asia/Shanghai,ORG-SZ,深圳主体,瀚海跨境供应链（深圳）有限公司,CN,CNY
+cross-border-multicurrency,Asia/Shanghai,ORG-HK,香港主体,瀚海国际贸易（香港）有限公司,HK,HKD
+cross-border-multicurrency,Asia/Shanghai,ORG-SG,新加坡主体,Hanhai Supply Chain Pte. Ltd.,SG,USD

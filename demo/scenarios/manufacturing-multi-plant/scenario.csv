@@ -1,0 +1,2 @@
+scenario,display_name,industry,story,base_currency,timezone,generated_at,seed
+manufacturing-multi-plant,华辰精密制造集团 · 多工厂协同,离散制造（汽车零部件 / 精密传动）,苏州总装、宁波精工、武汉电子三地工厂共用一套主数据；两层以上 BOM 驱动生产工单领料，采购收货按批次入库并形成库龄，月末与 80 家供应商对账，差异走工单审批与补偿回滚。,CNY,Asia/Shanghai,2026-11-11T09:00:00+08:00,45624254134536

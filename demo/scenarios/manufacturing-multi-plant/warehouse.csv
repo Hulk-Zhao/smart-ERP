@@ -1,0 +1,6 @@
+scenario,wh_code,org_code,wh_name,wh_type,province,city,address
+manufacturing-multi-plant,WH-SZ-01,ORG-SZ,苏州成品仓,成品仓,江苏省,苏州市,苏州工业园区星湖街 218 号 B2 库
+manufacturing-multi-plant,WH-SZ-02,ORG-SZ,苏州原料仓,原料仓,江苏省,苏州市,苏州工业园区唯新路 58 号 3 号库
+manufacturing-multi-plant,WH-NB-01,ORG-NB,宁波半成品仓,半成品仓,浙江省,宁波市,宁波市北仑区大碶街道沿山河南路 77 号
+manufacturing-multi-plant,WH-NB-02,ORG-NB,宁波包材仓,包材仓,浙江省,宁波市,宁波市鄞州区姜山镇工业园 12 幢
+manufacturing-multi-plant,WH-WH-01,ORG-WH,武汉电子料仓,原料仓,湖北省,武汉市,武汉市东湖新技术开发区高新四路 6 号

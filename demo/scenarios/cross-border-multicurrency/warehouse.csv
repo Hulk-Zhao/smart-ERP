@@ -1,0 +1,4 @@
+scenario,wh_code,org_code,wh_name,wh_type,province,city,address
+cross-border-multicurrency,WH-SZ-01,ORG-SZ,深圳前海保税仓,保税仓,广东省,深圳市,深圳市前海深港合作区听海大道 5059 号 A 库
+cross-border-multicurrency,WH-HK-01,ORG-HK,香港葵涌中转仓,中转仓,香港特别行政区,香港,香港葵涌货柜码头南路 18 号 3 楼
+cross-border-multicurrency,WH-SG-01,ORG-SG,新加坡樟宜海外仓,海外仓,新加坡,新加坡,"60 Airport Boulevard, Changi, Singapore"
