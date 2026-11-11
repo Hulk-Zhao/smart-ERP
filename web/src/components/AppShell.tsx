@@ -11,6 +11,7 @@ import { OPEN_SETTINGS_EVENT } from '../lib/settings';
 import { shortId } from '../lib/format';
 import { AssistantPanel } from './AssistantPanel';
 import { CommandPalette } from './CommandPalette';
+import { SessionNotice } from './SessionNotice';
 import {
   IconBell,
   IconCheck,
@@ -769,7 +770,17 @@ export function AppShell() {
         </header>
 
         <main className="app-content">
-          {session.status === 'ready' && session.scopeIssue !== null ? (
+          {session.unavailable ? (
+            // 401 时业务查询一律被 canQuery 拦住；若仍渲染 Outlet，页面会停在骨架屏上，
+            // 看起来像「一直在加载」。身份缺失必须整页显式说明，而不是让每页各自猜。
+            <div className="mx-auto max-w-2xl px-1 py-4">
+              <SessionNotice
+                error={session.error}
+                onRetry={session.refresh}
+                onOpenSettings={() => setSettingsOpen(true)}
+              />
+            </div>
+          ) : session.status === 'ready' && session.scopeIssue !== null ? (
             <ScopeGate session={session} onOpenSettings={() => setSettingsOpen(true)} />
           ) : (
             <Outlet />

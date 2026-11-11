@@ -120,6 +120,9 @@ describe('工单详情：执行回执可见', () => {
     const panel = screen.getByTestId('error-panel');
     expect(panel.getAttribute('data-kind')).toBe('forbidden');
     expect(panel.textContent).toContain('角色 [reviewer] 不能复核 finance 类场景');
+    expect(panel.textContent).toContain('业务类别闸拒绝');
+    // 类别闸不是缺角色：不能给出「请管理员开通角色/scope」这种会误导现场的解释。
+    expect(panel.textContent).not.toContain('缺少所需角色或 scope');
     expect(panel.textContent).not.toContain('操作失败');
   });
 });
