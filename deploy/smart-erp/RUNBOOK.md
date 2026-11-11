@@ -275,6 +275,10 @@ ERP_IMAGE_TAG=<old-sha> docker compose --env-file deploy/smart-erp/.env \
   （S7 实测：安全组漏一条，`/metrics` 与全部内部接口直接裸奔）；
 - 8011（worker 指标）、8012（connector-gw）、8020（doc）一律只 `expose` 在
   `smart-erp_net` 内网，任何档位都不发布到宿主；
+- **connector-gw（8012）不是写入通道**：进程只注册 `/healthz`、`/readyz`，运行期
+  零调用方；写只能经 api 进程内的 `WriteGateway.execute()`。演示与验收中**不得声称
+  「已启用连接器沙箱」**。任何给它加业务/写路由的改动都按绕过写路径红线处理
+  （`tests/connectors/test_gateway_routes_locked.py` 会直接变红）；
 - 8088（web 静态站点）只允许香港反代访问，同样不在安全组对 `0.0.0.0/0` 放行。
 
 切换档位（例如本机 demo → 服务器 full）必须先 `docker compose --profile demo down`：
