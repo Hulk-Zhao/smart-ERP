@@ -129,12 +129,18 @@ build_one() {
   local name="$1" dockerfile="$2"; shift 2
   # Git Bash（MSYS）会把 `--build-arg ERP_WEB_BASE=/` 的 `/` 改写成 Git 安装根目录，
   # 产物 index.html 里就会出现 /Program Files/Git/assets/...；只对 build 进程关闭转换。
-  local -a cmd=(env MSYS_NO_PATHCONV=1 docker build --file "${DOCKER_DIR}/${dockerfile}"
+  # 关掉转换后 docker 不再认 /e/... 这类 POSIX 路径，Dockerfile 与 context 需转成 Windows 路径。
+  local dockerfile_path="${DOCKER_DIR}/${dockerfile}" context_path="${REPO_ROOT}"
+  if command -v cygpath >/dev/null 2>&1; then
+    dockerfile_path="$(cygpath -w "${dockerfile_path}")"
+    context_path="$(cygpath -w "${context_path}")"
+  fi
+  local -a cmd=(env MSYS_NO_PATHCONV=1 docker build --file "${dockerfile_path}"
                 --tag "smart-erp/${name}:${TAG}")
   [[ -n "$PLATFORM" ]] && cmd+=(--platform "${PLATFORM}")
   (( NO_CACHE )) && cmd+=(--no-cache)
   cmd+=("$@")
-  cmd+=("${REPO_ROOT}")
+  cmd+=("${context_path}")
 
   echo "+ ${cmd[*]}"
   (( DRY_RUN )) || "${cmd[@]}"
