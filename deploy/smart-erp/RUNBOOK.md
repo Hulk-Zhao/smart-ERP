@@ -668,3 +668,27 @@ HTTP/1.1 500 Internal Server Error
  "simulated":true,"system":"u8-stub（模拟外部系统，不是真实 U8）"}]}
 ```
 
+## 10. 演示前统一重建（POC，只由集成会话执行）
+
+完整清单见 `docs/product/tech/演示前统一重建清单.md`；这里只记运维事实，避免和演示脚本各说一套。
+
+**基线（2026-11-11）**：live 栈镜像钉在 `smart-erp/app:12ba3e3`；`main = 8416788`，
+两者差 **9 个提交、65 个文件、+20751/−140**。
+
+- **迁移 +1**：`0014_connector_idem_grants`，head 从 `0013` 变 `0014`。重建时**必须先**
+  `alembic upgrade head`，并确认 `alembic current` = `0014_connector_idem_grants`；
+  该迁移只授 `erp_app` 的 SELECT/INSERT/UPDATE、撤 DELETE/TRUNCATE，无表结构变更。
+- **审计链零改动**：`12ba3e3..8416788` 内 `apps/audit/` 无 diff，重建不改变审计链行为。
+- **api 与 web 必须同批重建**：不得只换一边（`12ba3e3` 的后端配 `5b2c0dc` 的前端即字段/渲染错配）。
+- **`#158` 合入后需再同步一次**：它是破坏性字段改名（`required_roles`/`missing_roles` →
+  `approval_required_roles`/`execution_required_roles` 等）。若 `#158` 已合入而只重建了 api，
+  前端会读不到新字段、页面空白；必须 api + web 同批。
+- **复位四步**（顺序不可换）：`load.py --all` → `docker restart erp_api` → `POST /stub/reset`
+  → 四身份自检。其中 `restart erp_api` 仍必须做：连接器幂等已落 PG（`#152`），但 API 侧
+  请求级幂等缓存仍在进程内。
+- **验证点**：8 容器 healthy；`alembic current` = `0014`；两次 `stub/reset` 首单均为
+  `PO-STUB-000001`；同一 `idem_key` 重启后重发仍 REPLAY；写路径审计链 `ok/head_hash` 一致；
+  `connector-gw` 路由仍只有 `/healthz`、`/readyz`。
+- **红线**：演示当天不再 `build` / `up -d` / `load.py` / `restart`；重建失败按上一镜像 tag
+  回滚，不在现场调试。
+
