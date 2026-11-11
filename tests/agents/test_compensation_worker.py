@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import time
+from datetime import UTC, datetime
 
 from dbutil import db_env, prepare_executing
 from fastapi.testclient import TestClient
@@ -21,6 +22,12 @@ from apps.platform.contracts.ticket import TicketState
 from observability.metrics import MetricsRegistry
 
 PAYLOAD = {"supplier": "SUP-1", "amount": "10.00"}
+
+# 续期判据的固定基准：宿主机与 PG 的墙钟会回拨（实测 150s 内 11 次、最大 -2.19s），
+# 所以不能比较两次采样值的严格递增；先把心跳钉到过去、租约钉到远期，续期一旦发生
+# 必然把它们改写成 now() 派生值，断言只判断「写过没有」，与时钟是否单调无关。
+_HEARTBEAT_SEED = datetime(2000, 1, 1, tzinfo=UTC)
+_LEASE_SEED = datetime(2100, 1, 1, tzinfo=UTC)
 
 
 def _step(key: str) -> PlannedStep:
@@ -193,7 +200,7 @@ def test_long_call_renews_task_heartbeat_and_ticket_lease(db: str) -> None:
 
             async def slow_compensator(call, idem_key):
                 gate.set()
-                await asyncio.sleep(1.4)
+                await asyncio.sleep(2.4)
                 return CompensateResult(status="compensated")
 
             runtime = build_runtime(
@@ -213,13 +220,16 @@ def test_long_call_renews_task_heartbeat_and_ticket_lease(db: str) -> None:
             tick = asyncio.create_task(worker.tick())
             await asyncio.wait_for(gate.wait(), timeout=3)
 
-            first = await _fetch_renewal(env, ticket.id)
-            assert first[1] == "test-owner"
-            await asyncio.sleep(1.2)
-            second = await _fetch_renewal(env, ticket.id)
-
-            assert second[0] > first[0]
-            assert second[2] > first[2]
+            # 心跳/租约此刻已有初值（认领与 acquire 写入）。把它们钉到固定基准，
+            # 之后任何一次续期都会覆盖成 now() 派生值：判据是「被改写」，
+            # 不是「第二次采样的墙钟大于第一次」。
+            await _pin_renewal_markers(env, ticket.id)
+            heartbeat_at, lease_owner, lease_expires_at = await _wait_renewal(
+                env, ticket.id
+            )
+            assert lease_owner == "test-owner"
+            assert heartbeat_at > _HEARTBEAT_SEED, f"任务心跳未被续期：{heartbeat_at!r}"
+            assert lease_expires_at < _LEASE_SEED, f"工单租约未被续期：{lease_expires_at!r}"
 
             await asyncio.wait_for(tick, timeout=10)
             assert (
@@ -252,7 +262,9 @@ async def _fetch_renewal(env, ticket_id):
                 ),
                 {"ticket_id": ticket_id},
             )
-        ).one()
+        ).one_or_none()
+        if task is None:
+            return None
         lease = (
             await session.execute(
                 text("SELECT lease_expires_at FROM erp.ticket WHERE id = :ticket_id"),
@@ -260,3 +272,44 @@ async def _fetch_renewal(env, ticket_id):
             )
         ).one()
     return task.heartbeat_at, task.lease_owner, lease.lease_expires_at
+
+
+async def _pin_renewal_markers(env, ticket_id) -> None:
+    """把续期目标钉到固定基准，让「是否续期过」可判定且不依赖墙钟单调。"""
+
+    async with env.sf() as session, session.begin():
+        pinned = (
+            await session.execute(
+                text(
+                    "UPDATE erp.compensation_task SET heartbeat_at = :seed "
+                    "WHERE ticket_id = :ticket_id AND state = 'running' "
+                    "RETURNING id"
+                ),
+                {"seed": _HEARTBEAT_SEED, "ticket_id": ticket_id},
+            )
+        ).all()
+        assert pinned, "补偿行不在 running，续期用例没有可观察对象"
+        await session.execute(
+            text("UPDATE erp.ticket SET lease_expires_at = :seed WHERE id = :ticket_id"),
+            {"seed": _LEASE_SEED, "ticket_id": ticket_id},
+        )
+
+
+async def _wait_renewal(env, ticket_id, *, timeout: float = 5.0):
+    """等两个基准值都被续期覆盖；超时把最后观察到的实际值带进断言消息。"""
+
+    deadline = time.monotonic() + timeout
+    row = await _fetch_renewal(env, ticket_id)
+    while not (
+        row is not None
+        and row[0] is not None
+        and row[0] > _HEARTBEAT_SEED
+        and row[2] is not None
+        and row[2] < _LEASE_SEED
+    ):
+        if time.monotonic() >= deadline:
+            observed = "补偿行已结束（running 行消失）" if row is None else row
+            raise AssertionError(f"{timeout}s 内未观察到续期，实际值：{observed!r}")
+        await asyncio.sleep(0.05)
+        row = await _fetch_renewal(env, ticket_id)
+    return row
