@@ -74,6 +74,26 @@ def test_disabled_rejects_with_dedicated_code_and_zero_connector_calls(
     assert detail.json()["rollback_available"] is False
 
 
+def test_closed_state_authorizes_before_gate(env, monkeypatch):
+    """关闭态 + 跨租户：先 403，不是 503。
+
+    顺序契约：开关不得成为绕过数据范围探测的窗口；漏鉴权比漏开关严重。
+    """
+
+    monkeypatch.delenv(ENV_ROLLBACK_SYNC_ENABLED, raising=False)
+
+    response = env.client.post(
+        f"{PREFIX}/tickets/{env.tickets['other_org']}/actions/compensate",
+        json={"scope": env.scope(), "comment": "步骤失败", "fail_code": "F1"},
+        headers=env.headers("initiator", "k-gate-idor"),
+    )
+
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] == "E-AUTHZ-001"
+    assert env.connector.previews == []
+    assert env.connector.writes == []
+
+
 def test_enabled_keeps_legacy_behaviour_and_advertises_availability(env):
     _prepare_executing(env)
 

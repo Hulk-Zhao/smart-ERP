@@ -209,7 +209,9 @@ services:
   # ---------------------------------------------------------------------------
   # compensation：补偿执行器（独立进程，消费 erp.compensation_task）
   # 只认队列有到期行（不按工单/步骤状态扫）；自 serve /metrics 与 /healthz（8013 内网）
-  # full 档专属：demo 档仍由 API 同步回滚，不需要执行器；预算 256m / 0.5 核
+  # full 档专属：demo 档不启动执行器；API 侧同步回滚入口默认关闭
+  # （ERP_ROLLBACK_SYNC_ENABLED=false → 503 E-ROLLBACK-UNAVAILABLE），因此 demo 档没有可用回滚路径
+  # 预算 256m / 0.5 核
   # ---------------------------------------------------------------------------
   compensation:
     profiles: ["full"]

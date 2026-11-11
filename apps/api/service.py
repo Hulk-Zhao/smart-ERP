@@ -599,15 +599,6 @@ async def compensate_ticket(
 ) -> ActionOut:
     """触发补偿：先整单推导，再按系统分组经 WriteGateway 回写。"""
 
-    # 默认关闭：这条同步路径不写 ticket_event，也没有租约/重试，外部写与审计影像
-    # 之间还有无痕窗口。关闭态必须零副作用——放在任何取数、鉴权、连接器调用之前。
-    if not sync_rollback_enabled():
-        raise ProblemError(
-            ErrorCode.ROLLBACK_UNAVAILABLE,
-            "同步回滚入口已关闭（ERP_ROLLBACK_SYNC_ENABLED 未开启）："
-            "本期只读，未调用任何连接器，工单状态未改变。",
-        )
-
     scope = _require_scope(session, build_scope(body.scope))
     ticket = _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
@@ -617,6 +608,14 @@ async def compensate_ticket(
         initiator_id=ticket.initiator_id,
         reason=body.reason,
     )
+    # 开关放在鉴权之后：跨租户/无权重先 403，再谈「入口是否开放」——漏鉴权比漏开关严重。
+    # 这里之前的 scope 校验与取数都是纯读（进程内仓储），不碰连接器、不写库，关闭态依旧零副作用。
+    if not sync_rollback_enabled():
+        raise ProblemError(
+            ErrorCode.ROLLBACK_UNAVAILABLE,
+            "同步回滚入口已关闭（ERP_ROLLBACK_SYNC_ENABLED 未开启）："
+            "本期只读，未调用任何连接器，工单状态未改变。",
+        )
     if ticket.state not in (TicketState.EXECUTING, TicketState.COMPENSATING):
         raise ProblemError(
             ErrorCode.STATE_ILLEGAL,

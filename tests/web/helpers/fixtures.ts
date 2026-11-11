@@ -64,6 +64,7 @@ export function ticketDetail(overrides: Partial<TicketDetailOut> = {}): TicketDe
     required_roles: [],
     missing_roles: [],
     audit_image_count: 1,
+    rollback_available: false,
     ...overrides,
   };
 }
