@@ -58,6 +58,7 @@
       "scope": "compose",
       "services": [
         "api",
+        "compensation",
         "connector-gw",
         "doc",
         "migrate",
@@ -89,11 +90,48 @@
       "phase": "startup",
       "default": "/demo/smart-erp/"
     },
+    "ERP_COMPENSATION_PORT": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "compensation"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 8013,
+      "description": "补偿执行器 /metrics 与 /healthz 监听端口；仅内网 expose，不发布宿主端口"
+    },
+    "ERP_COMPENSATION_POLL_SECONDS": {
+      "type": "number",
+      "scope": "compose",
+      "services": [
+        "compensation"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 1.0,
+      "description": "常驻循环间隔（秒）；/healthz 按 max(30, poll*5) 判 stale"
+    },
+    "ERP_COMPENSATION_STALE_SECONDS": {
+      "type": "integer",
+      "scope": "compose",
+      "services": [
+        "compensation"
+      ],
+      "required": false,
+      "secret": false,
+      "phase": "startup",
+      "default": 60,
+      "description": "running 行重认领阈值，同时作为 compensation_overdue 指标阈值（秒）"
+    },
     "ERP_CONFIG_DIR": {
       "type": "string",
       "scope": "compose",
       "services": [
         "api",
+        "compensation",
         "connector-gw",
         "doc",
         "migrate",
@@ -148,6 +186,7 @@
       "scope": "compose",
       "services": [
         "api",
+        "compensation",
         "scheduler",
         "worker",
         "worker-agent",
@@ -185,6 +224,7 @@
       "scope": "compose",
       "services": [
         "api",
+        "compensation",
         "scheduler",
         "worker",
         "worker-agent",
@@ -196,6 +236,7 @@
       "default": "4",
       "defaultsByService": {
         "api": "4",
+        "compensation": "0",
         "scheduler": "0",
         "worker": "0",
         "worker-agent": "0",
@@ -216,6 +257,7 @@
       "scope": "compose",
       "services": [
         "api",
+        "compensation",
         "scheduler",
         "worker",
         "worker-agent",
@@ -227,6 +269,7 @@
       "default": "4",
       "defaultsByService": {
         "api": "4",
+        "compensation": "2",
         "scheduler": "1",
         "worker": "4",
         "worker-agent": "4",
@@ -372,6 +415,7 @@
       "scope": "compose",
       "services": [
         "api",
+        "compensation",
         "connector-gw",
         "doc",
         "migrate",
@@ -474,6 +518,7 @@
       "scope": "compose",
       "services": [
         "api",
+        "compensation",
         "connector-gw",
         "doc",
         "migrate",

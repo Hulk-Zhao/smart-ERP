@@ -55,8 +55,11 @@ class ConfigSchemaTest(unittest.TestCase):
         code, out, err = run(["--all"])
         self.assertEqual(code, 0, err)
         self.assertIn("PASS", out)
-        # 0008 新增 ERP_METERING_REQUIRE_CONTRACT_PRICE（63 -> 64）。
-        self.assertIn("64 个键", out)
+        # 总数从 schema 自身推导：加键不必再改测试（避免迁移 head / 0007 那类硬编码漂移）。
+        # 不改成「每个 schema 键都被某个服务读到」——scope=code 的键本就不进 compose，
+        # 那样会把真契约改成永远成立的空断言。
+        total = len(json.loads(SCHEMA.read_text(encoding="utf-8"))["properties"])
+        self.assertIn(f"{total} 个键", out)
 
     def test_observability_keys_are_registered(self):
         """代码读点必须在 .env.example 有对应项（配置面不许说谎）。"""
