@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { api, downloadText, type TicketAction, type TicketActionPayload } from '../api/client';
@@ -48,6 +48,10 @@ export function TicketDetailPage() {
   const [activeAction, setActiveAction] = useState<TicketAction | null>(null);
   const [comment, setComment] = useState('');
   const [role, setRole] = useState<ApprovalRole>(config.roles[0] ?? 'reviewer');
+  // 角色只来自会话端点；会话到达后若当前选择不在可用角色里，落到第一个可用角色。
+  useEffect(() => {
+    setRole((current) => (config.roles.includes(current) ? current : (config.roles[0] ?? 'reviewer')));
+  }, [config.roles.join(',')]);
   const [failCode, setFailCode] = useState<ActionFailCode>('F2');
   const [confirmedManual, setConfirmedManual] = useState(false);
   const [exportState, setExportState] = useState<{ status: 'idle' | 'loading' | 'ok' | 'error'; message?: string; error?: unknown }>({ status: 'idle' });

@@ -19,12 +19,14 @@ import type {
   AuditChainOut,
   PageApprovalTaskOut,
   PageAuditImageOut,
+  PageReconBatchSummaryOut,
   PageReconDiffOut,
   PageTicketOut,
   MeteringStatementOut,
   ReconBatchOut,
   ReconDiffDetailOut,
   ReconRunIn,
+  SessionOut,
   TicketDetailOut,
 } from './types';
 
@@ -36,6 +38,7 @@ type ScopeKeys = 'org_id' | 'period' | 'system_ids';
 
 export type ListTicketsParams = Omit<QueryOf<'GET /v1/tickets'>, ScopeKeys>;
 export type ListApprovalsParams = Omit<QueryOf<'GET /v1/approvals/pending'>, ScopeKeys>;
+export type ListBatchesParams = Omit<QueryOf<'GET /v1/recon/batches'>, ScopeKeys>;
 export type ListDiffsParams = Omit<QueryOf<'GET /v1/recon/runs/{batch_id}/diffs'>, ScopeKeys>;
 export type ListImagesParams = Omit<QueryOf<'GET /v1/audit/tickets/{ticket_id}/images'>, ScopeKeys>;
 export type TicketAction = 'approve' | 'reject' | 'cancel' | 'compensate';
@@ -55,6 +58,8 @@ interface SendOptions {
   body?: unknown;
   signal?: AbortSignal;
   idempotencyKey?: string;
+  /** 会话端点不参与 G-05 业务 scope，不附加 org/period/system_ids。 */
+  omitScope?: boolean;
 }
 
 function newIdempotencyKey(): string {
@@ -63,10 +68,16 @@ function newIdempotencyKey(): string {
   return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function buildQuery(config: ApiConfig, query: Record<string, unknown> | undefined): URLSearchParams {
+function buildQuery(
+  config: ApiConfig,
+  query: Record<string, unknown> | undefined,
+  omitScope = false,
+): URLSearchParams {
   const params = new URLSearchParams();
-  for (const [key, value] of scopeQuery(config.scope)) {
-    params.append(key, value);
+  if (!omitScope) {
+    for (const [key, value] of scopeQuery(config.scope)) {
+      params.append(key, value);
+    }
   }
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value === undefined || value === null || value === '') continue;
@@ -97,7 +108,7 @@ function toApiError(status: number, text: string): ApiError {
 
 async function sendJson(method: string, path: string, options: SendOptions): Promise<RawResult> {
   const config = getApiConfig();
-  const query = buildQuery(config, options.query);
+  const query = buildQuery(config, options.query, options.omitScope);
   const isWrite = method !== 'GET';
   const payload = isWrite ? { ...(options.body as object), scope: config.scope } : undefined;
 
@@ -167,6 +178,16 @@ export function ticketPath(ticketId: string, suffix = ''): string {
   return `/v1/tickets/${encodeURIComponent(ticketId)}${suffix}`;
 }
 
+/**
+ * 无路径参数的读接口路径集中在这里，作为 client 侧唯一来源。
+ * mock 仍是另一份分段匹配实现，靠 `tests/web/api-mock-routes.test.ts` 的守卫用例
+ * 保证「client 改路径而 mock 不认」时测试立刻变红。
+ */
+export const SESSION_PATH = '/v1/auth/session';
+export const RECON_BATCHES_PATH = '/v1/recon/batches';
+export const TICKETS_PATH = '/v1/tickets';
+export const PENDING_APPROVALS_PATH = '/v1/approvals/pending';
+
 export function batchPath(batchId: string, suffix = ''): string {
   return `/v1/recon/runs/${encodeURIComponent(batchId)}${suffix}`;
 }
@@ -195,8 +216,13 @@ export interface MeteringExport {
 }
 
 export const api = {
+  /** 当前会话身份：前端唯一的身份来源，替代 VITE_SESSION_ROLES / VITE_VIEWER_ID。 */
+  getSession(): Promise<SessionOut> {
+    return request<'GET /v1/auth/session'>('GET', SESSION_PATH, { omitScope: true });
+  },
+
   listTickets(params: ListTicketsParams = {}): Promise<PageTicketOut> {
-    return request<'GET /v1/tickets'>('GET', '/v1/tickets', { query: params as Record<string, unknown> });
+    return request<'GET /v1/tickets'>('GET', TICKETS_PATH, { query: params as Record<string, unknown> });
   },
 
   getTicket(ticketId: string): Promise<TicketDetailOut> {
@@ -212,7 +238,7 @@ export const api = {
   },
 
   listPendingApprovals(params: ListApprovalsParams = {}): Promise<PageApprovalTaskOut> {
-    return request<'GET /v1/approvals/pending'>('GET', '/v1/approvals/pending', {
+    return request<'GET /v1/approvals/pending'>('GET', PENDING_APPROVALS_PATH, {
       query: params as Record<string, unknown>,
     });
   },
@@ -232,6 +258,17 @@ export const api = {
 
   createReconRun(payload: ReconRunPayload): Promise<ReconBatchOut> {
     return request<'POST /v1/recon/runs'>('POST', '/v1/recon/runs', { body: payload });
+  },
+
+  /**
+   * 批次列表（键集分页）。`line_count/diff_count/diff_amount` 对没有投影的旧批次为
+   * `null`，调用方必须原样渲染成「—」，不能折算成 0；越权是 403 且没有 `items`，
+   * 会在 parseJson 里抛 ApiError，不会被当成空列表。
+   */
+  listReconBatches(params: ListBatchesParams = {}): Promise<PageReconBatchSummaryOut> {
+    return request<'GET /v1/recon/batches'>('GET', RECON_BATCHES_PATH, {
+      query: params as Record<string, unknown>,
+    });
   },
 
   getReconRun(batchId: string): Promise<ReconBatchOut> {

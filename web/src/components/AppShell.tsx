@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { configureApi, useApiConfig, type ApprovalRole } from '../api/config';
+import { configureApi, useApiConfig } from '../api/config';
+import { useSession } from '../api/session';
 import { CONTRACT_PATH_COUNT, CONTRACT_VERSION } from '../api/types';
 import { OPEN_SETTINGS_EVENT } from '../lib/settings';
+import { shortId } from '../lib/format';
 import { AssistantPanel } from './AssistantPanel';
 import { CommandPalette } from './CommandPalette';
 import {
@@ -27,7 +29,6 @@ const NAV = [
   { to: '/recon', label: '对账', hint: '发起 / 差异 / 证据 / 计量', icon: IconScale },
 ];
 
-const ROLE_CHOICES: ApprovalRole[] = ['reviewer', 'approver', 'cfo'];
 const SIDEBAR_KEY = 'smart-erp.web.sidebar.collapsed';
 
 function SourceBadge({ compact = false }: { compact?: boolean }) {
@@ -67,14 +68,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [period, setPeriod] = useState(config.scope.period);
   const [systems, setSystems] = useState(config.scope.system_ids.join(','));
   const [viewerName, setViewerName] = useState(config.viewerName);
-  const [viewerId, setViewerId] = useState(config.viewerId);
-  const [roles, setRoles] = useState<ApprovalRole[]>(config.roles);
-
-  const toggleRole = (role: ApprovalRole) => {
-    setRoles((current) =>
-      current.includes(role) ? current.filter((item) => item !== role) : [...current, role],
-    );
-  };
+  const session = useSession();
 
   const save = () => {
     const systemIds = systems
@@ -85,8 +79,6 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
       baseUrl: baseUrl.trim() || '/erp/api',
       token: token.trim(),
       viewerName: viewerName.trim() || '当前用户',
-      viewerId: viewerId.trim(),
-      roles: roles.length > 0 ? roles : ['reviewer'],
       scope: {
         org_id: orgId.trim() || 'ORG-1',
         period: period.trim() || '2026-10',
@@ -151,38 +143,59 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
             <input className="input mt-1" value={systems} onChange={(event) => setSystems(event.target.value)} />
           </label>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label className="block min-w-0">
-              <span className="label">当前身份显示名</span>
-              <input className="input mt-1" value={viewerName} onChange={(event) => setViewerName(event.target.value)} />
-            </label>
-            <label className="block min-w-0">
-              <span className="label">当前用户 ID</span>
-              <input
-                className="input mt-1"
-                value={viewerId}
-                onChange={(event) => setViewerId(event.target.value)}
-                placeholder="留空则不展示意见正文"
-              />
-            </label>
-          </div>
+          <label className="block min-w-0">
+            <span className="label">当前身份显示名</span>
+            <input className="input mt-1" value={viewerName} onChange={(event) => setViewerName(event.target.value)} />
+          </label>
 
-          <fieldset className="min-w-0">
-            <legend className="label">当前可用的审批角色（界面据此做意见脱敏）</legend>
-            <div className="mt-1 flex flex-wrap gap-2">
-              {ROLE_CHOICES.map((role) => (
-                <label key={role} className={`chip cursor-pointer ${roles.includes(role) ? 'chip-active' : ''}`}>
-                  <input
-                    type="checkbox"
-                    className="sr-only"
-                    checked={roles.includes(role)}
-                    onChange={() => toggleRole(role)}
-                  />
-                  {role}
-                </label>
-              ))}
+          <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5" data-testid="session-facts">
+            <div className="flex items-center justify-between gap-2">
+              <span className="label">会话身份（GET /v1/auth/session）</span>
+              <span
+                className={`badge ${
+                  session.status === 'ready'
+                    ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+                    : session.status === 'loading'
+                      ? 'bg-slate-100 text-slate-600 ring-slate-200'
+                      : 'bg-amber-50 text-amber-700 ring-amber-200'
+                }`}
+              >
+                {session.status === 'ready'
+                  ? '已连接'
+                  : session.status === 'loading'
+                    ? '获取中'
+                    : session.unavailable
+                      ? '未启用演示会话'
+                      : '获取失败'}
+              </span>
             </div>
-          </fieldset>
+            {session.session ? (
+              <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px]">
+                <dt className="text-slate-500">user_id</dt>
+                <dd className="truncate font-mono text-slate-700" title={session.session.user_id}>
+                  {session.session.user_id}
+                </dd>
+                <dt className="text-slate-500">tenant_id</dt>
+                <dd className="truncate font-mono text-slate-700" title={session.session.tenant_id}>
+                  {session.session.tenant_id}
+                </dd>
+                <dt className="text-slate-500">roles</dt>
+                <dd className="font-mono text-slate-700">
+                  {session.session.roles.length > 0 ? session.session.roles.join(' / ') : '（空）'}
+                </dd>
+              </dl>
+            ) : (
+              <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                身份和角色只来自会话端点，不再用 <span className="font-mono">VITE_SESSION_ROLES</span> /
+                <span className="font-mono"> VITE_VIEWER_ID</span> 猜。
+                {session.unavailable
+                  ? '当前返回 401：服务端演示会话未启用或令牌无效。'
+                  : session.status === 'error'
+                    ? '当前端点异常，详情见页面提示。'
+                    : ''}
+              </p>
+            )}
+          </div>
 
           <p className="rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-500">
             离线 mock 只在构建/启动时通过 <span className="font-mono">VITE_USE_MOCK=true</span> 显式开启，默认关闭；
@@ -204,9 +217,12 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 }
 
 function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
+  const session = useSession();
   const pending = useQuery({
     queryKey: ['shell', 'pending-approvals-count'],
     queryFn: () => api.listPendingApprovals({ limit: 50 }),
+    // 会话身份未就绪时不查待办：否则 401 会被当成「0 条待办」显示在侧栏。
+    enabled: session.canQuery,
     staleTime: 20_000,
     retry: 0,
   });
@@ -273,6 +289,7 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
 
 export function AppShell() {
   const config = useApiConfig();
+  const session = useSession();
   const location = useLocation();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -477,9 +494,16 @@ export function AppShell() {
           </button>
           <span
             className="ml-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[11px] font-semibold text-white"
-            title={`${config.viewerName}（${config.roles.join(' / ')}）`}
+            data-testid="identity-avatar"
+            title={
+              session.session
+                ? `user ${session.session.user_id} · tenant ${session.session.tenant_id} · roles ${session.session.roles.join(' / ') || '（空）'}`
+                : session.unavailable
+                  ? '当前未启用演示会话'
+                  : config.viewerName
+            }
           >
-            {config.viewerName.slice(0, 1)}
+            {session.session ? shortId(session.session.user_id).slice(0, 1).toUpperCase() : config.viewerName.slice(0, 1)}
           </span>
         </header>
 

@@ -16,13 +16,16 @@ import type {
   MeteringStatementOut,
   PageApprovalTaskOut,
   PageAuditImageOut,
+  PageReconBatchSummaryOut,
   PageReconDiffOut,
   PageTicketOut,
   ReconBatchOut,
+  ReconBatchSummaryOut,
   ReconDiffDetailOut,
   ReconDiffOut,
   ReconLineResultOut,
   ReconRunIn,
+  SessionOut,
   TicketDetailOut,
   TicketOut,
   TicketStepOut,
@@ -44,6 +47,9 @@ const T_DUAL = 'd0000000-0000-4000-8000-000000000003';
 const T_EXECUTING = 'd0000000-0000-4000-8000-000000000004';
 const T_RECON = 'd0000000-0000-4000-8000-000000000005';
 const BATCH = 'e0000000-0000-4000-8000-000000000001';
+const BATCH_MID = 'e0000000-0000-4000-8000-000000000003';
+/** 迁移前的旧批次：无计数投影，汇总字段为 null。 */
+const BATCH_OLD = 'e0000000-0000-4000-8000-000000000002';
 
 function ticket(partial: Partial<TicketOut> & Pick<TicketOut, 'ticket_id' | 'ticket_no' | 'state'>): TicketOut {
   return {
@@ -792,9 +798,26 @@ function decide(ticketId: string, decision: 'approve' | 'reject', body: Record<s
   return { status: 200, body: out };
 }
 
-function batchOut(): ReconBatchOut {
+function batchOut(batchId: string = BATCH): ReconBatchOut {
+  if (batchId === BATCH_OLD) {
+    // 迁移前的旧批次：服务端没有计数投影，三个汇总字段为 null（不是 0）。
+    return {
+      batch_id: batchId,
+      status: 'completed',
+      conclusive: false,
+      status_reason: '旧批次：计数投影在迁移前未回填，汇总字段为 null；明细可下钻但不对账汇总',
+      org_id: 'ORG-1',
+      period: '2026-09',
+      system_ids: ['u8'],
+      suppliers: ['S-001'],
+      metrics: null,
+      missing_items: [],
+      created_by: INITIATOR,
+      created_at: '2026-09-30T16:20:00Z',
+    };
+  }
   return {
-    batch_id: BATCH,
+    batch_id: batchId,
     status: 'reconciled',
     conclusive: true,
     status_reason: '全部供应商对账单已核完，差异均在可处置范围',
@@ -809,6 +832,37 @@ function batchOut(): ReconBatchOut {
     created_at: '2026-11-10T10:00:00Z',
   };
 }
+
+/**
+ * 批次列表的离线样本：含一条没有投影的旧批次（三个汇总字段为 null），
+ * 用来在 demo 里验证「null 不能渲染成 0」。
+ */
+const BATCH_SUMMARIES: ReconBatchSummaryOut[] = [
+  {
+    batch_id: BATCH,
+    status: 'reconciled',
+    line_count: 192,
+    diff_count: DIFFS.length,
+    diff_amount: '113242.8300',
+    created_at: '2026-11-10T10:00:00Z',
+  },
+  {
+    batch_id: BATCH_MID,
+    status: 'reconciled',
+    line_count: 64,
+    diff_count: 2,
+    diff_amount: '0.0300',
+    created_at: '2026-10-31T09:12:00Z',
+  },
+  {
+    batch_id: BATCH_OLD,
+    status: 'completed',
+    line_count: null,
+    diff_count: null,
+    diff_amount: null,
+    created_at: '2026-09-30T16:20:00Z',
+  },
+];
 
 function diffDetail(diffId: string): ReconDiffDetailOut {
   const base = DIFFS.find((item) => item.diff_id === diffId);
@@ -970,6 +1024,26 @@ export async function mockSend(
   const parts = path.replace(/^\/v1\//, '').split('/');
   const q = query as Record<string, string | string[] | undefined>;
 
+  if (method === 'GET' && path === '/v1/auth/session') {
+    return {
+      status: 200,
+      body: {
+        user_id: REVIEWER,
+        tenant_id: TENANT,
+        roles: ['reviewer', 'approver'],
+      } satisfies SessionOut,
+    };
+  }
+  if (method === 'GET' && path === '/v1/recon/batches') {
+    const limit = Math.min(Number(q.limit ?? 20) || 20, 50);
+    const start = Number(q.cursor ?? 0) || 0;
+    const items = BATCH_SUMMARIES.slice(start, start + limit);
+    const next = start + items.length < BATCH_SUMMARIES.length ? String(start + items.length) : null;
+    return {
+      status: 200,
+      body: { items, next_cursor: next } satisfies PageReconBatchSummaryOut,
+    };
+  }
   if (method === 'GET' && path === '/v1/tickets') {
     let rows = [...TICKETS];
     if (q.state) rows = rows.filter((row) => row.state === q.state);
@@ -1009,10 +1083,11 @@ export async function mockSend(
     return { status: 201, body: batch };
   }
   if (method === 'GET' && parts[0] === 'recon' && parts[1] === 'runs' && parts.length === 3) {
-    return { status: 200, body: batchOut() };
+    return { status: 200, body: batchOut(parts[2]) };
   }
   if (method === 'GET' && parts[0] === 'recon' && parts[1] === 'runs' && parts[3] === 'diffs' && parts.length === 4) {
-    let rows = [...DIFFS];
+    // 旧批次没有差异投影：返回空页，而不是借用当前批次的差异。
+    let rows = parts[2] === BATCH_OLD ? [] : [...DIFFS];
     if (q.diff_type) rows = rows.filter((row) => row.type === q.diff_type);
     if (q.needs_manual === 'true') rows = rows.filter((row) => row.needs_manual);
     return { status: 200, body: { items: rows, next_cursor: null } satisfies PageReconDiffOut };

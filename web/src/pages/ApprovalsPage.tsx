@@ -3,9 +3,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { api, type ApprovalDecision, type ApprovalPayload } from '../api/client';
 import { useApiConfig, type ApprovalRole } from '../api/config';
+import { useSession } from '../api/session';
 import { ApprovalOpinions } from '../components/ApprovalOpinions';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel } from '../components/ErrorPanel';
+import { SessionNotice } from '../components/SessionNotice';
 import { LevelBadge, RoleBadge, StateBadge } from '../components/Badges';
 import { IconAlert, IconCheck } from '../components/icons';
 import { amount, dateTime } from '../lib/format';
@@ -32,6 +34,7 @@ function waitingSince(value: string): string {
 
 export function ApprovalsPage() {
   const config = useApiConfig();
+  const session = useSession();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [comment, setComment] = useState('');
@@ -41,6 +44,8 @@ export function ApprovalsPage() {
   const tasks = useQuery({
     queryKey: ['approvals', 'pending', 'page'],
     queryFn: () => api.listPendingApprovals({ limit: 50 }),
+    // 「待你决策」由会话角色决定，必须先拿到 /v1/auth/session 的身份再查。
+    enabled: session.canQuery,
   });
 
   const items = tasks.data?.items ?? [];
@@ -65,8 +70,13 @@ export function ApprovalsPage() {
   });
 
   useEffect(() => {
-    if (!selected) return;
-    const nextRole = config.roles.find((item) => selected.missing_roles.includes(item)) ?? config.roles[0] ?? 'reviewer';
+    // 会话身份到达前默认落在第一个可用角色；会话到达后按缺角色规则重算。
+    const fallback = config.roles[0] ?? 'reviewer';
+    if (!selected) {
+      setRole(fallback);
+      return;
+    }
+    const nextRole = config.roles.find((item) => selected.missing_roles.includes(item)) ?? fallback;
     setRole(nextRole);
     setComment('');
     mutation.reset();
@@ -135,7 +145,9 @@ export function ApprovalsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="badge bg-slate-100 text-slate-600 ring-slate-200">队列 {items.length}</span>
+          <span className="badge bg-slate-100 text-slate-600 ring-slate-200">
+            队列 {session.canQuery ? items.length : '—'}
+          </span>
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => void tasks.refetch()}>
             刷新
           </button>
@@ -146,6 +158,16 @@ export function ApprovalsPage() {
         <ErrorPanel error={tasks.error} onRetry={() => void tasks.refetch()} onOpenSettings={openSettingsPanel} />
       ) : null}
 
+      {session.unavailable ? (
+        <SessionNotice error={session.error} onRetry={session.refresh} onOpenSettings={openSettingsPanel} />
+      ) : null}
+
+      {session.status === 'loading' ? (
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[340px_minmax(0,1fr)]">
+          <div className="skeleton h-72 w-full" />
+          <div className="skeleton h-72 w-full" />
+        </div>
+      ) : session.canQuery ? (
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-[340px_minmax(0,1fr)]">
         <section className="card min-w-0 overflow-hidden self-start">
           <div className="card-head">
@@ -303,12 +325,19 @@ export function ApprovalsPage() {
                       <option key={item} value={item}>{item}</option>
                     ))}
                   </select>
+                  {config.roles.length === 0 ? (
+                    <span className="mt-1 block text-[10.5px] leading-4 text-amber-700">
+                      会话未返回审批角色，提交会被服务端拒绝
+                    </span>
+                  ) : null}
                 </label>
                 <div className="min-w-0 text-[11px] text-slate-500">
                   <div className="label">当前身份</div>
                   <div className="mt-1 break-all">
                     {config.viewerName}
-                    {config.viewerId ? `（${config.viewerId}）` : '（未设置用户 ID，意见默认不展示正文）'}
+                    {config.viewerId
+                      ? `（${config.viewerId}）`
+                      : '（会话未返回 user_id，意见默认不展示正文）'}
                   </div>
                 </div>
               </div>
@@ -381,6 +410,7 @@ export function ApprovalsPage() {
           ) : null}
         </section>
       </div>
+      ) : null}
     </div>
   );
 }
