@@ -709,13 +709,15 @@ HTTP/1.1 500 Internal Server Error
    登录仍是旧 scope、上传演示仍 403，而且 `printenv` 才看得出来。
    正确顺序：改 `.env` → `up -d --no-deps --force-recreate <service>` →
    `docker exec <c> printenv <KEY>` 复核。
-   本机实例：2026-11-11 23:13 给四条身份统一补 `2026-10`（上传演示用），
-   已用 force-recreate 生效（四条都验证过 200 且能选 2026-10）。
+   本机实例：2026-11-11 23:13 曾给四条身份补 `2026-10`（上传演示用）；
+   2026-11-12 已按 §10.4 修法 A 撤掉 `2026-10`（fixtures 改到 2026-09），
+   同样必须 force-recreate 才生效。
 6. **上传的对账单登记在 api 进程内存里。** `POST /v1/recon/statements` 之后必须由
    **同一个 api 进程**跑 `/v1/recon/runs`（`sources.statement_files`），否则
    `422 E-DATA-MISSING（F1）`；api 一旦重启/重建，要重新上传。
-7. **上传演示是 `2026-10` 期。** 四个演示身份的 `periods` 必须包含 `2026-10`，
-   否则「开始对账」直接 `403 E-AUTHZ-001 超出授权`（种子工单用的是 07/08/09）。
+7. **上传演示样本是 `2026-09` 期**（与种子同月）。四个演示身份的 `periods`
+   含 `2026-07/08/09`，不需要额外期段；若样本期段与身份 periods 不一致，
+   「开始对账」会 `403 E-AUTHZ-001 超出授权`。
 8. **同步回滚入口默认关闭。** `POST /v1/tickets/{id}/actions/compensate` 返回
    `503 E-ROLLBACK-UNAVAILABLE`（`ERP_ROLLBACK_SYNC_ENABLED` 未随 compose 下发，
    与 `12ba3e3` 行为一致），连接器零调用、工单状态不变。演示补偿请展示种子里的
@@ -752,11 +754,11 @@ DSN_MIG="postgresql://erp_migrator:${PGPASSWORD}@s8-demo-pg:5432/smart_erp"
 # 换机器时按 `.env` 的 ERP_DB_NETWORK 与 PG 容器名替换这两处（不是 127.0.0.1）。
 ```
 
-0）**登录后先确认账期 = `2026-09`（临时措施，见 §10.4）**
+0）**登录后确认账期 = `2026-09`（已于 2026-11-12 根治，无需手工切）**
 
-当前四条身份的 `periods` 含 `2026-10`，而 `default_scope` 取字典序最新一期，
-所以 `dddddddd` 登录后默认落在 **`ORG-SZ · 2026-10`（空期：待你决策 0、样本 0）**。
-打开「连接设置」把账期改成 `2026-09` 并保存（不需要重新登录），再继续第 1 条。
+`default_scope` 取 `periods` 字典序最新一期；四个身份现在只到 `2026-09`，
+登录后默认就落在有数据的期段。若仍看到 `2026-10`，说明 api 没按新 `.env`
+重建（`printenv` 复核），按 §10.4 处理。
 
 ```text
 期望：页头 工单 18、待你决策 4、涉资 735,000
@@ -844,11 +846,11 @@ curl -s -o /dev/null -w 'api=%{http_code}\n' http://127.0.0.1:8088/erp/api/healt
 
 ```bash
 curl -s -X POST http://127.0.0.1:8010/v1/recon/statements -H "X-Session-Token: $TOKEN_D" \
-  -F "file=@fixtures/recon/upload_demo/supplier_statement_2026-10.csv" \
+  -F "file=@fixtures/recon/upload_demo/supplier_statement_2026-09.csv" \
   -F "dataset=$(cat fixtures/recon/upload_demo/our_dataset.json)"
-# 期望：{"statement_file":"supplier_statement_2026-10.csv","supplier_lines":3,"our_lines":3}
-# 然后（必须同一个 api 进程）POST /v1/recon/runs（scope 用 ORG-SZ / 2026-10 / u8，
-# sources.statement_files=["supplier_statement_2026-10.csv"]，带 Idempotency-Key）
+# 期望：{"statement_file":"supplier_statement_2026-09.csv","supplier_lines":3,"our_lines":3}
+# 然后（必须同一个 api 进程）POST /v1/recon/runs（scope 用 ORG-SZ / 2026-09 / u8，
+# sources.statement_files=["supplier_statement_2026-09.csv"]，带 Idempotency-Key）
 # 期望 metrics：supplier_lines=3 matched=3 diff_lines=1 diff_amount=10.0000
 ```
 
@@ -902,5 +904,12 @@ reset 后也没有它们的冲销回执。**不要说「桩上能查到冲销」
 
 两条互斥，都不改代码、只动 `.env` 与（A 的）fixtures 数据。当前采用
 「第 0 条手工切 `2026-09`」的临时措施，演示后按 A 或 B 落地。
+
+**已落地（2026-11-12，修法 A）**：`fixtures/recon/upload_demo/` 两份 CSV 与
+`our_dataset.json` 期段改为 `2026-09`（文件名同步改为 `_2026-09`，README 一并更新）；
+四个演示身份 `periods` 撤掉 `2026-10`，只剩 `2026-07/08/09`；`--force-recreate api`
+生效。复核：`default_scope.period=2026-09`、`/v1/approvals/pending` 4 条
+（W2 5,000 / 0003 735,000 / 0002 268,000 / 0001 86,000）、2026-09 工单 18 张。
+第 0 条从此只是「确认」，不再是手工步骤。
 
 
