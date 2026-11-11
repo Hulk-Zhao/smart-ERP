@@ -137,7 +137,13 @@ jobs:
         # -v 而不是 -q：聚合的「63 passed」看不出哪条绿、哪条被跳过——2026-11-11 已
         # 因此反复误判。必须能从日志读出 `...::test_xxx PASSED` 这种带用例名的一行，
         # 才算证明「某条具体用例在 main 基线上是绿的」。
-        run: python -m pytest tests/deploy -v -o addopts="" -rs
+        # job 日志要登录才能看（公共 API 对 logs 端点返回 403），annotation 公共可读，
+        # 所以把 pytest 自己打印的 PASSED 行原样转成 notice：不拼接措辞，不做成败判断。
+        # 失败不吞：GitHub 默认 shell 是 bash -e -o pipefail，pytest 非零即中止本步，
+        # awk 放在其后只在测试全绿时才执行；awk 无匹配也返回 0，不会制造假红。
+        run: |
+          python -m pytest tests/deploy -v -o addopts="" -rs 2>&1 | tee /tmp/deploy-static.log
+          awk '/^tests\/deploy\/.*::.* PASSED/ { print "::notice::" $0 }' /tmp/deploy-static.log
 
       - name: compose 正向解析（demo 档）
         run: |
