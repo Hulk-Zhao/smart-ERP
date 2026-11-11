@@ -201,32 +201,46 @@ def test_scheduler_lease_is_single_point_and_takeover(db: str) -> None:
                 session_factory=env_a.sf,
                 owner="scheduler-a",
                 scope="unit-test",
-                lease_seconds=0.2,
+                lease_seconds=300.0,
             )
             second = Scheduler(
                 session_factory=env_b.sf,
                 owner="scheduler-b",
                 scope="unit-test",
-                lease_seconds=0.2,
+                lease_seconds=300.0,
             )
             assert await first.acquire() is True
+
+            # 「未过期」用显式状态表示，不靠 200ms 窗口去赌两次 acquire 之间的耗时：
+            # 单次 acquire 在本地实测 p50≈18ms、p95≈29ms，满载时可能越过 200ms
+            # （实测 277ms 的间隔就会让 second 抢到），而 Docker Desktop 的时钟
+            # 跳变也会让任何亚秒级窗口失真。infinity 不会被 now() 越过。
+            async with env_a.sf() as session, session.begin():
+                await session.execute(
+                    text(
+                        "UPDATE erp.scheduler_lease SET expires_at = 'infinity' "
+                        "WHERE scope = 'unit-test'"
+                    )
+                )
             assert await second.acquire() is False, "租约未过期时第二个副本不能拿到"
 
             lease = await second.read_lease()
             assert lease is not None and lease["owner"] == "scheduler-a"
 
-            # 持有者崩溃：租约过期后第二个副本接管
+            # 持有者崩溃：把租约显式标成过期（-infinity），不依赖真实等待，
+            # 也不怕时钟回拨把「1 秒前」重新推回未来。
             async with env_a.sf() as session, session.begin():
                 await session.execute(
                     text(
-                        "UPDATE erp.scheduler_lease "
-                        "SET expires_at = now() - interval '1 second' "
+                        "UPDATE erp.scheduler_lease SET expires_at = '-infinity' "
                         "WHERE scope = 'unit-test'"
                     )
                 )
             assert await second.acquire() is True
             assert await first.acquire() is False, "被接管后原持有者不能续约"
 
+            # 释放后下一个副本立即接管：``owner`` 为空即可，不要求 now() 已越过
+            # release 写下的 expires_at（否则一次回拨就能让已释放的租约拿不回来）。
             await second.release()
             assert await first.acquire() is True
 
