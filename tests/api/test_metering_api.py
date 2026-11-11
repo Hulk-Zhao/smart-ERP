@@ -147,12 +147,20 @@ def test_statement_classifies_lines_and_amounts(env, monkeypatch):
 
     # 计费行是「上界」，口径可解释
     assert "上界" in body["billable_basis"]
-    assert "上界" in body["calculation"][-4]
+    assert any("上界" in item for item in body["calculation"])
     assert body["line_accounting"].startswith("应处理 4 = 自动放行 1 + 争议挂起 2 + 其他不计费 1")
 
-    # 否定断言（防复制粘贴复发）：billable 桶计数不得再被叫成「有效对账行」。
-    # 「有效对账行」只属于对账引擎口径（行级自动，含已自动归因的差异行）。
-    assert all("有效对账行" not in item for item in body["calculation"])
+    # 三个行数各自成句、各带字段名：总对账行 / 有效对账行 / 计费行数。
+    assert any(item.startswith("总对账行数（line_count") for item in body["calculation"])
+    assert any("有效对账行数（auto_released_lines" in item for item in body["calculation"])
+    assert any(item.startswith("计费行数（billable_lines") for item in body["calculation"])
+
+    # 否定断言（防复制粘贴复发）：「有效对账行」只指 auto_released_lines；
+    # 计费行数那句只许说 billable 桶，不得借用「有效对账行」这个名字。
+    billable_step = next(
+        item for item in body["calculation"] if item.startswith("计费行数（billable_lines")
+    )
+    assert "有效对账行" not in billable_step
     assert "有效对账行" not in body["billable_basis"]
 
     # 按行事实：自动放行 / 人工复核 / 争议挂起 / 其他不计费

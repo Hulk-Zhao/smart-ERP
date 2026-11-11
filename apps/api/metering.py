@@ -8,16 +8,17 @@
 
 计费口径（可在响应 ``calculation`` 中逐条核对）::
 
-    应处理行数 = 对账引擎的供应商对账单行数（metrics.supplier_lines）
-    自动放行行数 = 引擎状态「已匹配」且无需人工
-    争议挂起行数 = 引擎标记需人工（待人工/匹配歧义/候选待人工）
-    计费行数（billable_lines）= billable 桶计数 = 自动放行 − 已确认错放行 − 客户原因不计费
+    总对账行（line_count）= 批次快照里的全部行（含我方侧、不可解析行）
+    有效对账行（auto_released_lines）= 行级 auto = billable 桶 + auto_released 桶
+    计费行数（billable_lines）= billable 桶行数 = 有效对账行 − 已确认错放行 − 客户原因
     本期金额 = 计费行数 × 单行单价（单价只从配置读）
     累计金额 = 已计金额 + 本期金额
     封顶余额 = 封顶金额 − 累计金额
 
-「有效对账行」是对账引擎的口径（行级自动，含已自动归因的差异行），与本模块的
-``billable_lines`` 不是同一个数；两者不得互相代称（同一批次实测 64 vs 59）。
+三个数字（总对账行 / 有效对账行 / 计费行数）不得互相代称：前两者是行事实，后者是
+账单桶结果。``calculation`` 里每一步都由「数值 + 明确桶名」拼出，不把口径判断写死在
+句子里；前端只需按字段名取数（``line_count`` / ``auto_released_lines`` /
+``billable_lines``），不要从文案里解析数字。
 """
 
 from __future__ import annotations
@@ -275,8 +276,13 @@ def build_statement(
         other_reasons[code] = other_reasons.get(code, 0) + 1
 
     calculation = [
+        f"总对账行数（line_count，批次内全部行）= {len(lines)}",
         f"应处理行数 = 供应商对账单行数 = {expected}（来源：对账引擎 metrics.supplier_lines）",
-        f"自动放行行数 = 引擎状态「已匹配」且无需人工 = {auto_count}",
+        (
+            "有效对账行数（auto_released_lines，行级 auto）= "
+            f"billable 桶 {len(by_bucket[BillingBucket.BILLABLE])} + "
+            f"auto_released 桶 {len(by_bucket[BillingBucket.AUTO_RELEASED])} = {auto_count}"
+        ),
         f"争议挂起行数 = 引擎标记需人工（待人工/匹配歧义/候选待人工）= {hold_count}",
         f"其他不计费行数 = 供应商侧未匹配/重复计费/不可解析 = {other_count}",
         (
@@ -290,10 +296,7 @@ def build_statement(
             "已确认错放行行数 = 无数据源（未接入，按 0 扣减）；"
             "客户原因不计费行数 = 无数据源（未接入，按 0 扣减）"
         ),
-        (
-            f"计费行数（billable_lines）= 自动放行 {auto_count} − 已确认错放行 0 "
-            f"= {billable_count}（上界：确认数据接入后只会下调）"
-        ),
+        f"计费行数（billable_lines，billable 桶行数）= {billable_count}（上界：扣减源接入后只会下调）",
         (
             f"本期金额 = 计费行数 {billable_count} × 单行单价 {unit_price} "
             f"= {period_amount} {policy.currency}"
