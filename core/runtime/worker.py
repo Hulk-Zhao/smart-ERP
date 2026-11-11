@@ -54,6 +54,33 @@ DEFAULT_HEARTBEAT_SECONDS = 10.0
 DEFAULT_POLL_SECONDS = 1.0
 DEFAULT_DRAIN_SECONDS = 30.0
 
+# 任务租约每次续约的间隔是 lease/3（_run_job 的 asyncio.wait 超时）；
+# 心跳间隔不得超过租约的一半——再稀疏就会让 stale 回收与存活信号滞后一整个租约窗口。
+HEARTBEAT_RENEW_DIVISOR = 3
+HEARTBEAT_MAX_LEASE_RATIO = 0.5
+_HEARTBEAT_ENV = "ERP_HEARTBEAT_INTERVAL_SECONDS"
+
+
+def _heartbeat_seconds_from_env() -> tuple[float, str]:
+    """未给 --heartbeat-seconds 时读环境变量，返回 (秒数, 来源)。
+
+    空值回落默认 10s；非数字或 ≤0 直接抛 SystemExit 并带上键名，不静默回落——
+    compose 里写着一个看似生效的值而实际不生效，比没有这个变量更危险。
+    """
+    raw = os.environ.get(_HEARTBEAT_ENV)
+    if raw is None or not raw.strip():
+        return DEFAULT_HEARTBEAT_SECONDS, "default"
+    try:
+        value = float(raw)
+    except ValueError:
+        raise SystemExit(
+            f"{_HEARTBEAT_ENV}={raw!r} 不是数字；留空或删除该变量则使用默认 "
+            f"{DEFAULT_HEARTBEAT_SECONDS}s"
+        ) from None
+    if value <= 0:
+        raise SystemExit(f"{_HEARTBEAT_ENV}={raw!r} 必须 > 0")
+    return value, "env"
+
 
 HANDLERS: dict[str, JobHandler] = {}
 
@@ -96,6 +123,8 @@ class Worker:
     concurrency: int = DEFAULT_CONCURRENCY
     lease_seconds: float = DEFAULT_LEASE_SECONDS
     heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS
+    # 心跳的来源（cli/env/default），只用于启动日志对账，不参与调度决策。
+    heartbeat_source: str = "default"
     poll_seconds: float = DEFAULT_POLL_SECONDS
     drain_seconds: float = DEFAULT_DRAIN_SECONDS
     retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS
@@ -110,13 +139,55 @@ class Worker:
             raise ValueError("concurrency 必须 >= 1")
         if self.lease_seconds <= 0:
             raise ValueError("lease_seconds 必须 > 0")
-        # 心跳间隔必须小于租约 TTL：否则心跳还没写下一次，租约先过期，
+        # 心跳间隔必须明显小于租约 TTL：否则心跳还没写下一次，租约先过期，
         # 正常运行中的任务会被别的 worker 当成 stale 抢走（双跑）。
-        if self.heartbeat_seconds <= 0 or self.heartbeat_seconds >= self.lease_seconds:
+        if self.heartbeat_seconds <= 0:
             raise ValueError(
-                "heartbeat_seconds 必须 > 0 且 < lease_seconds（默认 10s / 60s）"
+                f"heartbeat_seconds={self.heartbeat_seconds} 必须 > 0"
+                f"（来自 {_HEARTBEAT_ENV} 或 --heartbeat-seconds）"
+            )
+        limit = self.lease_seconds * HEARTBEAT_MAX_LEASE_RATIO
+        if self.heartbeat_seconds > limit:
+            raise ValueError(
+                f"heartbeat_seconds={self.heartbeat_seconds} 超过上限 {limit}："
+                f"上限 = lease_seconds({self.lease_seconds}) × "
+                f"{HEARTBEAT_MAX_LEASE_RATIO}（租约的一半）；"
+                f"heartbeat 来自 {_HEARTBEAT_ENV} 或 --heartbeat-seconds，"
+                "lease 来自 --lease-seconds。"
+                "注意：调小租约默认值也会让原本合法的 heartbeat 变非法，"
+                "不是心跳配置写错了。"
+                "心跳比租约还稀疏时，stale 回收和存活信号会滞后一整个租约窗口。"
             )
         self.queue = JobQueueStore(self.session_factory)
+
+    @property
+    def heartbeat_limit(self) -> float:
+        """心跳间隔的硬上限（租约的一半），与启动日志同一个口径。"""
+        return self.lease_seconds * HEARTBEAT_MAX_LEASE_RATIO
+
+    @property
+    def lease_renew_seconds(self) -> float:
+        """任务租约的续约周期（lease/3），与 _run_job 的等待超时一致。"""
+        return self.lease_seconds / HEARTBEAT_RENEW_DIVISOR
+
+    def _log_startup(self) -> None:
+        """启动日志：配置值 / 来源 / 租约 / 续约周期 / 心跳上限，一次说全。
+
+        注释会腐烂，这行日志不会——「我把 30 改成了 300 为什么起不来」
+        的答案必须在 docker logs 里。
+        """
+        logger.info(
+            "worker %s 启动 queues=%s concurrency=%s heartbeat_seconds=%s source=%s "
+            "lease=%ss renew=%ss heartbeat_limit=%ss (lease/2)",
+            self.worker_id,
+            ",".join(self.queues),
+            self.concurrency,
+            self.heartbeat_seconds,
+            self.heartbeat_source,
+            self.lease_seconds,
+            self.lease_renew_seconds,
+            self.heartbeat_limit,
+        )
 
     # ---------------------------------------------------------------- 心跳
     async def _beat(self, state: str) -> None:
@@ -239,12 +310,7 @@ class Worker:
         reclaimed = await self.queue.reclaim_stale()
         if reclaimed:
             logger.warning("启动回收 stale running 任务 %s 条", reclaimed)
-        logger.info(
-            "worker %s 启动 queues=%s concurrency=%s",
-            self.worker_id,
-            ",".join(self.queues),
-            self.concurrency,
-        )
+        self._log_startup()
 
         processed = [0]
         heartbeat = asyncio.create_task(self._heartbeat_loop())
@@ -301,7 +367,13 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--lease-seconds", type=float, default=DEFAULT_LEASE_SECONDS)
     parser.add_argument(
-        "--heartbeat-seconds", type=float, default=DEFAULT_HEARTBEAT_SECONDS
+        "--heartbeat-seconds",
+        type=float,
+        default=None,
+        help=(
+            f"心跳间隔秒数；未指定时依次取 {_HEARTBEAT_ENV}、默认 "
+            f"{DEFAULT_HEARTBEAT_SECONDS}s（必须 ≤ lease/2）"
+        ),
     )
     parser.add_argument("--poll-seconds", type=float, default=DEFAULT_POLL_SECONDS)
     parser.add_argument("--drain-seconds", type=float, default=DEFAULT_DRAIN_SECONDS)
@@ -314,7 +386,14 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--max-jobs", type=int, default=None, help="处理 N 条后退出（冒烟/测试用）"
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.heartbeat_seconds is None:
+        args.heartbeat_seconds, args.heartbeat_source = (
+            _heartbeat_seconds_from_env()
+        )
+    else:
+        args.heartbeat_source = "cli"
+    return args
 
 
 async def _amain(args: argparse.Namespace) -> WorkerStats:
@@ -329,6 +408,7 @@ async def _amain(args: argparse.Namespace) -> WorkerStats:
             concurrency=args.concurrency,
             lease_seconds=args.lease_seconds,
             heartbeat_seconds=args.heartbeat_seconds,
+            heartbeat_source=args.heartbeat_source,
             poll_seconds=args.poll_seconds,
             drain_seconds=args.drain_seconds,
             retry_backoff_seconds=args.retry_backoff_seconds,

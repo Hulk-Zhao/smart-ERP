@@ -142,7 +142,8 @@ services:
       ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
       ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-4}
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
-      # 队列/并发只通过 command 的 ${...} 插值生效；环境副本没有读取点，已删（B-COMPOSE-METRICS）。
+      # 心跳间隔必须 ≤ lease/2（默认租约 60s → 上限 30s），超了 worker 拒绝启动；
+      # 租约续约周期是 lease/3=20s，启动日志会打 lease=60.0s renew=20.0s。
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
       ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
@@ -412,7 +413,8 @@ services:
       ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
       ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-4}
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
-      # 队列/并发只通过 command 的 ${...} 插值生效；环境副本没有读取点，已删（B-COMPOSE-METRICS）。
+      # 心跳间隔必须 ≤ lease/2（默认租约 60s → 上限 30s），超了 worker 拒绝启动；
+      # 租约续约周期是 lease/3=20s，启动日志会打 lease=60.0s renew=20.0s。
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
       ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
@@ -465,7 +467,8 @@ services:
       ERP_DATABASE_URL: ${ERP_DATABASE_URL:?ERP_DATABASE_URL is required (postgresql+asyncpg://erp_app:...@<pg-host>:5432/smart_erp)}
       ERP_DB_POOL_SIZE: ${ERP_DB_POOL_SIZE:-2}
       ERP_DB_MAX_OVERFLOW: ${ERP_DB_MAX_OVERFLOW:-0}
-      # 队列/并发只通过 command 的 ${...} 插值生效；环境副本没有读取点，已删（B-COMPOSE-METRICS）。
+      # 心跳间隔必须 ≤ lease/2（默认租约 60s → 上限 30s），超了 worker 拒绝启动；
+      # 租约续约周期是 lease/3=20s，启动日志会打 lease=60.0s renew=20.0s。
       ERP_HEARTBEAT_INTERVAL_SECONDS: ${ERP_HEARTBEAT_INTERVAL_SECONDS:-30}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
       ERP_OBJECT_STORE_DRIVER: ${ERP_OBJECT_STORE_DRIVER:-local}
