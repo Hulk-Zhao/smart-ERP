@@ -580,6 +580,55 @@
         "title": "Body_upload_statement_v1_recon_statements_post",
         "type": "object"
       },
+      "DemoIdentitiesOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DemoIdentityOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "DemoIdentitiesOut",
+        "type": "object"
+      },
+      "DemoIdentityOut": {
+        "description": "演示身份；``token`` 是该身份的静态会话令牌，等同演示登录凭据。",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "roles",
+          "label",
+          "token"
+        ],
+        "title": "DemoIdentityOut",
+        "type": "object"
+      },
       "DiffTypeCode": {
         "enum": [
           "unit_price",
@@ -2313,56 +2362,6 @@
         "title": "SessionScopeOut",
         "type": "object"
       },
-      "DemoIdentityOut": {
-        "description": "演示身份：只在 demo 档且 ERP_DEMO_SESSION_ENABLED=true 时返回，\n``token`` 即该身份的静态会话令牌（等同演示登录凭据）。",
-        "properties": {
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "roles": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Roles",
-            "type": "array"
-          },
-          "token": {
-            "title": "Token",
-            "type": "string"
-          },
-          "user_id": {
-            "format": "uuid",
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "user_id",
-          "roles",
-          "label",
-          "token"
-        ],
-        "title": "DemoIdentityOut",
-        "type": "object"
-      },
-      "DemoIdentitiesOut": {
-        "description": "演示身份清单；非 demo 环境该端点一律 404。",
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/DemoIdentityOut"
-            },
-            "title": "Items",
-            "type": "array"
-          }
-        },
-        "required": [
-          "items"
-        ],
-        "title": "DemoIdentitiesOut",
-        "type": "object"
-      },
       "SuggestIn": {
         "additionalProperties": false,
         "description": "助手建议入参；本期只支持 ``next_action`` 一类。",
@@ -3651,6 +3650,28 @@
         ]
       }
     },
+    "/v1/auth/demo-identities": {
+      "get": {
+        "description": "演示身份清单：仅 demo 档且显式开启时存在，其他环境一律 404。\n\n返回的 token 是部署期注入的静态会话令牌，等于把「登录」做成一键演示，\n所以必须过双闸：``ERP_APP_ENV=demo``（Settings 强制）与\n``ERP_DEMO_SESSION_ENABLED=true``。不写日志、禁止缓存。",
+        "operationId": "list_demo_identities_v1_auth_demo_identities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoIdentitiesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Demo Identities",
+        "tags": [
+          "会话"
+        ]
+      }
+    },
     "/v1/auth/session": {
       "get": {
         "description": "当前会话身份；缺失/过期/无效令牌统一 401（由 ``session_dep`` 抛出）。",
@@ -3668,28 +3689,6 @@
           }
         },
         "summary": "Read Session",
-        "tags": [
-          "会话"
-        ]
-      }
-    },
-    "/v1/auth/demo-identities": {
-      "get": {
-        "description": "列出部署期注入的演示身份（含短标签与该身份的静态会话令牌），供演示身份切换器一键换人。\n\n**仅演示环境**：``ERP_APP_ENV=demo`` 且 ``ERP_DEMO_SESSION_ENABLED=true`` 时存在；其余环境一律 404。\n返回的 token 等同演示登录凭据，不写日志、不允许缓存（Cache-Control: no-store）。",
-        "operationId": "list_demo_identities_v1_auth_demo_identities_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DemoIdentitiesOut"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "List Demo Identities",
         "tags": [
           "会话"
         ]
