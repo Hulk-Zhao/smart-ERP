@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -133,7 +134,21 @@ class TicketStore:
         diff_amount: Decimal | None = None,
         systems_count: int | None = None,
         touches_fund: bool = False,
+        org_id: str | None = None,
+        period: str | None = None,
+        systems: Sequence[str] | None = None,
+        write_level: int | None = None,
+        amount: Decimal | None = None,
+        pending_write: Mapping[str, Any] | None = None,
     ) -> Ticket:
+        """建单：ticket 投影 + created 事件同事务。
+
+        ``org_id`` / ``period`` / ``systems`` / ``write_level`` / ``amount`` /
+        ``pending_write`` 是 API 读路径的投影字段，同时镜像进 created payload——
+        否则 ``rebuild_projection`` 只能重建执行器写的那部分，API 建的单重建不出来。
+        执行器调用方不传这些参数，行为与 0010 之前一致（DB 为 NULL、payload 无这些键）。
+        """
+
         ticket = Ticket(
             id=uuid4(),
             tenant_id=tenant_id,
@@ -142,12 +157,39 @@ class TicketStore:
             initiator_id=initiator_id,
             trigger_kind=trigger_kind,
             business_key=business_key,
+            org_id=org_id,
+            period=period,
+            systems=list(systems) if systems is not None else None,
             state=TicketState.PLANNED.value,
             version=0,
+            write_level=write_level,
+            amount=amount,
             diff_amount=diff_amount,
-            systems_count=systems_count,
+            systems_count=(
+                systems_count
+                if systems_count is not None
+                else (len(systems) if systems is not None else None)
+            ),
             touches_fund=touches_fund,
+            pending_write=dict(pending_write) if pending_write is not None else None,
         )
+        payload: dict[str, Any] = {
+            "scene_code": scene_code,
+            "business_key": business_key,
+        }
+        if org_id is not None:
+            payload["org_id"] = org_id
+        if period is not None:
+            payload["period"] = period
+        if systems is not None:
+            payload["systems"] = list(systems)
+        if write_level is not None:
+            payload["write_level"] = write_level
+        if amount is not None:
+            payload["amount"] = str(amount)
+        if pending_write is not None:
+            payload["pending_write"] = dict(pending_write)
+
         try:
             async with self._sf() as session, session.begin():
                 session.add(ticket)
@@ -158,7 +200,7 @@ class TicketStore:
                     event_type=CREATED_EVENT,
                     from_state=None,
                     to_state=TicketState.PLANNED.value,
-                    payload={"scene_code": scene_code, "business_key": business_key},
+                    payload=payload,
                     actor_id=actor_id,
                     trace_id=trace_id,
                 )
@@ -227,7 +269,87 @@ class TicketStore:
             )
             ticket.state = target_state.value
             ticket.version = int(ticket.version) + 1
+            # 写计划也是投影的一部分：payload 里显式带 pending_write 时同步覆盖，
+            # 与 replay() 的口径一致（在线投影和「从事件重建」必须是同一份事实）。
+            if "pending_write" in body:
+                ticket.pending_write = body["pending_write"]
+            ticket.updated_at = datetime.now(UTC)
         return record
+
+    async def record_step(
+        self,
+        *,
+        ticket_id: UUID,
+        step_id: UUID,
+        step_no: int,
+        action_key: str,
+        target_system: str,
+        write_level: int,
+        idem_key: str,
+        request_hash: str,
+        state: str = "succeeded",
+        request_snapshot: Mapping[str, Any] | None = None,
+        object_type: str | None = None,
+        object_id: str | None = None,
+        audit_image_id: UUID | None = None,
+        executed_at: datetime | None = None,
+        trace_id: str | None = None,
+    ) -> TicketStep:
+        """记录 API 已执行完成的步骤（外部写入已发生），并追加 step 事件。
+
+        与执行器的 ``intent_step``/``mark_step`` 两段提交不同：API 的写计划在
+        审批通过时一次性执行完，这里只在成功之后落一行 + 一条事件，语义与改造前
+        ``ticket.steps.append`` 一致。``step_id`` 由调用方生成并先用于审计影像，
+        因此必须由调用方传入而不是这里 ``uuid4()``，否则影像与步骤对不上。
+        """
+
+        if write_level > 2:
+            raise StoreError("ticket_step.write_level 只允许 0..2（W3 不可能落库）")
+
+        step = TicketStep(
+            id=step_id,
+            ticket_id=ticket_id,
+            step_no=step_no,
+            action_key=action_key,
+            target_system=target_system,
+            write_level=write_level,
+            state=state,
+            idempotency_key=idem_key,
+            request_hash=request_hash,
+            request_snapshot=dict(request_snapshot) if request_snapshot else None,
+            object_type=object_type,
+            object_id=object_id,
+            audit_image_id=audit_image_id,
+            executed_at=executed_at,
+            attempt=1,
+        )
+        try:
+            async with self._sf() as session, session.begin():
+                ticket = await session.scalar(
+                    select(Ticket).where(Ticket.id == ticket_id).with_for_update()
+                )
+                if ticket is None:
+                    raise TicketNotFound(f"工单不存在: {ticket_id}")
+                session.add(step)
+                await session.flush()
+                await self._append_locked(
+                    session,
+                    ticket,
+                    event_type=STEP_EVENT,
+                    from_state=None,
+                    to_state=None,
+                    payload={
+                        "step_no": step_no,
+                        "state": state,
+                        "action_key": action_key,
+                    },
+                    actor_id=None,
+                    trace_id=trace_id,
+                )
+                ticket.updated_at = datetime.now(UTC)
+        except IntegrityError as exc:
+            raise DuplicateStep(f"工单 {ticket_id} 的 step_no={step_no} 已存在") from exc
+        return step
 
     async def list_events(self, ticket_id: UUID) -> list[EventRecord]:
         async with self._sf() as session:

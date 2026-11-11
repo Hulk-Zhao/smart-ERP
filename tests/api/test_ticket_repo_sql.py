@@ -181,7 +181,8 @@ def _record(
         amount=amount,
         touches_fund=False,
         state=TicketState(row["state"]),
-        version=row["version"],
+        # DB 存迁移次数（建单 0），端口对外 +1（建单即 1）。
+        version=row["version"] + 1,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         pending_write=pending_write,
@@ -393,7 +394,8 @@ def test_get_matches_in_memory_including_steps(session_factory):
     assert historical.systems is None
     assert historical.amount is None
     assert historical.write_level is None
-    assert historical.version == 0
+    # DB 里是 0（从未迁移），对外必须是 1：前端乐观并发的起点不能变成 0。
+    assert historical.version == 1
     # 空对象与 NULL 同义：没有锁定写计划。
     assert historical.pending_write is None
     assert historical.steps == []

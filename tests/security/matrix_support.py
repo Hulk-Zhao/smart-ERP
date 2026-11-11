@@ -24,7 +24,12 @@ from fastapi.testclient import TestClient
 
 from apps.api import configure_container, reset_container
 from apps.api.container import ApiContainer
-from apps.api.store import PendingWrite, TicketRecord, TicketStepRecord
+from apps.api.store import (
+    PendingWrite,
+    TicketRecord,
+    TicketRepository,
+    TicketStepRecord,
+)
 from apps.main import create_app
 from apps.platform.config import Settings
 from apps.platform.connectors.sdk import (
@@ -323,6 +328,7 @@ def _seed_container() -> tuple[ApiContainer, FakeConnector, FakeConnector, dict[
     container = ApiContainer(
         connectors={SYSTEM: connector, SYSTEM_B: connector_b},
         scenes={SCENE: SceneSpec(code=SCENE, max_level=WriteLevel.W2)},
+        tickets=TicketRepository(),
     )
     for action in (
         action_forward(),

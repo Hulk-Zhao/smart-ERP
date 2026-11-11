@@ -12,6 +12,7 @@ import hashlib
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from apps.agents.state_machine import (
@@ -142,19 +143,50 @@ def make_event(
 
 @dataclass(frozen=True, slots=True)
 class Projection:
-    """由事件折叠出的工单投影。"""
+    """由事件折叠出的工单投影。
+
+    除状态机字段外，还折叠 API 写入口负责的那部分投影（org/period/systems/
+    write_level/amount/pending_write）。否则「链是真源」只对执行器成立，
+    对 API 建单/审批的工单不成立。
+    """
 
     state: TicketState
     version: int
     last_seq: int
     last_hash: str
     steps: Mapping[int, str] = field(default_factory=dict)
+    org_id: str | None = None
+    period: str | None = None
+    systems: tuple[str, ...] | None = None
+    write_level: int | None = None
+    amount: Decimal | None = None
+    pending_write: Mapping[str, Any] | None = None
 
     @property
     def terminal(self) -> bool:
         from apps.agents.state_machine import is_terminal
 
         return is_terminal(self.state)
+
+
+def _systems_from_payload(value: Any) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+    return tuple(str(item) for item in value)
+
+
+def _amount_from_payload(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
+def _pending_from_payload(value: Any) -> Mapping[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return dict(value)
 
 
 def replay(events: Iterable[EventRecord], *, verify_hashes: bool = True) -> Projection:
@@ -169,6 +201,12 @@ def replay(events: Iterable[EventRecord], *, verify_hashes: bool = True) -> Proj
     prev_hash = GENESIS_HASH
     expected_seq = 1
     steps: dict[int, str] = {}
+    org_id: str | None = None
+    period: str | None = None
+    systems: tuple[str, ...] | None = None
+    write_level: int | None = None
+    amount: Decimal | None = None
+    pending_write: Mapping[str, Any] | None = None
 
     for event in ordered:
         if event.seq != expected_seq:
@@ -188,6 +226,14 @@ def replay(events: Iterable[EventRecord], *, verify_hashes: bool = True) -> Proj
                 raise ReplayError("created 事件只能出现一次")
             state = TicketState(event.to_state or TicketState.PLANNED.value)
             version = 0
+            # 0010 之后 API 建单会把投影字段写进 created payload；执行器建的历史
+            # 工单没有这些键，折叠结果就是 None（与 DB 的 NULL 一致）。
+            org_id = event.payload.get("org_id")
+            period = event.payload.get("period")
+            systems = _systems_from_payload(event.payload.get("systems"))
+            write_level = event.payload.get("write_level")
+            amount = _amount_from_payload(event.payload.get("amount"))
+            pending_write = _pending_from_payload(event.payload.get("pending_write"))
             continue
 
         if event.event_type == TRANSITION_EVENT:
@@ -213,6 +259,12 @@ def replay(events: Iterable[EventRecord], *, verify_hashes: bool = True) -> Proj
                 raise ReplayError(f"seq={event.seq} 的状态迁移非法：{exc}") from exc
             state = TicketState(target)
             version += 1
+            # 「锁定写计划」本身也是投影的一部分：审批/驳回/终止会显式写
+            # ``pending_write: null``，log 只有出现这个键才覆盖（见 store.transition）。
+            if "pending_write" in event.payload:
+                pending_write = _pending_from_payload(
+                    event.payload.get("pending_write")
+                )
             continue
 
         if event.event_type == STEP_EVENT:
@@ -227,7 +279,19 @@ def replay(events: Iterable[EventRecord], *, verify_hashes: bool = True) -> Proj
 
     if state is None:
         raise ReplayError("事件序列缺少 created 事件")
-    return Projection(state=state, version=version, last_seq=ordered[-1].seq, last_hash=prev_hash, steps=steps)
+    return Projection(
+        state=state,
+        version=version,
+        last_seq=ordered[-1].seq,
+        last_hash=prev_hash,
+        steps=steps,
+        org_id=org_id,
+        period=period,
+        systems=systems,
+        write_level=write_level,
+        amount=amount,
+        pending_write=pending_write,
+    )
 
 
 def replay_state(events: Sequence[EventRecord]) -> TicketState:

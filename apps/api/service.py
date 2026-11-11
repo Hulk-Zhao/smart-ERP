@@ -405,10 +405,19 @@ async def approve_ticket(
         "approved",
         TransitionContext(approved=True),
     )
+    # 不直接改投影：事件与投影同事务，审批与执行器共用 TicketStore.transition。
+    version = await container.tickets.transition(
+        tenant_id=session.tenant_id,
+        ticket_id=ticket.ticket_id,
+        target=TicketState.EXECUTING,
+        trigger="approved",
+        context=TransitionContext(approved=True),
+        actor_id=session.user_id,
+        payload={"pending_write": None},
+    )
     ticket.state = TicketState.EXECUTING
-    ticket.version += 1
+    ticket.version = version
     ticket.pending_write = None
-    await container.tickets.save(ticket)
 
     return ActionOut(
         ticket_id=ticket.ticket_id,
@@ -485,7 +494,13 @@ async def _execute_pending_write(
         after_ref=result.write.after_ref,
     )
     step.audit_image_id = image.id
-    ticket.steps.append(step)
+    # 步骤也是链的一部分：落 ticket_step 行 + step 事件，不能只 append 到内存投影。
+    await container.tickets.record_step(
+        tenant_id=ticket.tenant_id,
+        ticket_id=ticket.ticket_id,
+        step=step,
+        request_hash=request_fingerprint(pending.payload),
+    )
     return step
 
 
@@ -534,10 +549,18 @@ async def reject_ticket(
     resolve_transition(
         ticket.state, TicketState.REJECTED, "rejected", TransitionContext()
     )
+    version = await container.tickets.transition(
+        tenant_id=session.tenant_id,
+        ticket_id=ticket.ticket_id,
+        target=TicketState.REJECTED,
+        trigger="rejected",
+        context=TransitionContext(),
+        actor_id=session.user_id,
+        payload={"pending_write": None},
+    )
     ticket.state = TicketState.REJECTED
-    ticket.version += 1
+    ticket.version = version
     ticket.pending_write = None
-    await container.tickets.save(ticket)
     return ActionOut(
         ticket_id=ticket.ticket_id,
         action="reject",
@@ -587,10 +610,18 @@ async def cancel_ticket(
         touches_fund=ticket.touches_fund,
     )
     resolve_transition(ticket.state, TicketState.TERMINATED, trigger, context)
+    version = await container.tickets.transition(
+        tenant_id=session.tenant_id,
+        ticket_id=ticket.ticket_id,
+        target=TicketState.TERMINATED,
+        trigger=trigger,
+        context=context,
+        actor_id=session.user_id,
+        payload={"pending_write": None},
+    )
     ticket.state = TicketState.TERMINATED
-    ticket.version += 1
+    ticket.version = version
     ticket.pending_write = None
-    await container.tickets.save(ticket)
     return ActionOut(
         ticket_id=ticket.ticket_id,
         action="cancel",
@@ -877,10 +908,18 @@ async def decide_approval(
         resolve_transition(
             ticket.state, TicketState.REJECTED, "rejected", TransitionContext()
         )
+        version = await container.tickets.transition(
+            tenant_id=session.tenant_id,
+            ticket_id=ticket.ticket_id,
+            target=TicketState.REJECTED,
+            trigger="rejected",
+            context=TransitionContext(),
+            actor_id=session.user_id,
+            payload={"pending_write": None},
+        )
         ticket.state = TicketState.REJECTED
-        ticket.version += 1
+        ticket.version = version
         ticket.pending_write = None
-        await container.tickets.save(ticket)
 
     required = _required_roles(container, ticket)
     return ApprovalDecisionOut(

@@ -14,6 +14,7 @@ from apps.api import configure_container, reset_container
 from apps.api.container import ApiContainer
 from apps.api.recon_snapshot import BatchSnapshot, SnapshotLine
 from apps.api.recon_store import FileReconStore, NewEvent
+from apps.api.store import TicketRepository
 from apps.platform.policy.levels import SceneSpec, WriteLevel
 from apps.recon.models import LineStatus
 
@@ -86,6 +87,7 @@ def _rebuild_container(store_path) -> tuple[ApiContainer, str]:
         scenes={cf.SCENE: SceneSpec(code=cf.SCENE, max_level=WriteLevel.W2)},
         recon_store=FileReconStore(store_path),
         price_book=cf.EmptyPriceBook(),
+        tickets=TicketRepository(),
     )
     container.actions.register(cf._reverse_action())
     container.actions.register(cf._forward_action())
