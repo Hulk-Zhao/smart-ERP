@@ -111,15 +111,10 @@ services:
       ERP_METRICS_ENABLED: "${ERP_METRICS_ENABLED:-true}"
       ERP_METRICS_PATH: "${ERP_METRICS_PATH:-/metrics}"
       # demo 静态会话：默认关闭；开启时 ERP_APP_ENV 必须为 demo，否则 api 拒绝启动。
-      # 令牌只在部署期注入，API 不提供任何签发端点（apps/api/demo_session.py）。
+      # 身份以 JSON 数组注入（每条一枚令牌 / 一个 user_id），可同时存在发起人与
+      # 审批人，用于演示双人复核；API 不提供任何签发端点（apps/api/demo_session.py）。
       ERP_DEMO_SESSION_ENABLED: "${ERP_DEMO_SESSION_ENABLED:-}"
-      ERP_DEMO_SESSION_TOKEN: "${ERP_DEMO_SESSION_TOKEN:-}"
-      ERP_DEMO_SESSION_USER_ID: "${ERP_DEMO_SESSION_USER_ID:-}"
-      ERP_DEMO_SESSION_TENANT_ID: "${ERP_DEMO_SESSION_TENANT_ID:-}"
-      ERP_DEMO_SESSION_ROLES: "${ERP_DEMO_SESSION_ROLES:-}"
-      ERP_DEMO_SESSION_ORGS: "${ERP_DEMO_SESSION_ORGS:-}"
-      ERP_DEMO_SESSION_PERIODS: "${ERP_DEMO_SESSION_PERIODS:-}"
-      ERP_DEMO_SESSION_SYSTEMS: "${ERP_DEMO_SESSION_SYSTEMS:-}"
+      ERP_DEMO_SESSION_IDENTITIES: "${ERP_DEMO_SESSION_IDENTITIES:-}"
     ports:
       # 只绑回环：公网入口只有 hk-web 的 nginx（/erp/api/ → 127.0.0.1:8010），
       # 宿主不再监听 0.0.0.0。4C4G 演示机若确需宿主直连，显式设 ERP_API_BIND=0.0.0.0。

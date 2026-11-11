@@ -136,14 +136,25 @@ for _ in $(seq 1 60); do
 done
 [[ -z "${unhealthy}" ]] || { printf '%s\n' "${states}" >&2; die "仍有容器未 healthy"; }
 
-TOKEN="$(sed -n 's/^ERP_DEMO_SESSION_TOKEN=//p' "${DEMO_DIR}/.env")"
+IDENTITIES="$(sed -n 's/^ERP_DEMO_SESSION_IDENTITIES=//p' "${DEMO_DIR}/.env")"
+token_for() {
+  printf '%s' "${IDENTITIES}" | grep -o '{[^{}]*}' \
+    | grep "\"user_id\":\"$1" \
+    | sed -n 's/.*"token":"\([^"]*\)".*/\1/p' || true
+}
+INITIATOR_TOKEN="$(token_for 'aaaaaaaa')"
+APPROVER_TOKEN="$(token_for 'eeeeeeee')"
+CFO_TOKEN="$(token_for 'dddddddd')"
 cat <<EOF
 
 栈已就绪：
   web     http://localhost:${ERP_WEB_PORT:-8088}/          （本机 nginx 不带 /demo/smart-erp/ 前缀）
   api     http://localhost:${ERP_API_PORT:-8010}/healthz
-  session curl -H 'X-Session-Token: ${TOKEN}' \\
+  session curl -H 'X-Session-Token: ${INITIATOR_TOKEN}' \\
           'http://localhost:${ERP_API_PORT:-8010}/v1/auth/session'
   u8 桩   http://127.0.0.1:8021/stub/receipts   （模拟外部系统，不是真 U8）
           写入是否真落在桩上：curl -s http://127.0.0.1:8021/stub/requests
+  双人复核：发起人 ${INITIATOR_TOKEN}
+            审批人（finance）${APPROVER_TOKEN}
+            被类别闸拒的反例（CFO，无 finance）${CFO_TOKEN}
 EOF

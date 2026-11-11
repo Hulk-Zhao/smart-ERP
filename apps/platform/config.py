@@ -7,12 +7,20 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 from uuid import UUID
 
 ENV_PREFIX = "ERP_"
+
+#: demo 静态身份条目的字段闭集；缺字段或多字段都启动失败。
+_DEMO_IDENTITY_FIELDS = frozenset(
+    {"token", "user_id", "tenant_id", "roles", "org_ids", "periods", "system_ids"}
+)
+_DEMO_IDENTITY_LIST_FIELDS = ("roles", "org_ids", "periods", "system_ids")
+_DEMO_TOKEN_MIN_LENGTH = 16
 
 _DEFAULT_DATABASE_URL = "postgresql+asyncpg://erp_app@127.0.0.1:5432/smart_erp"
 
@@ -24,11 +32,6 @@ def _bool_env(name: str, default: bool = False) -> bool:
     if raw is None or raw.strip() == "":
         return default
     return raw.strip().lower() in _TRUTHY
-
-
-def _list_env(name: str) -> tuple[str, ...]:
-    raw = _env(name) or ""
-    return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
 class ConfigError(ValueError):
@@ -50,6 +53,108 @@ def _int_env(name: str, default: int) -> int:
 
 
 @dataclass(frozen=True, slots=True)
+class DemoIdentity:
+    """demo 档的一枚静态身份；一枚令牌对应一个人，不共享、不代登录。"""
+
+    token: str
+    user_id: UUID
+    tenant_id: UUID
+    roles: tuple[str, ...]
+    org_ids: tuple[str, ...]
+    periods: tuple[str, ...]
+    system_ids: tuple[str, ...]
+
+
+def parse_demo_identities(raw: str) -> tuple[DemoIdentity, ...]:
+    """解析 ``ERP_DEMO_SESSION_IDENTITIES``；任何一处不合法都启动失败。
+
+    fail-closed：不跳过坏条目、不做默认填充——半套身份跑起来比不跑更危险。
+    """
+
+    cleaned = (raw or "").strip()
+    if not cleaned:
+        raise ConfigError(
+            "ERP_DEMO_SESSION_ENABLED=true 时 ERP_DEMO_SESSION_IDENTITIES 不能为空"
+        )
+    try:
+        payload = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise ConfigError(
+            f"ERP_DEMO_SESSION_IDENTITIES 必须是合法 JSON（{exc.msg}，位置 {exc.pos}）"
+        ) from exc
+    if not isinstance(payload, list):
+        raise ConfigError("ERP_DEMO_SESSION_IDENTITIES 必须是一个 JSON 数组（每个元素一个身份）")
+    if not payload:
+        raise ConfigError("ERP_DEMO_SESSION_IDENTITIES 不能是空数组（至少一个身份）")
+
+    identities: list[DemoIdentity] = []
+    seen_tokens: set[str] = set()
+    seen_users: set[UUID] = set()
+    for index, entry in enumerate(payload):
+        label = f"ERP_DEMO_SESSION_IDENTITIES[{index}]"
+        if not isinstance(entry, dict):
+            raise ConfigError(f"{label} 必须是对象，实际为 {type(entry).__name__}")
+        missing = sorted(_DEMO_IDENTITY_FIELDS - set(entry))
+        if missing:
+            raise ConfigError(f"{label} 缺少字段：" + "、".join(missing))
+        unknown = sorted(set(entry) - _DEMO_IDENTITY_FIELDS)
+        if unknown:
+            raise ConfigError(f"{label} 含未知字段：" + "、".join(unknown))
+
+        token = entry["token"]
+        if not isinstance(token, str) or not token.strip():
+            raise ConfigError(f"{label}.token 必须是非空字符串")
+        token = token.strip()
+        if len(token) < _DEMO_TOKEN_MIN_LENGTH:
+            raise ConfigError(
+                f"{label}.token 至少 {_DEMO_TOKEN_MIN_LENGTH} 个字符（避免误用短串当令牌）"
+            )
+        if token in seen_tokens:
+            raise ConfigError(f"{label}.token 与其他身份重复（令牌必须唯一）")
+
+        parsed_uuids: dict[str, UUID] = {}
+        for key in ("user_id", "tenant_id"):
+            raw_uuid = entry[key]
+            if not isinstance(raw_uuid, str):
+                raise ConfigError(f"{label}.{key} 必须是 UUID 字符串")
+            try:
+                parsed_uuids[key] = UUID(raw_uuid)
+            except ValueError as exc:
+                raise ConfigError(f"{label}.{key} 必须是 UUID，实际为 {raw_uuid!r}") from exc
+        if parsed_uuids["user_id"] in seen_users:
+            raise ConfigError(f"{label}.user_id 与其他身份重复（一人一条）")
+
+        parsed_lists: dict[str, tuple[str, ...]] = {}
+        for key in _DEMO_IDENTITY_LIST_FIELDS:
+            value = entry[key]
+            if not isinstance(value, list) or not value:
+                raise ConfigError(f"{label}.{key} 必须是非空字符串数组")
+            items: list[str] = []
+            for item in value:
+                if not isinstance(item, str) or not item.strip():
+                    raise ConfigError(f"{label}.{key} 只能包含非空字符串")
+                items.append(item.strip())
+            if len(set(items)) != len(items):
+                raise ConfigError(f"{label}.{key} 存在重复值")
+            parsed_lists[key] = tuple(items)
+
+        seen_tokens.add(token)
+        seen_users.add(parsed_uuids["user_id"])
+        identities.append(
+            DemoIdentity(
+                token=token,
+                user_id=parsed_uuids["user_id"],
+                tenant_id=parsed_uuids["tenant_id"],
+                roles=parsed_lists["roles"],
+                org_ids=parsed_lists["org_ids"],
+                periods=parsed_lists["periods"],
+                system_ids=parsed_lists["system_ids"],
+            )
+        )
+    return tuple(identities)
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     """进程级只读配置。字段顺序即 `.env.example` 的建议顺序。"""
 
@@ -65,14 +170,10 @@ class Settings:
     lock_timeout_ms: int = 3_000
     idle_in_transaction_timeout_ms: int = 60_000
     #: demo 档静态会话（部署期注入，默认关闭）；只读当前会话，不签发新令牌。
+    #: 值为 JSON 数组，每条是一个 ``{token, user_id, tenant_id, roles, org_ids,
+    #: periods, system_ids}`` 身份；多身份用于演示「发起人 ≠ 审批人」的双人复核。
     demo_session_enabled: bool = False
-    demo_session_token: str = ""
-    demo_session_user_id: str = ""
-    demo_session_tenant_id: str = ""
-    demo_session_roles: tuple[str, ...] = ()
-    demo_session_org_ids: tuple[str, ...] = ()
-    demo_session_periods: tuple[str, ...] = ()
-    demo_session_system_ids: tuple[str, ...] = ()
+    demo_session_identities: str = ""
     #: 助手建议（OpenAI 兼容）：密钥不参与 repr，日志只打主机名与模型名。
     llm_base_url: str = ""
     llm_api_key: str = field(default="", repr=False)
@@ -96,7 +197,7 @@ class Settings:
         self._validate_demo_session()
 
     def _validate_demo_session(self) -> None:
-        """demo 静态会话只能活在 demo 档；缺字段一律启动失败，不留半套身份。"""
+        """demo 静态会话只能活在 demo 档；身份不全一律启动失败，不留半套身份。"""
 
         if not self.demo_session_enabled:
             return
@@ -105,33 +206,8 @@ class Settings:
                 "ERP_DEMO_SESSION_ENABLED 只允许在 ERP_APP_ENV=demo 时开启，"
                 f"当前 ERP_APP_ENV={self.app_env!r}（full/生产档位不得继承该开关）"
             )
-        missing = [
-            name
-            for name, value in (
-                ("ERP_DEMO_SESSION_TOKEN", self.demo_session_token),
-                ("ERP_DEMO_SESSION_USER_ID", self.demo_session_user_id),
-                ("ERP_DEMO_SESSION_TENANT_ID", self.demo_session_tenant_id),
-                ("ERP_DEMO_SESSION_ROLES", ",".join(self.demo_session_roles)),
-                ("ERP_DEMO_SESSION_ORGS", ",".join(self.demo_session_org_ids)),
-                ("ERP_DEMO_SESSION_PERIODS", ",".join(self.demo_session_periods)),
-                ("ERP_DEMO_SESSION_SYSTEMS", ",".join(self.demo_session_system_ids)),
-            )
-            if not value.strip()
-        ]
-        if missing:
-            raise ConfigError(
-                "ERP_DEMO_SESSION_ENABLED=true 时以下键不能为空：" + "、".join(missing)
-            )
-        if len(self.demo_session_token) < 16:
-            raise ConfigError("ERP_DEMO_SESSION_TOKEN 至少 16 个字符（避免误用短串当令牌）")
-        for name, raw in (
-            ("ERP_DEMO_SESSION_USER_ID", self.demo_session_user_id),
-            ("ERP_DEMO_SESSION_TENANT_ID", self.demo_session_tenant_id),
-        ):
-            try:
-                UUID(raw)
-            except ValueError as exc:
-                raise ConfigError(f"{name} 必须是 UUID，实际为 {raw!r}") from exc
+        # 解析即校验：空映射、坏 JSON、坏 UUID、重复令牌一律在这里炸掉。
+        parse_demo_identities(self.demo_session_identities)
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -148,13 +224,7 @@ class Settings:
             lock_timeout_ms=_int_env("DB_LOCK_TIMEOUT_MS", 3_000),
             idle_in_transaction_timeout_ms=_int_env("DB_IDLE_TX_TIMEOUT_MS", 60_000),
             demo_session_enabled=_bool_env("DEMO_SESSION_ENABLED"),
-            demo_session_token=(_env("DEMO_SESSION_TOKEN") or "").strip(),
-            demo_session_user_id=(_env("DEMO_SESSION_USER_ID") or "").strip(),
-            demo_session_tenant_id=(_env("DEMO_SESSION_TENANT_ID") or "").strip(),
-            demo_session_roles=_list_env("DEMO_SESSION_ROLES"),
-            demo_session_org_ids=_list_env("DEMO_SESSION_ORGS"),
-            demo_session_periods=_list_env("DEMO_SESSION_PERIODS"),
-            demo_session_system_ids=_list_env("DEMO_SESSION_SYSTEMS"),
+            demo_session_identities=(_env("DEMO_SESSION_IDENTITIES") or "").strip(),
             llm_base_url=(_env("LLM_BASE_URL") or "").strip(),
             llm_api_key=(_env("LLM_API_KEY") or "").strip(),
             llm_model=(_env("LLM_MODEL") or "").strip(),

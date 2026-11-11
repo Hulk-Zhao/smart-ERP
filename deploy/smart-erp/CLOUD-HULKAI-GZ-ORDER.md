@@ -220,14 +220,15 @@ web /                 200
 ```
 ERP_APP_ENV=demo
 ERP_DEMO_SESSION_ENABLED=true
-ERP_DEMO_SESSION_TOKEN=demo-session-token-2026-11-11
-ERP_DEMO_SESSION_USER_ID=dddddddd-dddd-4ddd-8ddd-dddddddddddd
-ERP_DEMO_SESSION_TENANT_ID=a927f664-796d-5a6c-bb43-c052cd4a0e2e
-ERP_DEMO_SESSION_ROLES=reviewer,approver,cfo
-ERP_DEMO_SESSION_ORGS=ORG-SZ
-ERP_DEMO_SESSION_PERIODS=2026-07,2026-08,2026-09
-ERP_DEMO_SESSION_SYSTEMS=u8,wms,sap
+ERP_DEMO_SESSION_IDENTITIES=[{"token":"demo-initiator-token-2026-11-11","user_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","tenant_id":"a927f664-796d-5a6c-bb43-c052cd4a0e2e","roles":["operator"],"org_ids":["ORG-SZ"],"periods":["2026-07","2026-08","2026-09"],"system_ids":["u8","wms","sap"]},{"token":"demo-reviewer-token-2026-11-11","user_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","tenant_id":"a927f664-796d-5a6c-bb43-c052cd4a0e2e","roles":["reviewer","finance"],"org_ids":["ORG-SZ"],"periods":["2026-07","2026-08","2026-09"],"system_ids":["u8","wms","sap"]},{"token":"demo-cfo-token-2026-11-11","user_id":"dddddddd-dddd-4ddd-8ddd-dddddddddddd","tenant_id":"a927f664-796d-5a6c-bb43-c052cd4a0e2e","roles":["reviewer","approver","cfo"],"org_ids":["ORG-SZ"],"periods":["2026-07","2026-08","2026-09"],"system_ids":["u8","wms","sap"]},{"token":"demo-approver-2-token-2026-11-11","user_id":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","tenant_id":"a927f664-796d-5a6c-bb43-c052cd4a0e2e","roles":["reviewer","approver","finance"],"org_ids":["ORG-SZ"],"periods":["2026-07","2026-08","2026-09"],"system_ids":["u8","wms","sap"]}]
 ```
+
+IDENTITIES 是 JSON 数组，每条身份各自声明 roles / orgs / periods / systems。
+演示 W2 双人复核：`bbbb...` 的 reviewer 票由种子预置；现场先用 `dddd...`（CFO，
+无 finance）点 approver 被类别闸拒，再用 `eeee...`（持有 finance）点 approver 通过
+（`satisfied=true`），最后由 `aaaa...` 触发执行。`dddd...` 故意不给 finance，
+它是「规则真的在拦」的反例。
+身份不全 / 坏 UUID / 令牌或 user_id 重复 / 空映射都会让 api 启动失败。
 
 正式生产必须 `ERP_DEMO_SESSION_ENABLED=false`，改用真实令牌验收。
 

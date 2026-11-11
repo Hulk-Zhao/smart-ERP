@@ -182,6 +182,20 @@ export ERP_U8_BASE_URL=http://127.0.0.1:8013          # PowerShell: $env:ERP_U8_
 > `E-AUTHZ-001`（职责分离约束，不是缺陷）。单令牌环境请按「审批人点票 +
 > 执行体触发」两步演示，不要用审批人令牌冒充发起人。
 
+### 演示身份（`ERP_DEMO_SESSION_IDENTITIES`，仅 demo 档）
+
+| user_id | roles | 用途 |
+| --- | --- | --- |
+| `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa` | `operator` | 发起工单 |
+| `bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb` | `reviewer,finance` | 投 reviewer 票（种子已预置） |
+| `dddddddd-dddd-4ddd-8ddd-dddddddddddd` | `reviewer,approver,cfo`（无 `finance`） | 反例：类别闸应拒绝 |
+| `eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee` | `reviewer,approver,finance` | 投 approver 票 |
+
+> `bbbbbbbb` 只持有 `reviewer,finance` **不是漏配**：reviewer 票只校验 `reviewer` 角色
+> （`ApprovalService._assert_role_capability`）+ 场景类别 `finance`
+> （`BusinessCategoryPolicy.assert_reviewer`）；`approver` 票才接受 `approver` 或 `cfo`。
+> 两票由不同人各持一个角色即可，不要给它补 `approver`。
+
 核对「单据到底有没有到 / 有没有冲销」：
 
 ```bash
