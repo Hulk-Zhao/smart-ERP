@@ -126,8 +126,8 @@ curl -X POST http://127.0.0.1:8021/stub/reset
 ```
 
 > 端口一律以 `docker compose config` 的输出为准（当前 `u8-stub` 的宿主映射是
-> `127.0.0.1:8021:8021`）。**`8013` 是 compensation 的容器内端口，不是桩**，
-> 打到 8013 可能返回 200 却没清任何东西。
+> `127.0.0.1:8021:8021`）。**`8013` 是 compensation 的容器内端口，只 `expose`
+> 不发布宿主**：在本机 curl 8013 会直接连接失败；它绝不是桩。
 
 **为什么重灌后必须重启 `erp_api`**：种子把工单的 `pending_write.idem_key` 固定成
 `demo-demo-w2-write-9001`，而写结果的幂等缓存在 **API 进程内**
