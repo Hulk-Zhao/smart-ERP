@@ -296,6 +296,11 @@ registry.observe_recon_result(result, duration_seconds=elapsed)  # result 为 ap
    `smart_erp_audit_chain_broken` 就是反例：写入点在 scheduler，而 `/metrics` 只挂在 api/web
    （`apps/main.py:35`）与补偿执行器（`apps/agents/compensation_worker.py:302`），唯独没有 scheduler，
    两边不通，所以这条 P0 继续保持注释——不明就里地取消注释，等于恢复一条哑告警。
+6. **规则不评估 = 规则不存在**：仓库里没有任何抓取/评估进程时，写好的规则与注释掉的规则在故障当天
+   没有区别。2026-11-11 核实：`deploy/` 全目录没有 Prometheus / Alertmanager，也没有
+   `scrape_configs` / `rule_files`；compose 的 9 个服务里没有任何进程读取 `alerts.rules.yaml`。
+   当前 2 条「生效」规则的真实状态只是「语法合法 + 有采集点」，**不构成可观测性**。
+   评估器（含抓取配置）接入前，验收与文档不得写「已告警」「线上有告警」，只能写「规则已定义、待评估器」。
 
 ### 6.1.3 采集点审计表（基准 `origin/main` `0f597b3`，2026-11-11）
 
@@ -318,10 +323,15 @@ git grep -n -E "\.(record_ticket|record_stage|record_recon_batch|observe_recon_r
 > `feat/audit-chain-metric-wiring`（`4473014`）上，未合入 main，故不计入上面的 8 行。
 > 即便合入，它写的是 scheduler 进程的内存，而 `/metrics` 只在 web 进程——见第 5 条判据。
 
+> **更进一步：连那 2 条「生效」规则也没有评估器。** 2026-11-11 核实：`deploy/` 全目录无
+> Prometheus / Alertmanager，无 `scrape_configs` / `rule_files`，compose 的 9 个服务里没有进程
+> 读取 `alerts.rules.yaml`。它们的序列写得出、promtool 也能通过，但没有任何进程会评估规则，
+> 因此故障发生时与注释掉的规则没有区别。这就是 §6.1.2 第 6 条的由来。
+
 | 指标 | 生产采集点 | 是否仍被 `alerts.rules.yaml` 引用 | 取消注释的前置条件 |
 |---|---|---|---|
-| `smart_erp_recon_batches_total` | `apps/api/service.py:991` | 是，启用（SmartErpReconBatchFailureRateHigh） | —（已满足） |
-| `smart_erp_recon_batch_duration_seconds` | `apps/api/service.py:991` | 是，启用（SmartErpReconBatchP95Slow） | —（已满足） |
+| `smart_erp_recon_batches_total` | `apps/api/service.py:991` | 是，启用（SmartErpReconBatchFailureRateHigh；但部署内无评估器） | 采集点已满足；仍缺抓取与评估器（§6.1.2 第 6 条） |
+| `smart_erp_recon_batch_duration_seconds` | `apps/api/service.py:991` | 是，启用（SmartErpReconBatchP95Slow；但部署内无评估器） | 同上 |
 | `smart_erp_recon_supplier_lines_total` | `apps/api/service.py:991` | 否（有采集点、无规则） | — |
 | `smart_erp_recon_batch_auto_match_ratio` | `apps/api/service.py:991` | 否（有采集点、无规则） | — |
 | `smart_erp_recon_degraded_batches_total` | `apps/api/service.py:991` | 否（有采集点、无规则） | — |
@@ -377,9 +387,11 @@ git grep -n -E "\.(record_ticket|record_stage|record_recon_batch|observe_recon_r
 阈值可比「批次未自动完成率 2%」宽；分母用已处理批次数，避免夜间空窗把 1 次失败放大成高失败率。
 **5% / 15m 只是候选**，必须等一个结账周期的真实基线再定，不凭猜启用。
 
-> 结论：`/metrics` 已由 `apps/main.py:35` 挂载（仍受 `ERP_METRICS_ENABLED` 控制），
-> 但**只有对账链路真正在产出序列且能被 scrape 到**；其余指标须按此表逐项接线后才能进规则。
-> 「接线」= 写入进程 === serve `/metrics` 的进程，二者不一致时视为未接线。
+> 结论：`/metrics` 已由 `apps/main.py:35` 与补偿执行器 `apps/agents/compensation_worker.py:302` 挂载
+> （api/web 仍受 `ERP_METRICS_ENABLED` 控制），但只有对账链路与（full 档）补偿执行器真正在产出序列。
+> 更关键的是：**部署内没有任何评估器**——没有抓取、没有 Prometheus / Alertmanager，
+> 规则写了也不会被评估。所以「接线」需同时满足两件事：指标写入进程 === serve `/metrics` 的进程，
+> 且存在抓取与规则评估进程；缺一即未接线。当前 2 条「生效」规则同样不产生告警。
 
 ### 6.1.4 补偿队列与时钟口径
 
@@ -458,16 +470,27 @@ smart_erp_audit_chain_broken 0
 
 ## 7. 告警规则
 
-规则文件：[alerts.rules.yaml](./alerts.rules.yaml)（Prometheus rule file，`groups[0].rules` 共 6 条）。
+规则文件：[alerts.rules.yaml](./alerts.rules.yaml)（Prometheus rule file，`groups[0].rules` 共 12 条：生效 2、已注释 9、建议未启用 1）。
 
-| 告警 | 级别 | `for` | 触发口径 | 为什么值得半夜叫醒人 |
-|---|---|---|---|---|
-| `SmartErpWriteFailureRateHigh` | P1 | 10m | `write` 阶段失败率 > 5% | 写入是唯一产生外部副作用的动作，失败即数据分叉，越晚核对范围越大 |
-| `SmartErpUnresolvedTicketsGrowing` | P1 | 10m | `max()` 后 30 分钟增量 > 5 且总量 > 10 | unresolved 只增不减 = 没人接住的失败在堆积，会变成对账差异与付款错误 |
-| `SmartErpCompensationBacklogHigh` | P1 | 10m | 10 分钟内积压 > 20 | 补偿积压意味着外部系统保留着该撤未撤的数据，可能已被下游消费 |
-| `SmartErpReconBatchFailureRateHigh` | P1 | 15m | 待人工 + 无法对账占比 > 2% | 对账是关账前置，夜间不修复会让人工队列指数级放大 |
-| `SmartErpAuditChainBroken` | **P0** | 1m | `max(smart_erp_audit_chain_broken) > 0` | 审计链断链后「谁改了什么」无法自证，每小时都产生新的不可信记录 |
-| `SmartErpReconBatchP95Slow` | P2 | 10m | 批次 P95 > 120s | 只影响速度不影响正确性，工作时间处理；与失败率告警同发时升级 P1 |
+> **部署内没有评估器**：`deploy/` 全目录没有 Prometheus / Alertmanager，也没有 `scrape_configs` /
+> `rule_files` 配置，compose 的 9 个服务没有任何进程读取本文件。下表「生效」只表示**未被注释、
+> 且依赖指标有真实采集点**，不表示线上有告警——在评估器（含抓取配置）接入前，这 2 条与注释掉的
+> 规则在故障当天没有区别。依据见 §6.1.2 第 6 条。
+
+| 告警 | 状态 | 级别 | `for` | 触发口径 | 为什么值得半夜叫醒人 |
+|---|---|---|---|---|---|
+| `SmartErpReconBatchFailureRateHigh` | 生效·**无评估器** | P1 | 15m | 待人工 + 无法对账占比 > 2% | 对账是关账前置，夜间不修复会让人工队列指数级放大 |
+| `SmartErpReconBatchP95Slow` | 生效·**无评估器** | P2 | 10m | 批次 P95 > 120s | 只影响速度不影响正确性，工作时间处理；与失败率告警同发时升级 P1 |
+| `SmartErpWriteFailureRateHigh` | 已注释（待 apps/write） | P1 | 10m | `write` 阶段失败率 > 5% | 写入是唯一产生外部副作用的动作，失败即数据分叉，越晚核对范围越大 |
+| `SmartErpUnresolvedTicketsGrowing` | 已注释（待抓取 + 30m 历史） | P1 | 10m | `max()` 后 30 分钟增量 > 5 且总量 > 10 | unresolved 只增不减 = 没人接住的失败在堆积，会变成对账差异与付款错误 |
+| `SmartErpCompensationOverdueP2` | 已注释（full 档待抓取） | P2 | 5m | `overdue > 0` | 补偿到期未被领取，说明 claim 侧开始停摆 |
+| `SmartErpCompensationOverdueP1Volume` | 已注释 | P1 | 5m | `overdue > 5` | 量级说明不是单条卡住，而是领取链路大面积不工作 |
+| `SmartErpCompensationOverdueP1Duration` | 已注释 | P1 | 15m | `overdue > 0` 持续 15m | 持续即停摆：该撤未撤的数据留在对方系统，可能已被下游消费 |
+| `SmartErpCompensationFutureRetry` | 已注释 | P1 | 1m | `future_retry > 0` | 唯一能抓到时钟回拨的信号：补偿被推到未来等于永久不执行 |
+| `SmartErpClockSkewP2` | 已注释 | P2 | 1m | `|skew| ≥ 5s` | 根因信号，先于「任务卡住」出现，留出止损窗口 |
+| `SmartErpClockSkewP1` | 已注释 | P1 | 1m | `|skew| ≥ 30s` | 回拨幅度已足以让补偿、超时与租约判断同时失真 |
+| `SmartErpAuditChainBroken` | 已注释（P0，等分支合入 + 端点） | **P0** | 1m | `max(smart_erp_audit_chain_broken) > 0` | 审计链断链后「谁改了什么」无法自证，每小时都产生新的不可信记录 |
+| `SmartErpReconRunFailureRateHigh` | 建议·未启用（等基线） | P1 | 15m | 对账硬失败率 > 5% | 硬错误比业务分流严重，但阈值需真实基线，不凭猜启用 |
 
 每条规则都带 `annotations.why_paged` 与 `runbook`，解释「为什么叫醒」和「先看哪里」。
 
@@ -491,6 +514,10 @@ Checking /rules/observability/alerts.rules.yaml
 
 > **没有 docker / 拉不到镜像时，不得宣称规则已验证**。此时只能写“YAML 结构已校验，PromQL 未验证”，并把它列为发布阻塞项；配置错误会让 Prometheus 拒绝加载整个 rules 文件，而不是跳过单条。
 
+> **这两层都只证明文件本身**。`SUCCESS: 2 rules found` 不等于「有 2 条告警在盯着线上」——
+> 部署内没有 Prometheus / Alertmanager，也没有抓取配置，没有任何进程会评估它们。
+> 详见 §6.1.2 第 6 条；评估器接入前，验收只能写「规则已定义、待评估器」。
+
 P0 表达式另做真实指标快照求值（不依赖 docker，用于证明告警确实会触发）：
 
 ```text
@@ -511,6 +538,9 @@ audit_chain_broken=1  max()=1  firing=True
 | SLO-3 审计链完整 | 100%，错误预算 0 | `avg_over_time(smart_erp_audit_chain_broken[30d]) == 0`；任一时刻为 1 即消耗全部预算 |
 
 错误预算：SLO-1 按 30 天窗口允许 0.5% 失败；预算耗尽后暂停 W1/W2 自动写入、只保留预演。SLO-2 超阈值不阻断业务，先扩批次切分与并发；SLO-3 无预算，触发即按 P0 冻结写入并保全现场。
+
+> 以上 SLO 都依赖查询/评估端。当前部署内没有 Prometheus，也没有抓取配置，所以这些 SLO
+> **暂时不可计算**，不能当作「已达成的指标」引用（§6.1.2 第 6 条）。
 
 ---
 
@@ -538,7 +568,7 @@ docker run --rm --entrypoint promtool `
   prom/prometheus:latest check rules /rules/observability/alerts.rules.yaml
 ```
 
-必须看到 `SUCCESS: 2 rules found`（当前 12 条里：2 条生效、9 条因「采集点待接线」注释、1 条建议规则待基线，见 §6.1.2/§6.1.3）。**没有 docker / 拉不到镜像时，不得宣称规则已验证**：只能标注“YAML 结构已校验，PromQL 未验证”，并按发布阻塞项处理。
+必须看到 `SUCCESS: 2 rules found`（当前 12 条里：2 条生效、9 条因「采集点待接线」注释、1 条建议规则待基线，见 §6.1.2/§6.1.3）。**没有 docker / 拉不到镜像时，不得宣称规则已验证**：只能标注“YAML 结构已校验，PromQL 未验证”，并按发布阻塞项处理。注意这只证明语法：评估器（Prometheus + 抓取）未接入前，`SUCCESS` 也不代表线上有告警。
 
 3. 确认 `ERP_METRICS_ENABLED` 目标状态：生产如未接入内网抓取就保持关闭；开启时确认 nginx 已 `deny /erp/api/metrics`、且未设置 `ERP_API_BIND=0.0.0.0`（§6.0）。
 
