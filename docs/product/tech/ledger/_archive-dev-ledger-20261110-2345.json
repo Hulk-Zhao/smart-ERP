@@ -1,0 +1,2064 @@
+{
+  "schema_version": 2,
+  "generated_by": "concurrent-dev-board",
+  "updated_at": "2026-11-10 23:45",
+  "append_only": true,
+  "fields": {
+    "seq": "单调递增整数，写入时由写入方分配（本地最大 seq + 1）；排序与「谁覆盖谁」的唯一依据",
+    "ts": "ISO 时间，本地时区，精确到分钟；仅用于展示与时钟异常检测（ts 倒退/未来 ts 告警），不参与排序",
+    "task_id": "任务 ID，如 T302",
+    "task_title": "任务标题（便于人读，可缺）",
+    "stream": "流编号 S0–S8",
+    "type": "状态流转 / 负责人变更 / 补充记录",
+    "from": "原状态标签；补充记录为 —",
+    "to": "新状态标签；补充记录为 —",
+    "actor": "开发者标识（必填）",
+    "evidence": "分支 / 提交 / PR / 产物链接（待评审必填）",
+    "note": "备注 / 验收结论 / 阻塞原因",
+    "payload_before": "变更前状态快照（可选）",
+    "payload_after": "变更后状态快照（可选）"
+  },
+  "entries": [
+    {
+      "ts": "2026-10-26 09:00",
+      "task_id": "T001",
+      "task_title": "仓库骨架、基础镜像与 CI 骨架",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-01",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 1
+    },
+    {
+      "ts": "2026-10-26 09:00",
+      "task_id": "T101",
+      "task_title": "C1 统一数据模型 v1（5 主对象 + Money + 溯源）",
+      "stream": "S1",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-02",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 2
+    },
+    {
+      "ts": "2026-10-26 09:00",
+      "task_id": "T201",
+      "task_title": "金标准样本 500 行夹具与标注口径",
+      "stream": "S2",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-al-01",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 3
+    },
+    {
+      "ts": "2026-10-27 09:00",
+      "task_id": "T102",
+      "task_title": "C2 ActionSpec 与连接器能力清单（describe 六能力）",
+      "stream": "S1",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-02",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 4
+    },
+    {
+      "ts": "2026-10-27 09:00",
+      "task_id": "T601",
+      "task_title": "前端骨架 + OpenAPI 生成客户端 + mock server 联调",
+      "stream": "S6",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-fe-01",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 5
+    },
+    {
+      "ts": "2026-10-27 09:30",
+      "task_id": "T002",
+      "task_title": "C4 策略契约：WriteLevel 枚举与 effective_level 取严公式",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-01",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 6
+    },
+    {
+      "ts": "2026-10-28 10:00",
+      "task_id": "T003",
+      "task_title": "C5 核心库表基线与迁移链规范",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-02",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 7
+    },
+    {
+      "ts": "2026-10-29 09:00",
+      "task_id": "T801",
+      "task_title": "4 个 Dockerfile（多阶段 + slim + 非 root + read_only）",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-ops-01",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 8
+    },
+    {
+      "ts": "2026-10-30 18:20",
+      "task_id": "T001",
+      "task_title": "仓库骨架、基础镜像与 CI 骨架",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "lead-arch",
+      "evidence": "branch: feat/skeleton-ci · PR#12",
+      "note": "pip install -e . + pytest 空跑通过，镜像可构建",
+      "seq": 9
+    },
+    {
+      "ts": "2026-11-01 09:00",
+      "task_id": "T001",
+      "task_title": "仓库骨架、基础镜像与 CI 骨架",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "dev-be-01",
+      "evidence": "branch: feat/skeleton-ci · PR#12",
+      "note": "提测待评审",
+      "seq": 10
+    },
+    {
+      "ts": "2026-11-01 09:00",
+      "task_id": "T101",
+      "task_title": "C1 统一数据模型 v1（5 主对象 + Money + 溯源）",
+      "stream": "S1",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "dev-be-02",
+      "evidence": "tag: contracts/canonical@v1.0 · PR#8",
+      "note": "提测待评审",
+      "seq": 11
+    },
+    {
+      "ts": "2026-11-01 09:00",
+      "task_id": "T201",
+      "task_title": "金标准样本 500 行夹具与标注口径",
+      "stream": "S2",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "dev-al-01",
+      "evidence": "branch: feat/golden-500 · tests/golden/recon/500.csv",
+      "note": "提测待评审",
+      "seq": 12
+    },
+    {
+      "ts": "2026-11-02 09:00",
+      "task_id": "T102",
+      "task_title": "C2 ActionSpec 与连接器能力清单（describe 六能力）",
+      "stream": "S1",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "dev-be-02",
+      "evidence": "branch: feat/connector-sdk · contracts/connector/spec.v1.json",
+      "note": "提测待评审",
+      "seq": 13
+    },
+    {
+      "ts": "2026-11-02 09:00",
+      "task_id": "T601",
+      "task_title": "前端骨架 + OpenAPI 生成客户端 + mock server 联调",
+      "stream": "S6",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "dev-fe-01",
+      "evidence": "branch: feat/web-skeleton · PR#22",
+      "note": "提测待评审",
+      "seq": 14
+    },
+    {
+      "ts": "2026-11-02 09:00",
+      "task_id": "T701",
+      "task_title": "OTel 埋点规范与 SDK 封装（四跳同一 trace）",
+      "stream": "S7",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-02",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 15
+    },
+    {
+      "ts": "2026-11-02 09:30",
+      "task_id": "T002",
+      "task_title": "C4 策略契约：WriteLevel 枚举与 effective_level 取严公式",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "dev-be-01",
+      "evidence": "tag: contracts/policy@v1.0.0 · PR#19",
+      "note": "提测待评审",
+      "seq": 16
+    },
+    {
+      "ts": "2026-11-02 18:00",
+      "task_id": "T201",
+      "task_title": "金标准样本 500 行夹具与标注口径",
+      "stream": "S2",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "dev-al-02",
+      "evidence": "branch: feat/golden-500 · tests/golden/recon/500.csv",
+      "note": "三方样本（3 家客户脱敏）各覆盖价格/数量/税率/缺单四类差异",
+      "seq": 17
+    },
+    {
+      "ts": "2026-11-03 09:00",
+      "task_id": "T501",
+      "task_title": "版面分析与三类单据分类（对账单/送货单/发票）",
+      "stream": "S5",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-al-03",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 18
+    },
+    {
+      "ts": "2026-11-03 09:20",
+      "task_id": "T202",
+      "task_title": "三层匹配（精确/模糊/候选）与歧义标记",
+      "stream": "S2",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-al-01",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 19
+    },
+    {
+      "ts": "2026-11-03 10:00",
+      "task_id": "T003",
+      "task_title": "C5 核心库表基线与迁移链规范",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "dev-be-02",
+      "evidence": "alembic upgrade head / downgrade -1 均通过",
+      "note": "提测待评审",
+      "seq": 20
+    },
+    {
+      "ts": "2026-11-03 18:00",
+      "task_id": "T801",
+      "task_title": "4 个 Dockerfile（多阶段 + slim + 非 root + read_only）",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "lead-arch",
+      "evidence": "branch: feat/dockerfiles · PR#26",
+      "note": "4 镜像均可构建；未使用 latest；.dockerignore 已排除 tests/ 与 docs/",
+      "seq": 21
+    },
+    {
+      "ts": "2026-11-03 19:10",
+      "task_id": "T101",
+      "task_title": "C1 统一数据模型 v1（5 主对象 + Money + 溯源）",
+      "stream": "S1",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "lead-arch",
+      "evidence": "tag: contracts/canonical@v1.0 · PR#8",
+      "note": "缺失≠零（Optional + missing_reason）已单测覆盖；model_version=1.0",
+      "seq": 22
+    },
+    {
+      "ts": "2026-11-04 09:00",
+      "task_id": "T103",
+      "task_title": "连接器 SDK 六能力骨架与 transport 私有化",
+      "stream": "S1",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-02",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 23
+    },
+    {
+      "ts": "2026-11-04 09:00",
+      "task_id": "T301",
+      "task_title": "工单 12 态状态机与迁移表白名单",
+      "stream": "S3",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-03",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 24
+    },
+    {
+      "ts": "2026-11-04 09:00",
+      "task_id": "T502",
+      "task_title": "字段抽取 + 置信度 + bbox 坐标回链",
+      "stream": "S5",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-al-03",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 25
+    },
+    {
+      "ts": "2026-11-04 09:00",
+      "task_id": "T801",
+      "task_title": "4 个 Dockerfile（多阶段 + slim + 非 root + read_only）",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "dev-ops-01",
+      "evidence": "branch: feat/dockerfiles · PR#26",
+      "note": "提测待评审",
+      "seq": 26
+    },
+    {
+      "ts": "2026-11-04 09:00",
+      "task_id": "T802",
+      "task_title": "compose 单文件 + 6 个 profile + dev 覆盖（demo 可起）",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-ops-01",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 27
+    },
+    {
+      "ts": "2026-11-04 10:00",
+      "task_id": "T203",
+      "task_title": "七类归因规则（单价/数量/报废/单位/税率/缺单/重复）",
+      "stream": "S2",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-al-02",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 28
+    },
+    {
+      "ts": "2026-11-04 16:30",
+      "task_id": "T102",
+      "task_title": "C2 ActionSpec 与连接器能力清单（describe 六能力）",
+      "stream": "S1",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "dev-be-02",
+      "evidence": "branch: feat/connector-sdk · contracts/connector/spec.v1.json",
+      "note": "缺 verify 或 level>=W1 无补偿 → 注册期断言失败",
+      "seq": 29
+    },
+    {
+      "ts": "2026-11-04 17:05",
+      "task_id": "T002",
+      "task_title": "C4 策略契约：WriteLevel 枚举与 effective_level 取严公式",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "lead-arch",
+      "evidence": "tag: contracts/policy@v1.0.0 · PR#19",
+      "note": "min(场景,连接器,动作,熔断) 六条单测全绿；W3 注册被拒",
+      "seq": 30
+    },
+    {
+      "ts": "2026-11-05 09:00",
+      "task_id": "T302",
+      "task_title": "C3 工单/事件/步骤/审计 DDL 与唯一约束",
+      "stream": "S3",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-03",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 31
+    },
+    {
+      "ts": "2026-11-05 09:00",
+      "task_id": "T602",
+      "task_title": "P3 任务详情：状态机进度条 + 时间线 + 字段级 diff",
+      "stream": "S6",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-fe-01",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 32
+    },
+    {
+      "ts": "2026-11-05 09:00",
+      "task_id": "T803",
+      "task_title": "C11 .env.example 全量清单 + config schema + 三套环境矩阵",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-ops-01",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 33
+    },
+    {
+      "ts": "2026-11-05 09:10",
+      "task_id": "T004",
+      "task_title": "C10 错误码表与 F1–F8 映射",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-02",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 34
+    },
+    {
+      "ts": "2026-11-05 09:40",
+      "task_id": "T104",
+      "task_title": "通用 REST（MES）连接器：读/预演/写/补偿/校验",
+      "stream": "S1",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-02",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 35
+    },
+    {
+      "ts": "2026-11-05 10:00",
+      "task_id": "T603",
+      "task_title": "P4 复核审批：三方并排 + 证据面板 + 双人互不可见",
+      "stream": "S6",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-fe-02",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 36
+    },
+    {
+      "ts": "2026-11-05 11:40",
+      "task_id": "T003",
+      "task_title": "C5 核心库表基线与迁移链规范",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "dev-be-01",
+      "evidence": "alembic upgrade head / downgrade -1 均通过",
+      "note": "空库与旧库均可升降；命名 NNNN_<stream>_<slug>.py 已写进 README",
+      "seq": 37
+    },
+    {
+      "ts": "2026-11-06 09:00",
+      "task_id": "T401",
+      "task_title": "审计影像表与哈希链（prev_hash + 每日锚点）",
+      "stream": "S4",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-04",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 38
+    },
+    {
+      "ts": "2026-11-06 10:00",
+      "task_id": "T804",
+      "task_title": "C12 镜像 tag 规则、tar 清单与 RELEASES.md 首登记",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-ops-01",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 39
+    },
+    {
+      "ts": "2026-11-06 10:30",
+      "task_id": "T403",
+      "task_title": "审批满足性判定与自审 CHECK 约束",
+      "stream": "S4",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-04",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 40
+    },
+    {
+      "ts": "2026-11-06 14:00",
+      "task_id": "T005",
+      "task_title": "WriteGateway 执行入口与字段 scope 校验",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-01",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 41
+    },
+    {
+      "ts": "2026-11-06 15:30",
+      "task_id": "T006",
+      "task_title": "ScopeGuard 与 RLS 落库（ScopeGuard 编译 SQL 条件）",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-02",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 42
+    },
+    {
+      "ts": "2026-11-06 18:30",
+      "task_id": "T601",
+      "task_title": "前端骨架 + OpenAPI 生成客户端 + mock server 联调",
+      "stream": "S6",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "dev-fe-02",
+      "evidence": "branch: feat/web-skeleton · PR#22",
+      "note": "C6 读接口 mock 下 7 页可走查",
+      "seq": 43
+    },
+    {
+      "ts": "2026-11-07 09:00",
+      "task_id": "T702",
+      "task_title": "指标口径与 OTel→Prometheus 映射（四跳同 trace）",
+      "stream": "S7",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-02",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 44
+    },
+    {
+      "ts": "2026-11-07 10:30",
+      "task_id": "T806",
+      "task_title": "smart-erp.yml CI：compose config 校验 + 镜像构建 + tar 产物",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-ops-01",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 45
+    },
+    {
+      "ts": "2026-11-08 09:00",
+      "task_id": "T701",
+      "task_title": "OTel 埋点规范与 SDK 封装（四跳同一 trace）",
+      "stream": "S7",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "dev-be-02",
+      "evidence": "branch: feat/otel-spec · docs/otel-spec.md v0.3",
+      "note": "提测待评审",
+      "seq": 46
+    },
+    {
+      "ts": "2026-11-08 09:00",
+      "task_id": "T703",
+      "task_title": "六条主链路 E2E（用 C12 镜像跑，非 mock）",
+      "stream": "S7",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-02",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 47
+    },
+    {
+      "ts": "2026-11-08 09:30",
+      "task_id": "T604",
+      "task_title": "空态/错误态全表（F1–F8 各自下一步）",
+      "stream": "S6",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-fe-01",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 48
+    },
+    {
+      "ts": "2026-11-09 10:00",
+      "task_id": "T106",
+      "task_title": "connector-gw：MCP Server + 限流 + 拦截记录 + 沙箱",
+      "stream": "S1",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "dev-be-02",
+      "evidence": "",
+      "note": "领取任务，开始开发",
+      "seq": 49
+    },
+    {
+      "ts": "2026-11-10 09:00",
+      "task_id": "T103",
+      "task_title": "连接器 SDK 六能力骨架与 transport 私有化",
+      "stream": "S1",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "dev-be-02",
+      "evidence": "branch: feat/sdk-transport · PR#31",
+      "note": "提测待评审",
+      "seq": 50
+    },
+    {
+      "ts": "2026-11-10 23:45",
+      "task_id": "T803",
+      "task_title": "C11 .env.example 全量清单 + config schema + 三套环境矩阵",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "dev-ops-01",
+      "evidence": "branch: feat/config-contract · PR#40",
+      "note": "【种子时间戳修正】原 ts=2026-11-11 09:00 由种子「开始时间+6 天」推导，属未来时间戳、非真实发生；已改写为实际修正时刻 2026-11-10 23:45，判定先后以 seq 为准。原备注：提测待评审",
+      "seq": 51
+    },
+    {
+      "ts": "2026-11-10 23:45",
+      "task_id": "T004",
+      "task_title": "C10 错误码表与 F1–F8 映射",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "dev-be-02",
+      "evidence": "branch: feat/error-codes · contracts/errors/codes.v1.json",
+      "note": "【种子时间戳修正】原 ts=2026-11-11 09:10 由种子「开始时间+6 天」推导，属未来时间戳、非真实发生；已改写为实际修正时刻 2026-11-10 23:45，判定先后以 seq 为准。原备注：提测待评审",
+      "seq": 52
+    },
+    {
+      "ts": "2026-11-10 23:45",
+      "task_id": "T403",
+      "task_title": "审批满足性判定与自审 CHECK 约束",
+      "stream": "S4",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "dev-be-04",
+      "evidence": "branch: feat/sod-check · PR#37",
+      "note": "【种子时间戳修正】原 ts=2026-11-12 10:30 由种子「开始时间+6 天」推导，属未来时间戳、非真实发生；已改写为实际修正时刻 2026-11-10 23:45，判定先后以 seq 为准。原备注：提测待评审",
+      "seq": 53
+    },
+    {
+      "ts": "2026-11-10 23:45",
+      "task_id": "T702",
+      "task_title": "指标口径与 OTel→Prometheus 映射（四跳同 trace）",
+      "stream": "S7",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "dev-be-02",
+      "evidence": "branch: feat/metrics-map · PR#46",
+      "note": "【种子时间戳修正】原 ts=2026-11-13 09:00 由种子「开始时间+6 天」推导，属未来时间戳、非真实发生；已改写为实际修正时刻 2026-11-10 23:45，判定先后以 seq 为准。原备注：提测待评审",
+      "seq": 54
+    },
+    {
+      "ts": "2026-11-10 23:45",
+      "task_id": "T604",
+      "task_title": "空态/错误态全表（F1–F8 各自下一步）",
+      "stream": "S6",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "dev-fe-01",
+      "evidence": "branch: feat/error-states · PR#44",
+      "note": "【种子时间戳修正】原 ts=2026-11-14 09:30 由种子「开始时间+6 天」推导，属未来时间戳、非真实发生；已改写为实际修正时刻 2026-11-10 23:45，判定先后以 seq 为准。原备注：提测待评审",
+      "seq": 55
+    },
+    {
+      "ts": "2026-11-10 23:20",
+      "task_id": "T201",
+      "task_title": "金标准样本 500 行夹具与标注口径",
+      "stream": "S2",
+      "type": "补充记录",
+      "from": "已关闭",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "docs/product/tech/ledger/S2.jsonl · fixtures/recon/（4 组场景夹具）",
+      "note": "负责人归一（更正）：dev-al-01 认领、dev-al-02 关闭均为占位标识，实际承载 S2 交付的流标识为 S2-对账引擎。仅更正负责人口径，不改写历史状态（保持「已关闭」）。另记待复核项：T201 声明的 500 行金标准夹具在仓库与 S2 流台账中均无对应交付物，现存仅 fixtures/recon/ 的 4 组场景夹具，本次不据此调整状态，留待 S2 正式提评审时澄清。",
+      "payload_before": {
+        "owner": "dev-al-01 / dev-al-02",
+        "status": "已关闭"
+      },
+      "payload_after": {
+        "owner": "S2-对账引擎",
+        "status": "已关闭"
+      },
+      "seq": 56
+    },
+    {
+      "ts": "2026-11-10 23:21",
+      "task_id": "T202",
+      "task_title": "三层匹配（精确/模糊/候选）与歧义标记",
+      "stream": "S2",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "apps/recon/matching.py · tests/recon/test_matching.py · docs/product/tech/ledger/S2.jsonl",
+      "note": "负责人归一（更正）：dev-al-01 为占位认领，实际实现与自测由 S2-对账引擎 流完成（三层匹配与歧义标记落于 apps/recon/matching.py，用例 test_matching.py）。状态不改写，仍为「开发中」；待该流按状态机提「待评审」时另行留底。",
+      "payload_before": {
+        "owner": "dev-al-01",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S2-对账引擎",
+        "status": "开发中"
+      },
+      "seq": 57
+    },
+    {
+      "ts": "2026-11-10 23:22",
+      "task_id": "T203",
+      "task_title": "七类归因规则（单价/数量/报废/单位/税率/缺单/重复）",
+      "stream": "S2",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "apps/recon/attribution.py · tests/recon/test_attribution.py · docs/product/tech/ledger/S2.jsonl",
+      "note": "负责人归一（更正）：dev-al-02 为占位认领，实际实现与自测由 S2-对账引擎 流完成（归因规则落于 apps/recon/attribution.py，用例 test_attribution.py；S2 流台账记录当轮覆盖七类中的 5 类）。状态不改写，仍为「开发中」。",
+      "payload_before": {
+        "owner": "dev-al-02",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S2-对账引擎",
+        "status": "开发中"
+      },
+      "seq": 58
+    },
+    {
+      "ts": "2026-11-10 23:23",
+      "task_id": "T501",
+      "task_title": "版面分析与三类单据分类（对账单/送货单/发票）",
+      "stream": "S5",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "apps/docparse/detection.py · apps/docparse/mapping/classifier.py · tests/docparse/test_detection.py · docs/product/tech/ledger/S5.jsonl",
+      "note": "负责人归一（更正）：dev-al-03 为占位认领，实际实现与自测由 S5-文档解析 流完成（版面检测 detection.py、分类 classifier.py）。状态不改写，仍为「开发中」。",
+      "payload_before": {
+        "owner": "dev-al-03",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S5-文档解析",
+        "status": "开发中"
+      },
+      "seq": 59
+    },
+    {
+      "ts": "2026-11-10 23:24",
+      "task_id": "T502",
+      "task_title": "字段抽取 + 置信度 + bbox 坐标回链",
+      "stream": "S5",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "apps/docparse/pipeline.py · apps/docparse/scoring.py · tests/docparse/ · docs/product/tech/ledger/S5.jsonl",
+      "note": "负责人归一（更正）：dev-al-03 为占位认领，实际实现与自测由 S5-文档解析 流完成（管线与置信度落于 pipeline.py / scoring.py，空缺字段输出 null、bbox 回链由 tests/docparse 覆盖）。状态不改写，仍为「开发中」。",
+      "payload_before": {
+        "owner": "dev-al-03",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S5-文档解析",
+        "status": "开发中"
+      },
+      "seq": 60
+    },
+    {
+      "ts": "2026-11-10 23:36",
+      "task_id": "T005",
+      "task_title": "WriteGateway 执行入口与字段 scope 校验",
+      "stream": "S0",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "apps/platform/policy/gateway.py · apps/platform/policy/levels.py · contracts/policy/write_levels.v1.json · tests/platform 75 passed",
+      "note": "负责人归一（更正）：dev-be-01 为占位标识，实际实现由 S0-平台底座 完成。产物：apps/platform/（政策/契约/DB/连接器 SDK 全量骨架）、contracts/（C1–C5/C10 冻结物）、db/migrations/versions/0001_s0_baseline.py、apps/main.py；自测 python -m pytest tests/platform → 75 passed。状态不改写，仍为「开发中」。",
+      "payload_before": {
+        "owner": "dev-be-01",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S0-平台底座",
+        "status": "开发中"
+      },
+      "seq": 61
+    },
+    {
+      "ts": "2026-11-10 23:37",
+      "task_id": "T006",
+      "task_title": "ScopeGuard 与 RLS 落库（ScopeGuard 编译 SQL 条件）",
+      "stream": "S0",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "apps/platform/db/models.py · db/migrations/versions/0001_s0_baseline.py · tests/platform/test_migrations.py · tests/platform 75 passed",
+      "note": "负责人归一（更正）：dev-be-02 为占位标识，实际实现由 S0-平台底座 完成。产物：apps/platform/db/（模型与会话）、db/migrations/versions/0001_s0_baseline.py（erp schema 基线与 RLS 策略）、tests/platform/test_migrations.py 覆盖升级/降级与 erp.alembic_version_erp 断言；自测 75 passed。状态不改写，仍为「开发中」。",
+      "payload_before": {
+        "owner": "dev-be-02",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S0-平台底座",
+        "status": "开发中"
+      },
+      "seq": 62
+    },
+    {
+      "ts": "2026-11-10 23:11",
+      "task_id": "T005",
+      "task_title": "S0 平台底座：工程骨架 + C1–C5/C10 契约最小实现 + 迁移基线 + W3 校验",
+      "stream": "S0",
+      "type": "补充记录",
+      "from": "—",
+      "to": "—",
+      "actor": "S0-平台底座",
+      "evidence": "apps/platform/ · apps/main.py · contracts/ · db/migrations/ · tests/platform/",
+      "note": "开工。dev-ledger 中 T005/T006 记为 dev-be-01/dev-be-02「开发中」，但工作树无任何业务代码（仅 docs/），经集成会话指派由 S0 流一次性补齐骨架、契约、迁移与 W3 校验；仅写本任务独占范围（apps/platform、apps/main.py、contracts、db/migrations、pyproject.toml、tests/platform），不触碰 core/、connectors/、agents/、tests/fault 等他人独占目录，不执行 git 命令。",
+      "seq": 63
+    },
+    {
+      "ts": "2026-11-10 23:18",
+      "task_id": "T001",
+      "task_title": "S0 工程骨架可启动",
+      "stream": "S0",
+      "type": "待评审",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "S0-平台底座",
+      "evidence": "pyproject.toml · apps/main.py · apps/platform/config.py · tests/platform/test_healthz.py · tests/platform/test_config.py",
+      "note": "归属以集成会话裁决为准（T001 在 dev-ledger 中已由 dev-be-01 关闭，本次为 S0 流按集成会话指派补齐的空树骨架）。验收：python -m apps.main 起 uvicorn:8010 并 GET /healthz 返回 200 {status:ok,service:smart-erp-api,image_tag}；配置全部 ERP_ 前缀（DATABASE_URL/IMAGE_TAG/API_PORT/池预算/超时），启动即校验 asyncpg 连接串与 image_tag≠latest；pytest tests/platform/test_healthz.py tests/platform/test_config.py 通过。",
+      "seq": 64
+    },
+    {
+      "ts": "2026-11-10 23:19",
+      "task_id": "T005",
+      "task_title": "C2/C4 契约与 WriteGateway 唯一写出口 + W3 硬约束",
+      "stream": "S0",
+      "type": "待评审",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "S0-平台底座",
+      "evidence": "apps/platform/policy/{levels,registry,gateway}.py · apps/platform/connectors/{sdk,transport}.py · contracts/policy/write_levels.v1.json · contracts/connector/action_spec.v1.json · tests/platform/test_{levels,registry,registry_scan,gateway,connector_sdk,connector_transport_isolation}.py",
+      "note": "验收：ActionSpec 在代码声明等级；effective_level(scene,connector,action,breaker) 对 W0–W2 取数值 min、W3 为吸收元（任一路 W3 必拒），配置无法抬高等级；ActionRegistry 注册期拒绝 W3/无补偿/无 verify/资金只读字段/禁止动词；WriteGateway.execute 为唯一出口，签名无 bypass/force/allow_w3 参数；预演→写入→校验顺序固定，预演无前像即零写入。W3 校验：遍历注册表用例断言不存在 W3 动作；import-linter 1 kept/0 broken + AST 全量扫描确认 transport 仅 sdk.py/gateway.py 可导入。pytest 通过。",
+      "seq": 65
+    },
+    {
+      "ts": "2026-11-10 23:20",
+      "task_id": "T006",
+      "task_title": "C5 迁移基线：schema erp + alembic_version_erp + job_queue + ticket 三表",
+      "stream": "S0",
+      "type": "待评审",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "S0-平台底座",
+      "evidence": "db/migrations/env.py · db/migrations/versions/0001_s0_baseline.py · apps/platform/db/{base,models,session}.py · tests/platform/test_migrations.py",
+      "note": "验收：临时 PG15 容器（postgres:15-alpine，端口 55432，已删除）实跑 alembic upgrade head → downgrade base → upgrade head 全部成功；information_schema 显示 erp.alembic_version_erp/job_queue/ticket/ticket_event/ticket_step；ticket_event 触发器拒绝非法迁移（计划中→已完成）与 UPDATE/DELETE；ticket_step.write_level=3 被 CHECK 拒绝；离线 --sql 渲染以 CREATE SCHEMA IF NOT EXISTS erp 开头，无 any_value()/MERGE 等 PG16 特性。SQLAlchemy 2.0 async 引擎 + search_path=erp + statement/lock/idle 超时。",
+      "seq": 66
+    },
+    {
+      "ts": "2026-11-10 23:21",
+      "task_id": "T004",
+      "task_title": "C1/C3/C7/C10 契约最小实现与冻结件",
+      "stream": "S0",
+      "type": "待评审",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "S0-平台底座",
+      "evidence": "apps/platform/contracts/{canonical,agent,audit,ticket,errors,export_contracts}.py · contracts/agent/*.json · contracts/ticket/state_machine.v1.json · contracts/errors/codes.v1.json · contracts/README.md · tests/platform/test_{agent_contracts,audit,ticket,errors,contracts_frozen}.py",
+      "note": "验收：Agent 入参 scope{org_id,period,system_ids} 必填、additionalProperties:false；金额为 Money{amount(str,18,4),currency,tax_included}，裸 float 拒绝；confidence<0.70 校验期拒绝；出参必含 ticket_id/status/evidence[]；12 状态机与 ticket_event 触发器同源（TRANSITIONS）；审计影像 sha256 前向哈希链可校验；错误码 E-*/F1–F8 全覆盖。冻结件 6 份由代码生成，--check 与 pytest 双重校验；契约归属待集成会话裁决。",
+      "seq": 67
+    },
+    {
+      "ts": "2026-11-10 23:24",
+      "task_id": "T103",
+      "task_title": "连接器 SDK：能力声明/健康检查/限流/重试退避/幂等键/错误分类/超时熔断（抽象接口）+ connector-gw 健康端口",
+      "stream": "S1",
+      "type": "补充记录",
+      "from": "—",
+      "to": "—",
+      "actor": "S1-连接器",
+      "evidence": "apps/connectors/ · tests/connectors/ · fixtures/connectors/ · docs/product/tech/ledger/S1.jsonl",
+      "note": "开工。在 S0 契约上开发，不改 apps/platform、db/migrations、contracts 与 docs/product 规划文档。差异记录：① C2 的 SDK 载体在 S0 已落 apps/platform/connectors/{sdk,transport}.py（BaseConnector/ConnectorMeta/CapabilitySet/ActionSpec 复用），S1 只在 apps/connectors/ 实现运行时能力（限流/重试/幂等/熔断/分类）与厂商连接器，不复制 ActionSpec；② 统一数据模型 5 主对象按上级任务独占范围放 apps/connectors/canonical/（路线 §2.0 写的是 shared/，当前仓库无 shared/ 目录，待集成会话裁决归属）；③ 入口 python -m connectors.gateway 依赖仓库根 connectors/ 包，当前 pyproject 的 packages.find 只含 apps*，镜像内安装后该入口不可用 → 需 S0/S8 在打包清单补 connectors*，见 apps/connectors/MIGRATION_NEEDS.md 旁注；④ 熔断/限流/幂等键的 PG 落库（rate_bucket/breaker_state/idempotency_record）不在本次范围，先给抽象接口与内存实现。",
+      "seq": 68
+    },
+    {
+      "ts": "2026-11-10 23:24",
+      "task_id": "T101",
+      "task_title": "C1 统一数据模型映射：U8 域模型 ↔ canonical（供应商/物料/采购订单/入库单），缺失按 PRD §7.1/§7.3 降级",
+      "stream": "S1",
+      "type": "补充记录",
+      "from": "—",
+      "to": "—",
+      "actor": "S1-连接器",
+      "evidence": "apps/connectors/canonical/ · apps/connectors/u8/ · tests/connectors/test_mapping*.py",
+      "note": "开工。复用 S0 的 Money/Evidence/Canonical 基类（apps/platform/contracts/canonical.py），不改其文件；映射层只做「缺就报缺、不猜」：缺 code 阻断、缺 base_unit 阻断该行、单位换算缺失标 unit_conversion_missing 且不参与金额、金额≠Σ(数量×单价)±0.01 标 DQ-05 警告。",
+      "seq": 69
+    },
+    {
+      "ts": "2026-11-10 23:10",
+      "task_id": "S2-RECON-CORE",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "S2-对账引擎",
+      "evidence": "apps/recon/",
+      "note": "认领 S2 对账核心离线开发；独占路径 apps/recon/、tests/recon/、fixtures/recon/、docs/product/tech/ledger/S2.jsonl。已知 T202/T203 在 dev-ledger.json 中登记为开发中（dev-al-01/dev-al-02），本次不修改其状态，产出作为这两个任务的离线核心实现。",
+      "stream": "S2",
+      "type": "状态流转",
+      "task_title": "S2 对账引擎：离线核心与场景夹具（流级工作单元）",
+      "seq": 70
+    },
+    {
+      "ts": "2026-11-10 23:14",
+      "task_id": "S2-RECON-CORE",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "S2-对账引擎",
+      "evidence": "apps/recon/engine.py + fixtures/recon/scenario_01_exact_match.json",
+      "note": "对账核心可跑通第一组场景（完全匹配，3 行直配，零差异，已对账且证据可下钻）。",
+      "stream": "S2",
+      "type": "状态流转",
+      "task_title": "S2 对账引擎：离线核心与场景夹具（流级工作单元）",
+      "seq": 71
+    },
+    {
+      "ts": "2026-11-10 23:22",
+      "task_id": "S2-RECON-CORE",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "S2-对账引擎",
+      "evidence": "python -m pytest tests/recon → 35 passed",
+      "note": "夹具 4 组（完全匹配/金额差异/数量差异+报废/缺主数据）与 pytest 用例全绿；覆盖三层匹配、七类归因中的 5 类、置信度 0.70 闸门、缺主数据降级、差异单草稿生成。待 S0 冻结 C7 契约后对齐字段。（合并归一：流台账原文 to=待验收，主留底无该状态，按「待评审」收录）",
+      "stream": "S2",
+      "type": "状态流转",
+      "task_title": "S2 对账引擎：离线核心与场景夹具（流级工作单元）",
+      "seq": 72
+    },
+    {
+      "ts": "2026-11-10 23:22",
+      "task_id": "S3-RUNTIME-CORE",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "S3-Agent运行时",
+      "evidence": "apps/agents/",
+      "note": "开工。范围：12 态显式转移表、ticket_event 事件溯源与投影重建、intent→verify 两段提交、租约防双跑、补偿队列倒序、AG-1~AG-8 通用执行壳（输入校验/WriteGateway/F1-F8/熔断）。独占 apps/agents/、tests/agents/、docs/product/tech/ledger/S3.jsonl；T301/T302 在 dev-ledger.json 中由 dev-be-03 登记开发中，本次不修改其状态与主留底，产出作为这两个任务的运行时实现。不改 db/migrations（compensation_task 缺口写 apps/agents/MIGRATION_NEEDS.md 交 S0）。不执行 git 命令。",
+      "stream": "S3",
+      "type": "状态流转",
+      "task_title": "S3 Agent 运行时：12 态/事件溯源/两段提交（流级工作单元）",
+      "seq": 73
+    },
+    {
+      "ts": "2026-11-10 23:25",
+      "task_id": "T401",
+      "task_title": "S4 审计与权限：审计链 / 回滚 / 权限四道闸",
+      "stream": "S4",
+      "type": "补充记录",
+      "from": "—",
+      "to": "—",
+      "actor": "S4-审计权限",
+      "evidence": "apps/audit/ · apps/security/ · tests/audit/ · tests/security/ · docs/product/tech/ledger/S4.jsonl",
+      "note": "开工。已读 PRD M13（FR-1301~1308）/ M14（FR-1401~1408）/ §2.3 权限矩阵、tech 01 §3.2~§3.4、tech 02 §2.5 与 00 协作规约，并核对 S0 的 contracts/audit.py、policy/levels.py、policy/gateway.py、0001_s0_baseline.py。dev-ledger 中 T401/T403 记为 dev-be-04「开发中」，本次由 S4 流承载实现；仅写 apps/audit、apps/security、tests/audit、tests/security 与本台账，不改 db/migrations 与其他流目录，不执行任何 git 命令。",
+      "seq": 74
+    },
+    {
+      "ts": "2026-11-10 23:13",
+      "task_id": "T502",
+      "task_title": "字段抽取 + 置信度 + bbox 坐标回链",
+      "stream": "S5",
+      "type": "补充记录",
+      "from": "—",
+      "to": "—",
+      "actor": "S5-文档解析",
+      "evidence": "apps/docparse/ · tests/docparse/ · fixtures/docparse/",
+      "note": "开工：S5 解析输出契约与规则管线骨架（离线，不依赖其他流）。dev-ledger.json 中 T501/T502 已由 dev-al-03 认领，本流不改变主看板状态，仅在本流留底；实际改动限定 apps/docparse/、tests/docparse/、fixtures/docparse/。",
+      "seq": 75
+    },
+    {
+      "ts": "2026-11-10 10:00",
+      "task_id": "T607",
+      "task_title": "S6 前端 7 页骨架 + mock OpenAPI + 状态态全量（独立开发）",
+      "type": "状态流转",
+      "from": "待开始",
+      "to": "开发中",
+      "actor": "S6-前端工作台",
+      "evidence": "",
+      "note": "领取任务。web/ 当前为空目录（T601 已关闭但交付物未落盘），本次以 mock OpenAPI 独立重建 7 页骨架；独占 web/、tests/web/、ledger/S6.jsonl",
+      "stream": "S6",
+      "seq": 76
+    },
+    {
+      "ts": "2026-11-10 11:20",
+      "task_id": "T607",
+      "task_title": "S6 前端 7 页骨架 + mock OpenAPI + 状态态全量（独立开发）",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "S6-前端工作台",
+      "evidence": "web/dist/index.html; web/README.md; web/mock/openapi.yaml; tests/web/lib.test.ts; tests/web/diff-table.test.tsx",
+      "note": "7 页（工作台/对话/任务详情/复核/异常/连接器/报表）完成，含字段级 diff、证据下钻、6 步状态机时间线、回滚计划；加载/空/错误/冲突四态可切换。npm run build 与 npm run test（13 用例）通过；浏览器抽查 7 页及 F7 冲突态通过。均为 mock，未连后端。",
+      "stream": "S6",
+      "seq": 77
+    },
+    {
+      "ts": "2026-11-10 23:10",
+      "task_id": "T802",
+      "task_title": "compose 单文件 + 6 个 profile + dev 覆盖（demo 可起）",
+      "stream": "S8",
+      "type": "负责人变更",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "S8-基础设施",
+      "evidence": "deploy/smart-erp/docker-compose.yml",
+      "note": "上一负责人 dev-ops-01 于 2026-11-04 置为开发中，本机仓库尚无 deploy/smart-erp/ 任何文件；经调度方指派由 S8-基础设施 接续。本次只交付 demo 档（api/worker/scheduler/connector-gw/web 5 容器、合计 1200MiB、json-file 20m×5），full/ops/self-db/cache/obs 与 dev 覆盖留待后续任务，不在本次范围。",
+      "seq": 78
+    },
+    {
+      "ts": "2026-11-10 23:10",
+      "task_id": "T803",
+      "task_title": "C11 .env.example 全量清单 + config schema + 三套环境矩阵",
+      "stream": "S8",
+      "type": "补充记录",
+      "from": "—",
+      "to": "—",
+      "actor": "S8-基础设施",
+      "evidence": "deploy/smart-erp/.env.example",
+      "note": "该任务在留底里为「待评审」，但仓库内无 .env.example。本次按 demo 档必需项重写：ERP_ 前缀、DATABASE_URL 指向共用 PG15 的 smart_erp 库与 erp_app 角色、ERP_IMAGE_TAG、端口 8010 对外 / 8011·8012 内网、对象存储与模型配置；不含任何真实密钥。contracts/config.schema.json 与 full 档环境矩阵仍缺，移交后续任务。",
+      "seq": 79
+    },
+    {
+      "ts": "2026-11-10 23:10",
+      "task_id": "T801",
+      "task_title": "4 个 Dockerfile（多阶段 + slim + 非 root + read_only）",
+      "stream": "S8",
+      "type": "补充记录",
+      "from": "—",
+      "to": "—",
+      "actor": "S8-基础设施",
+      "evidence": "projects/smart-ERP/docker/",
+      "note": "T801 在留底中已由 lead-arch 关闭（PR#26），但本机仓库不存在 projects/smart-ERP/docker/。本次重建 api/connector-gw/web 三个多阶段 slim Dockerfile（非 root uid 10001、gw read_only），doc 镜像不在本次范围。构建依赖 pyproject.toml 与 web/package.json，二者尚未落地，故构建为「未实测」状态，已在 Dockerfile 与脚本注释中标注。",
+      "seq": 80
+    },
+    {
+      "ts": "2026-11-10 23:10",
+      "task_id": "T804",
+      "task_title": "C12 镜像 tag 规则、tar 清单与 RELEASES.md 首登记",
+      "stream": "S8",
+      "type": "负责人变更",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "S8-基础设施",
+      "evidence": "scripts/build-images.sh; scripts/deploy-images.sh",
+      "note": "接续 dev-ops-01。本次实现 tag 规则（ERP_IMAGE_TAG 必须为完整 40 位 sha，compose 用 ${ERP_IMAGE_TAG:?} 强制）、docker save 打包 + sha256sum.txt、scp→docker load→compose up -d 部署；RELEASES.md 首登记未做（无可用 sha），不建镜像仓库。",
+      "seq": 81
+    },
+    {
+      "ts": "2026-11-10 23:10",
+      "task_id": "T806",
+      "task_title": "smart-erp.yml CI：compose config 校验 + 镜像构建 + tar 产物",
+      "stream": "S8",
+      "type": "负责人变更",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "S8-基础设施",
+      "evidence": ".github/workflows/smart-erp.yml; tests/deploy/",
+      "note": "接续 dev-ops-01。本次按调度口径只做 paths 过滤 + lint（shellcheck / ruff）+ 单元测试（tests/deploy 静态校验 + compose config 正负向），明确不含镜像构建与任何部署步骤；镜像构建 + tar 产物留待后续任务。",
+      "seq": 82
+    },
+    {
+      "ts": "2026-11-10 23:38",
+      "task_id": "T802",
+      "task_title": "compose 单文件 + 6 个 profile + dev 覆盖（demo 可起）",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "S8-基础设施",
+      "evidence": "deploy/smart-erp/docker-compose.yml; deploy/smart-erp/.env.example; tests/deploy/test_compose_deploy.py",
+      "note": "demo 档 5 服务交付，实测 `docker compose --profile demo config` 退出 0；缺 ERP_IMAGE_TAG 时退出非 0 并报变量名。内存 384+512+96+160+48=1200MiB（无 memswap）。与 S0 落地对齐：入口 apps.main:app、配置键 ERP_APP_ENV（非 ERP_ENV）。未起的部分：full/ops/self-db/cache/obs 档、dev 覆盖、migrate 服务——随档位 2 另开任务。",
+      "seq": 83
+    },
+    {
+      "ts": "2026-11-10 23:38",
+      "task_id": "T801",
+      "task_title": "4 个 Dockerfile（多阶段 + slim + 非 root + read_only）",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "—",
+      "to": "待评审",
+      "actor": "S8-基础设施",
+      "evidence": "projects/smart-ERP/docker/{api,connector-gw,web}.Dockerfile",
+      "note": "实测：api 镜像构建通过 91.5MB、USER=app、容器内 GET /healthz 200；web 26.5MB、uid 10001、/healthz 返回 ok、/ 返回 index.html；connector-gw 构建通过 91.4MB，启动失败于 No module named 'connectors'（S5 入口未落地，预期缺口）。三镜像均 < 220MB / 60MB 目标。doc 镜像不在本次范围。nginx:1.27-alpine 本机拉取卡 0B，web 验证改用 --build-arg NGINX_IMAGE=nginx:alpine。",
+      "seq": 84
+    },
+    {
+      "ts": "2026-11-10 23:38",
+      "task_id": "T803",
+      "task_title": "C11 .env.example 全量清单 + config schema + 三套环境矩阵",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "—",
+      "to": "待评审",
+      "actor": "S8-基础设施",
+      "evidence": "deploy/smart-erp/.env.example; tests/deploy/test_compose_deploy.py",
+      "note": ".env.example 覆盖 compose 引用的全部 34 个 ERP_* 变量（用例自动比对，缺一即红），含 ERP_DATABASE_URL(smart_erp/erp_app)、ERP_IMAGE_TAG(留空强制必填)、8010/8088 对外与 8011/8012 内网、对象存储与模型项；无真实密钥（用例断言 CHANGE_ME 占位 + 无 sk-/AKIA 形态）。仍缺：contracts/config.schema.json（S0 侧）、full/私有化两套环境矩阵。",
+      "seq": 85
+    },
+    {
+      "ts": "2026-11-10 23:38",
+      "task_id": "T804",
+      "task_title": "C12 镜像 tag 规则、tar 清单与 RELEASES.md 首登记",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "S8-基础设施",
+      "evidence": "scripts/build-images.sh; scripts/deploy-images.sh",
+      "note": "tag 规则实测：非 40 位 sha 直接拒绝；build-images.sh --dry-run 输出 3 条 build + save + sha256sum.txt。deploy-images.sh 未对真实服务器执行（无授权目标机），仅 bash -n 与逻辑走查。compose 用 ${ERP_IMAGE_TAG:?} 强制；未建镜像仓库、未 push。RELEASES.md 首登记仍缺（本次无真实发布 sha）。",
+      "seq": 86
+    },
+    {
+      "ts": "2026-11-10 23:38",
+      "task_id": "T806",
+      "task_title": "smart-erp.yml CI：compose config 校验 + 镜像构建 + tar 产物",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "开发中",
+      "to": "待评审",
+      "actor": "S8-基础设施",
+      "evidence": ".github/workflows/smart-erp.yml; tests/deploy/",
+      "note": "workflow 三个 job：部署面静态校验（26 用例 + compose 正负向）、脚本 lint（bash -n + shellcheck）、Python lint 与单测（ruff + pytest + lint-imports）；paths 过滤覆盖 deploy/projects/scripts/tests/apps/db/contracts；明确无 build/save/scp/up 步骤。注意：仓库现状下 ruff 报 123 处、pytest 有 2 处失败，均在其它流文件（apps/tests/db），S8 未越界修改，需对应流修复后 CI 才全绿。",
+      "seq": 87
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T001",
+      "task_title": "仓库骨架、基础镜像与 CI 骨架",
+      "stream": "S0",
+      "type": "补充记录",
+      "from": "待评审",
+      "to": "待评审",
+      "actor": "集成会话",
+      "evidence": "pyproject.toml · apps/main.py · apps/platform/config.py · tests/platform/test_healthz.py",
+      "note": "【基线重建】核对成立：骨架可启动、ERP_ 配置与 /healthz 有测试；S0 流台账 23:18 已置待评审，维持待人工验收。",
+      "payload_before": {
+        "owner": "S0-平台底座",
+        "status": "待评审"
+      },
+      "payload_after": {
+        "owner": "S0-平台底座",
+        "status": "待评审"
+      },
+      "seq": 88
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T002",
+      "task_title": "C4 策略契约：WriteLevel 枚举与 effective_level",
+      "stream": "S0",
+      "type": "补充记录",
+      "from": "已关闭",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "contracts/policy/write_levels.v1.json · apps/platform/policy/levels.py · tests/platform/test_levels.py",
+      "note": "【基线重建】核对成立：枚举、取严公式、契约冻结件与用例三者在；原登记在 lead-arch 名下，按实际交付补负责人。",
+      "payload_before": {
+        "owner": "S0-平台底座",
+        "status": "已关闭"
+      },
+      "payload_after": {
+        "owner": "S0-平台底座",
+        "status": "已关闭"
+      },
+      "seq": 89
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T003",
+      "task_title": "C5 核心库表基线与迁移链规范",
+      "stream": "S0",
+      "type": "补充记录",
+      "from": "已关闭",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "db/migrations/versions/0001_s0_baseline.py · alembic.ini · tests/platform/test_migrations.py",
+      "note": "【基线重建】核对成立：迁移链 0001 与升降级断言可跑；实际交付为 S0-平台底座，原挂 dev-be-01。",
+      "payload_before": {
+        "owner": "S0-平台底座",
+        "status": "已关闭"
+      },
+      "payload_after": {
+        "owner": "S0-平台底座",
+        "status": "已关闭"
+      },
+      "seq": 90
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T004",
+      "task_title": "C10 错误码表与 F1–F8 映射",
+      "stream": "S0",
+      "type": "补充记录",
+      "from": "待评审",
+      "to": "待评审",
+      "actor": "集成会话",
+      "evidence": "contracts/{agent,ticket,errors}/*.json · apps/platform/contracts/ · tests/platform/test_contracts_frozen.py",
+      "note": "【基线重建】核对成立：6 份冻结件 + --check 双重校验；S0 流台账 23:21 已置待评审，维持。；注意：该任务存在 ts=2026-11-11 09:10 的种子条目（晚于本次基线），看板按「取最晚 ts」会回落到种子条目，需人工裁定以本基线为准。",
+      "payload_before": {
+        "owner": "S0-平台底座",
+        "status": "待评审"
+      },
+      "payload_after": {
+        "owner": "S0-平台底座",
+        "status": "待评审"
+      },
+      "seq": 91
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T005",
+      "task_title": "WriteGateway 执行入口与字段 scope 校验",
+      "stream": "S0",
+      "type": "补充记录",
+      "from": "待评审",
+      "to": "待评审",
+      "actor": "集成会话",
+      "evidence": "apps/platform/policy/{levels,registry,gateway}.py · tests/platform/test_{levels,registry,gateway}.py · 75 passed",
+      "note": "【基线重建】状态以流台账为准：S0 于 23:19 已置待评审（我在 23:36 的归一记录写「仍为开发中」基于更旧的种子数据，此处更正）。W3 拒绝、取严、无 bypass 参数、import-linter 全绿均有断言。",
+      "payload_before": {
+        "owner": "S0-平台底座",
+        "status": "待评审"
+      },
+      "payload_after": {
+        "owner": "S0-平台底座",
+        "status": "待评审"
+      },
+      "seq": 92
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T006",
+      "task_title": "ScopeGuard 与 RLS 落库",
+      "stream": "S0",
+      "type": "补充记录",
+      "from": "待评审",
+      "to": "待评审",
+      "actor": "集成会话",
+      "evidence": "db/migrations/versions/0001_s0_baseline.py · apps/platform/db/models.py · tests/platform/test_migrations.py",
+      "note": "【基线重建】状态以流台账为准：S0 于 23:20 已置待评审。erp schema 五表、ticket_event 触发器拒绝非法迁移、write_level CHECK 均实测。",
+      "payload_before": {
+        "owner": "S0-平台底座",
+        "status": "待评审"
+      },
+      "payload_after": {
+        "owner": "S0-平台底座",
+        "status": "待评审"
+      },
+      "seq": 93
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T101",
+      "task_title": "C1 统一数据模型映射（U8 ↔ canonical）",
+      "stream": "S1",
+      "type": "补充记录",
+      "from": "已关闭",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "apps/connectors/canonical/{models,mapping}.py · apps/platform/contracts/canonical.py · ledger/S1.jsonl",
+      "note": "【基线重建】降级：种子声明已关闭但无验收记录；canonical 基类在 S0，U8 映射层由 S1 于 23:24 才开工，且 tests/connectors 为空。",
+      "payload_before": {
+        "owner": "S1-连接器",
+        "status": "已关闭"
+      },
+      "payload_after": {
+        "owner": "S1-连接器",
+        "status": "开发中"
+      },
+      "seq": 94
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T102",
+      "task_title": "C2 ActionSpec 与连接器能力清单",
+      "stream": "S0",
+      "type": "补充记录",
+      "from": "已关闭",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "contracts/connector/action_spec.v1.json · apps/platform/connectors/sdk.py · tests/platform/test_connector_sdk.py",
+      "note": "【基线重建】核对成立：ActionSpec 与 describe 六能力有契约+实现+用例；交付方实为 S0，原挂 dev-be-02。",
+      "payload_before": {
+        "owner": "S0-平台底座",
+        "status": "已关闭"
+      },
+      "payload_after": {
+        "owner": "S0-平台底座",
+        "status": "已关闭"
+      },
+      "seq": 95
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T103",
+      "task_title": "连接器 SDK 六能力与 transport 私有化",
+      "stream": "S1",
+      "type": "补充记录",
+      "from": "待评审",
+      "to": "待评审",
+      "actor": "集成会话",
+      "evidence": "apps/connectors/{ratelimit,retry,idempotency,breaker,errors,health}.py · tests/platform/test_connector_{sdk,transport_isolation}.py",
+      "note": "【基线重建】部分成立：S0 侧 SDK 与 transport 隔离有测试（75 passed），S1 侧限流/重试/幂等/熔断无测试，connector-gw 健康端口未落地；维持待评审但验收须扣除未覆盖部分。",
+      "payload_before": {
+        "owner": "S1-连接器",
+        "status": "待评审"
+      },
+      "payload_after": {
+        "owner": "S1-连接器",
+        "status": "待评审"
+      },
+      "seq": 96
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T104",
+      "task_title": "通用 REST（MES/U8）连接器：读/预演/写/补偿/校验",
+      "stream": "S1",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "apps/connectors/u8/{connector,actions,mapping,models}.py",
+      "note": "【基线重建】有产物无测试：U8 连接器五能力代码在，tests/connectors 为空；负责人由 dev-be-02 更正为实际流 S1-连接器。",
+      "payload_before": {
+        "owner": "S1-连接器",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S1-连接器",
+        "status": "开发中"
+      },
+      "seq": 97
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T106",
+      "task_title": "connector-gw：MCP Server + 限流 + 拦截记录 + 健康端口",
+      "stream": "S1",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "apps/connectors/{health,runtime,ratelimit}.py · ledger/S1.jsonl",
+      "note": "【基线重建】部分产物：限流/健康/运行时在，MCP Server 与拦截记录未见；pyproject include 仅 apps*，connectors 包入口未纳入打包（S1 台账已记该缺口）。",
+      "payload_before": {
+        "owner": "S1-连接器",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S1-连接器",
+        "status": "开发中"
+      },
+      "seq": 98
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T201",
+      "task_title": "金标准样本 500 行夹具与标注口径",
+      "stream": "S2",
+      "type": "补充记录",
+      "from": "已关闭",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "fixtures/recon/scenario_01..04_*.json（4 组）",
+      "note": "【基线重建】降级：种子声明 500 行金标准夹具，仓库只有 4 组场景夹具，无 500 行样本与标注口径，也无验收记录。",
+      "payload_before": {
+        "owner": "S2-对账引擎",
+        "status": "已关闭"
+      },
+      "payload_after": {
+        "owner": "S2-对账引擎",
+        "status": "开发中"
+      },
+      "seq": 99
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T202",
+      "task_title": "三层匹配（精确/模糊/候选）与歧义标记",
+      "stream": "S2",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "apps/recon/matching.py · tests/recon/test_matching.py · pytest tests/recon 35 passed",
+      "note": "【基线重建】核对成立：三层匹配与歧义标记有用例，全量 35 passed；负责人已归一为 S2-对账引擎。",
+      "payload_before": {
+        "owner": "S2-对账引擎",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S2-对账引擎",
+        "status": "开发中"
+      },
+      "seq": 100
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T203",
+      "task_title": "七类归因规则（单价/数量/报废/单位/税率/缺单/重复）",
+      "stream": "S2",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "apps/recon/attribution.py · tests/recon/test_attribution.py",
+      "note": "【基线重建】部分成立：归因实现与用例在，S2 台账自称覆盖七类中的 5 类，未逐类核对，验收时须补齐。",
+      "payload_before": {
+        "owner": "S2-对账引擎",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S2-对账引擎",
+        "status": "开发中"
+      },
+      "seq": 101
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T301",
+      "task_title": "工单 12 态状态机与迁移表白名单",
+      "stream": "S3",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "contracts/ticket/state_machine.v1.json · apps/platform/contracts/ticket.py · apps/agents/state_machine.py",
+      "note": "【基线重建】有产物：12 态契约与运行时状态机并存；S3 于 23:22 开工，tests/agents 尚未建立。",
+      "payload_before": {
+        "owner": "S3-Agent运行时",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S3-Agent运行时",
+        "status": "开发中"
+      },
+      "seq": 102
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T302",
+      "task_title": "C3 工单/事件/步骤/审计 DDL 与唯一约束",
+      "stream": "S3",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "db/migrations/versions/0001_s0_baseline.py（ticket/ticket_event/ticket_step/job_queue）· apps/agents/MIGRATION_NEEDS.md",
+      "note": "【基线重建】部分成立：四表已在 0001，compensation_task 等 DDL 缺口登记在 MIGRATION_NEEDS.md，未落库。",
+      "payload_before": {
+        "owner": "S3-Agent运行时",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S3-Agent运行时",
+        "status": "开发中"
+      },
+      "seq": 103
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T401",
+      "task_title": "审计影像表与哈希链（prev_hash + 每日锚点）",
+      "stream": "S4",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "apps/audit/{ledger,models,store,rollback}.py · apps/audit/MIGRATION_NEEDS.md",
+      "note": "【基线重建】部分成立：应用层哈希链与回滚在；0001 无审计影像表，DDL 缺口已登记；tests/audit 为空。",
+      "payload_before": {
+        "owner": "S4-审计权限",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S4-审计权限",
+        "status": "开发中"
+      },
+      "seq": 104
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T403",
+      "task_title": "审批满足性判定与自审 CHECK 约束",
+      "stream": "S4",
+      "type": "补充记录",
+      "from": "待评审",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "apps/security/{approvals,gate,identity,scope}.py",
+      "note": "【基线重建】降级：种子声明待评审，无验收记录、无测试（tests/audit、tests/security 均为空）；S4 于 23:25 才开工。；注意：该任务存在 ts=2026-11-12 10:30 的种子条目（晚于本次基线），看板按「取最晚 ts」会回落到种子条目，需人工裁定以本基线为准。",
+      "payload_before": {
+        "owner": "S4-审计权限",
+        "status": "待评审"
+      },
+      "payload_after": {
+        "owner": "S4-审计权限",
+        "status": "开发中"
+      },
+      "seq": 105
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T501",
+      "task_title": "版面分析与三类单据分类",
+      "stream": "S5",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "apps/docparse/{detection.py,mapping/classifier.py} · tests/docparse/ · 41 passed",
+      "note": "【基线重建】核对成立：版面检测与三类分类有实现与用例，docparse 全量 41 passed；负责人已归一。",
+      "payload_before": {
+        "owner": "S5-文档解析",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S5-文档解析",
+        "status": "开发中"
+      },
+      "seq": 106
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T502",
+      "task_title": "字段抽取 + 置信度 + bbox 坐标回链",
+      "stream": "S5",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "apps/docparse/{pipeline,scoring}.py · tests/docparse/ · 41 passed",
+      "note": "【基线重建】核对成立：字段抽取/置信度/bbox 回链由 41 passed 覆盖，含空缺字段输出 null 的断言。",
+      "payload_before": {
+        "owner": "S5-文档解析",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S5-文档解析",
+        "status": "开发中"
+      },
+      "seq": 107
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T601",
+      "task_title": "前端骨架 + OpenAPI 生成客户端 + mock server 联调",
+      "stream": "S6",
+      "type": "补充记录",
+      "from": "已关闭",
+      "to": "待评审",
+      "actor": "集成会话",
+      "evidence": "web/（7 页 + components + mock/openapi.yaml + src/mock/handlers.ts）· tests/web/",
+      "note": "【基线重建】更正：种子置关闭时 web/ 为空，实际由 S6 另立 T607 于 11:20 补交付；现产物齐全但只有 2 个前端用例、无全量验收，降为待评审。",
+      "payload_before": {
+        "owner": "S6-前端工作台",
+        "status": "已关闭"
+      },
+      "payload_after": {
+        "owner": "S6-前端工作台",
+        "status": "待评审"
+      },
+      "seq": 108
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T602",
+      "task_title": "P3 任务详情：状态机进度条 + 时间线 + 字段级 diff",
+      "stream": "S6",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "web/src/pages/TicketDetail.tsx · components/{StateMachine,Timeline,DiffTable}.tsx · tests/web/diff-table.test.tsx",
+      "note": "【基线重建】有产物：进度条/时间线/字段 diff 组件齐全，diff-table 有用例；端到端联调未验。",
+      "payload_before": {
+        "owner": "S6-前端工作台",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S6-前端工作台",
+        "status": "开发中"
+      },
+      "seq": 109
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T603",
+      "task_title": "P4 复核审批：三方并排 + 证据面板 + 双人互不可见",
+      "stream": "S6",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "web/src/pages/Review.tsx · components/{EvidencePanel,RollbackDialog}.tsx",
+      "note": "【基线重建】有产物：三方并排与证据面板在；「双人互不可见」无测试断言，未验证。",
+      "payload_before": {
+        "owner": "S6-前端工作台",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "S6-前端工作台",
+        "status": "开发中"
+      },
+      "seq": 110
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T604",
+      "task_title": "空态/错误态全表（F1–F8 各自下一步）",
+      "stream": "S6",
+      "type": "补充记录",
+      "from": "待评审",
+      "to": "开发中",
+      "actor": "集成会话",
+      "evidence": "web/src/api/errors.ts · src/lib/status.ts · tests/web/lib.test.ts",
+      "note": "【基线重建】降级：种子声明全表待评审，实际只有错误文案与状态映射工具，未逐条落 F1–F8 的下一步动作与空态页面断言。；注意：该任务存在 ts=2026-11-14 09:30 的种子条目（晚于本次基线），看板按「取最晚 ts」会回落到种子条目，需人工裁定以本基线为准。",
+      "payload_before": {
+        "owner": "S6-前端工作台",
+        "status": "待评审"
+      },
+      "payload_after": {
+        "owner": "S6-前端工作台",
+        "status": "开发中"
+      },
+      "seq": 111
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T701",
+      "task_title": "OTel 埋点规范与 SDK 封装（四跳同一 trace）",
+      "stream": "S7",
+      "type": "补充记录",
+      "from": "待评审",
+      "to": "未开始",
+      "actor": "集成会话",
+      "evidence": "无",
+      "note": "【基线重建】种子声明，无产物证据：全仓无 opentelemetry/otel 依赖、无埋点规范文档、无 SDK 封装。",
+      "payload_before": {
+        "owner": "未认领（原 dev-be-02）",
+        "status": "待评审"
+      },
+      "payload_after": {
+        "owner": "未认领（原 dev-be-02）",
+        "status": "未开始"
+      },
+      "seq": 112
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T702",
+      "task_title": "指标口径与 OTel→Prometheus 映射",
+      "stream": "S7",
+      "type": "补充记录",
+      "from": "待评审",
+      "to": "未开始",
+      "actor": "集成会话",
+      "evidence": "无",
+      "note": "【基线重建】种子声明，无产物证据：无指标口径文档、无映射实现。；注意：该任务存在 ts=2026-11-13 09:00 的种子条目（晚于本次基线），看板按「取最晚 ts」会回落到种子条目，需人工裁定以本基线为准。",
+      "payload_before": {
+        "owner": "未认领（原 dev-be-02）",
+        "status": "待评审"
+      },
+      "payload_after": {
+        "owner": "未认领（原 dev-be-02）",
+        "status": "未开始"
+      },
+      "seq": 113
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T703",
+      "task_title": "六条主链路 E2E（用 C12 镜像跑，非 mock）",
+      "stream": "S7",
+      "type": "补充记录",
+      "from": "开发中",
+      "to": "未开始",
+      "actor": "集成会话",
+      "evidence": "无",
+      "note": "【基线重建】种子声明，无产物证据：无 tests/e2e、无 C12 镜像实测记录。",
+      "payload_before": {
+        "owner": "未认领（原 dev-be-02）",
+        "status": "开发中"
+      },
+      "payload_after": {
+        "owner": "未认领（原 dev-be-02）",
+        "status": "未开始"
+      },
+      "seq": 114
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T801",
+      "task_title": "4 个 Dockerfile（多阶段 + slim + 非 root + read_only）",
+      "stream": "S8",
+      "type": "补充记录",
+      "from": "待评审",
+      "to": "待评审",
+      "actor": "集成会话",
+      "evidence": "projects/smart-ERP/docker/{api,connector-gw,web}.Dockerfile · ledger/S8.jsonl",
+      "note": "【基线重建】部分成立：3 个 Dockerfile 已构建实测（91.5/26.5/91.4MB），doc 镜像不在本次范围；声明为 4 个，差额须验收人确认豁免。",
+      "payload_before": {
+        "owner": "S8-基础设施",
+        "status": "待评审"
+      },
+      "payload_after": {
+        "owner": "S8-基础设施",
+        "status": "待评审"
+      },
+      "seq": 115
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T802",
+      "task_title": "compose 单文件 + 6 个 profile + dev 覆盖",
+      "stream": "S8",
+      "type": "补充记录",
+      "from": "待评审",
+      "to": "待评审",
+      "actor": "集成会话",
+      "evidence": "deploy/smart-erp/docker-compose.yml · tests/deploy/test_compose_deploy.py",
+      "note": "【基线重建】流台账 23:38 已置待评审：demo 档 5 服务可渲染，full/ops 等档位另开任务；负责人由 dev-ops-01 更正为 S8-基础设施。",
+      "payload_before": {
+        "owner": "S8-基础设施",
+        "status": "待评审"
+      },
+      "payload_after": {
+        "owner": "S8-基础设施",
+        "status": "待评审"
+      },
+      "seq": 116
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T803",
+      "task_title": "C11 .env.example 全量清单 + config schema",
+      "stream": "S8",
+      "type": "补充记录",
+      "from": "待评审",
+      "to": "待评审",
+      "actor": "集成会话",
+      "evidence": "deploy/smart-erp/.env.example · tests/deploy/test_compose_deploy.py",
+      "note": "【基线重建】核对成立：34 个 ERP_* 变量自动比对，缺一即红；仍缺 contracts/config.schema.json 与两套环境矩阵。；注意：该任务存在 ts=2026-11-11 09:00 的种子条目（晚于本次基线），看板按「取最晚 ts」会回落到种子条目，需人工裁定以本基线为准。",
+      "payload_before": {
+        "owner": "S8-基础设施",
+        "status": "待评审"
+      },
+      "payload_after": {
+        "owner": "S8-基础设施",
+        "status": "待评审"
+      },
+      "seq": 117
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T804",
+      "task_title": "C12 镜像 tag 规则、tar 清单与 RELEASES.md 首登记",
+      "stream": "S8",
+      "type": "补充记录",
+      "from": "待评审",
+      "to": "待评审",
+      "actor": "集成会话",
+      "evidence": "scripts/{build-images,deploy-images}.sh · tests/deploy/",
+      "note": "【基线重建】部分成立：tag 规则与打包/部署脚本已实测，RELEASES.md 首登记未做（无真实发布 sha）。",
+      "payload_before": {
+        "owner": "S8-基础设施",
+        "status": "待评审"
+      },
+      "payload_after": {
+        "owner": "S8-基础设施",
+        "status": "待评审"
+      },
+      "seq": 118
+    },
+    {
+      "ts": "2026-11-10 23:50",
+      "task_id": "T806",
+      "task_title": "CI：compose config 校验 + 镜像构建 + tar 产物",
+      "stream": "S8",
+      "type": "补充记录",
+      "from": "待评审",
+      "to": "待评审",
+      "actor": "集成会话",
+      "evidence": ".github/workflows/smart-erp.yml · tests/deploy/",
+      "note": "【基线重建】部分成立：三个 job 到位且明确不含镜像构建；流台账记录当前 ruff 123 处、pytest 2 处失败在其它流文件，CI 尚未全绿。",
+      "payload_before": {
+        "owner": "S8-基础设施",
+        "status": "待评审"
+      },
+      "payload_after": {
+        "owner": "S8-基础设施",
+        "status": "待评审"
+      },
+      "seq": 119
+    },
+    {
+      "ts": "2026-11-10 23:38",
+      "task_id": "T001",
+      "task_title": "S0 工程骨架可启动",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "feat/platform-baseline · PR #9 · commit c35532b68fac005849f44875bc79fb7b94a4c484",
+      "note": "验收通过：apps/main.py 起 uvicorn:8010，GET /healthz 返回 200（status/service/image_tag），配置全 ERP_ 前缀且启动校验 asyncpg 连接串与 image_tag≠latest；tests/platform/test_healthz.py、test_config.py 通过。squash 合并入 main。",
+      "seq": 120
+    },
+    {
+      "ts": "2026-11-10 23:38",
+      "task_id": "T004",
+      "task_title": "C1/C3/C7/C10 契约最小实现与冻结件",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "feat/platform-baseline · PR #9 · commit c35532b68fac005849f44875bc79fb7b94a4c484",
+      "note": "验收通过：Agent 入参 scope 必填 + additionalProperties:false、Money{amount(str,18,4)} 拒裸 float、confidence<0.70 校验期拒绝、出参含 ticket_id/status/evidence、12 状态机与触发器同源、审计哈希链可校验、错误码全覆盖；6 份冻结件 --check 与 pytest 双重校验。squash 合并入 main。该任务原有一条 2026-11-11 09:10 的未来时间戳种子条目（开发中→待评审，dev-be-02，由 s0+6 天推导），其 ts 已改写为实际修正时刻、原值保留在该条 note；先后判定以 seq 为准，本记录 seq 最大，状态为已关闭。",
+      "seq": 121
+    },
+    {
+      "ts": "2026-11-10 23:38",
+      "task_id": "T005",
+      "task_title": "C2/C4 契约与 WriteGateway 唯一写出口 + W3 硬约束",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "feat/platform-baseline · PR #9 · commit c35532b68fac005849f44875bc79fb7b94a4c484",
+      "note": "验收通过：ActionSpec 代码声明等级、effective_level 对 W0–W2 取数值 min 且 W3 吸收、注册期拒绝 W3/无补偿/无 verify/资金只读字段/禁止动词、WriteGateway.execute 签名无 bypass 类参数、预演→写入→校验顺序固定；import-linter 1 kept/0 broken + AST 全量扫描确认 transport 仅 sdk/gateway 可导入。squash 合并入 main。",
+      "seq": 122
+    },
+    {
+      "ts": "2026-11-10 23:38",
+      "task_id": "T006",
+      "task_title": "C5 迁移基线：schema erp + alembic_version_erp + job_queue + ticket 三表",
+      "stream": "S0",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "feat/platform-baseline · PR #9 · commit c35532b68fac005849f44875bc79fb7b94a4c484",
+      "note": "验收通过：临时 PG15 容器实跑 upgrade head → downgrade base → upgrade head 全绿；information_schema 见 erp.alembic_version_erp/job_queue/ticket/ticket_event/ticket_step；触发器拒绝非法迁移与 UPDATE/DELETE，ticket_step.write_level=3 被 CHECK 拒绝；离线 --sql 以 CREATE SCHEMA IF NOT EXISTS erp 开头且无 PG16 特性。squash 合并入 main。",
+      "seq": 123
+    },
+    {
+      "task_id": "T202",
+      "task_title": "三层匹配（精确/模糊/候选）与歧义标记",
+      "stream": "S2",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "feat/recon-engine · PR #10 · commit e6a18ab0a381c039dbd3e607df1d3f41cc089f27",
+      "note": "验收通过：squash 合并入 main。合并后 verify worktree（detached 于 e6a18ab）跑 python -m pytest tests -q --import-mode=importlib 得 tests=110 failures=0 errors=0（tests/platform 75 + tests/recon 35）。三层匹配与歧义标记用例全绿。",
+      "ts": "2026-11-10 23:39",
+      "seq": 124
+    },
+    {
+      "task_id": "T203",
+      "task_title": "七类归因规则（单价/数量/报废/单位/税率/缺单/重复）",
+      "stream": "S2",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "feat/recon-engine · PR #10 · commit e6a18ab0a381c039dbd3e607df1d3f41cc089f27",
+      "note": "验收通过：七类归因规则随 S2 分支合并入 main；合并后全量 tests=110 failures=0 errors=0。T201（500 行金标准夹具）无产物证据，保持「开发中」，未随本 PR 关闭。",
+      "ts": "2026-11-10 23:39",
+      "seq": 125
+    },
+    {
+      "task_id": "T501",
+      "task_title": "版面分析与三类单据分类（对账单/送货单/发票）",
+      "stream": "S5",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "feat/docparse-pipeline · PR #11 · commit 1b64d85217cf38df4bd8c6c029685bd4e1de5972",
+      "note": "验收通过：squash 合并入 main。合并后 verify worktree（detached 于 1b64d85）跑 python -m pytest tests -q --import-mode=importlib 得 tests=151 failures=0 errors=0（platform 75 + recon 35 + docparse 41）。三类单据分类用例（tests/docparse/test_detection.py）全绿。",
+      "ts": "2026-11-10 23:40",
+      "seq": 126
+    },
+    {
+      "task_id": "T502",
+      "task_title": "字段抽取 + 置信度 + bbox 坐标回链",
+      "stream": "S5",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "feat/docparse-pipeline · PR #11 · commit 1b64d85217cf38df4bd8c6c029685bd4e1de5972",
+      "note": "验收通过：字段抽取、置信度打分与 bbox 回链随 S5 分支合并入 main；tests/docparse 41 个用例全绿（含 clear_invoice / amount_mismatch / missing_fields / multipage / pipeline_degradation）。合并后全量 tests=151 failures=0 errors=0。",
+      "ts": "2026-11-10 23:40",
+      "seq": 127
+    },
+    {
+      "task_id": "T801",
+      "task_title": "4 个 Dockerfile（多阶段 + slim + 非 root + read_only）",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "feat/deploy-infra · PR #12 · commit cbf89a55edf0661bcf9ac8a7d9dd6436b995ca3d",
+      "note": "验收通过并合并入 main：projects/smart-ERP/docker/{api,connector-gw,web}.Dockerfile 三个多阶段 slim 镜像落库，非 root uid 10001、connector-gw read_only；api 91.5MB 容器内 /healthz 200、web 26.5MB。已知缺口（不影响关闭，属后续任务）：doc 镜像不在本次范围；connector-gw 因 S5 connectors 入口未落地启动失败于 No module named 'connectors'。合并后全量 tests=222 failures=0 errors=0。",
+      "ts": "2026-11-10 23:41",
+      "seq": 128
+    },
+    {
+      "task_id": "T802",
+      "task_title": "compose 单文件 + 6 个 profile + dev 覆盖（demo 可起）",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "feat/deploy-infra · PR #12 · commit cbf89a55edf0661bcf9ac8a7d9dd6436b995ca3d",
+      "note": "验收通过并合并入 main：deploy/smart-erp/docker-compose.yml 按 demo 档交付 5 服务（api/worker/scheduler/connector-gw/web，合计 1200MiB），docker compose --profile demo config 退出 0，缺 ERP_IMAGE_TAG 时非 0 并报变量名。未含 full/ops/self-db/cache/obs 档与 dev 覆盖、migrate 服务，留待后续任务。合并后全量 tests=222 failures=0 errors=0。",
+      "ts": "2026-11-10 23:41",
+      "seq": 129
+    },
+    {
+      "task_id": "T803",
+      "task_title": "C11 .env.example 全量清单 + config schema + 三套环境矩阵",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "feat/deploy-infra · PR #12 · commit cbf89a55edf0661bcf9ac8a7d9dd6436b995ca3d",
+      "note": "验收通过并合并入 main：deploy/smart-erp/.env.example 覆盖 compose 引用的全部 34 个 ERP_* 变量（用例自动比对，缺一即红），无真实密钥（CHANGE_ME 占位 + 无 sk-/AKIA 形态）。仍缺 contracts/config.schema.json 与 full/私有化环境矩阵，移交后续任务。该任务原有一条 2026-11-11 09:00 的未来时间戳种子条目（开发中→待评审，dev-ops-01，由 s0+6 天推导），其 ts 已改写为实际修正时刻、原值保留在该条 note；先后判定以 seq 为准，本记录 seq 最大，状态为已关闭。",
+      "ts": "2026-11-10 23:41",
+      "seq": 130
+    },
+    {
+      "task_id": "T804",
+      "task_title": "C12 镜像 tag 规则、tar 清单与 RELEASES.md 首登记",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "feat/deploy-infra · PR #12 · commit cbf89a55edf0661bcf9ac8a7d9dd6436b995ca3d",
+      "note": "验收通过并合并入 main：scripts/build-images.sh 与 deploy-images.sh 实现 tag 规则（ERP_IMAGE_TAG 必须完整 40 位 sha，非 40 位直接拒绝）、docker save + sha256sum.txt、scp→load→compose up -d；--dry-run 输出 3 条 build。未对真实服务器执行（无授权目标机），RELEASES.md 首登记未做（无真实发布 sha），移交后续任务。合并后全量 tests=222 failures=0 errors=0。",
+      "ts": "2026-11-10 23:41",
+      "seq": 131
+    },
+    {
+      "task_id": "T806",
+      "task_title": "smart-erp.yml CI：compose config 校验 + 镜像构建 + tar 产物",
+      "stream": "S8",
+      "type": "状态流转",
+      "from": "待评审",
+      "to": "已关闭",
+      "actor": "集成会话",
+      "evidence": "feat/deploy-infra · PR #12 · commit cbf89a55edf0661bcf9ac8a7d9dd6436b995ca3d",
+      "note": "验收通过并合并入 main：.github/workflows/smart-erp.yml 三个 job（部署面静态校验 + compose config 正负向、脚本 bash -n + shellcheck、Python ruff + pytest + lint-imports），paths 过滤覆盖 deploy/projects/scripts/tests/apps/db/contracts，明确不含 build/save/scp/up。合并后全量 tests=222 failures=0 含 tests/deploy 71 项。注意：仓库现状 ruff 仍报 123 处、主工作树 tests/ 整树收集有 12 个 ImportError（tests/agents|audit|security，归属 S3/S4 在写流，未入库），属既有问题，非本 PR 引入，CI 全绿需对应流修复。",
+      "ts": "2026-11-10 23:41",
+      "seq": 132
+    },
+    {
+      "ts": "2026-11-10 23:45",
+      "task_id": "LEDGER",
+      "task_title": "留底机制：判定先后改用 seq（本机时钟曾回拨）",
+      "stream": "—",
+      "type": "补充记录",
+      "from": "—",
+      "to": "—",
+      "actor": "集成会话",
+      "evidence": "docs/product/tech/dev-ledger.json · docs/product/tech/index.html",
+      "note": "本机时钟曾从 2026-11-10 23:50 回拨到 23:37（同一工作时段内出现 ts 倒退）。自此条起，留底每条记录新增单调递增整数 seq：排序与「谁覆盖谁」一律以 seq 为准，ts 只作展示与时钟异常检测（ts 倒退或未来 ts 时看板给出告警，但不改变排序、不阻断操作）。历史条目按文件既有顺序一次性回填 seq=1..132，不重排、不删改内容；此前被调成「合并后逻辑时间 23:55」的 13 条关闭记录与 T004/T803 两条被推到未来的关闭记录，已全部恢复真实发生时刻；T004(2026-11-11 09:10)/T803(2026-11-11 09:00)/T403(2026-11-12 10:30)/T702(2026-11-13 09:00)/T604(2026-11-14 09:30) 五条未来时间戳种子已在种子源改为实际修正时刻，原值保留在各自 note。",
+      "seq": 133
+    }
+  ]
+}
