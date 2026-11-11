@@ -259,6 +259,17 @@ class ComposeStaticTest(unittest.TestCase):
         self.assertEqual(str(doc["healthcheck"]["start_period"]), "300s")
         self.assertIn("8020", [str(p) for p in doc.get("expose", [])])
         self.assertNotIn("ports", doc, "8020 只在内网，不发布到宿主")
+        self.assertEqual(doc["cpus"], 1.5)
+        self.assertEqual(
+            " ".join(str(part) for part in doc["command"]),
+            "python -m apps.docparse --port=8020",
+            "doc 入口必须是包内模块（worker-doc entrypoint），不能再指向 docker/ 下的脚本",
+        )
+        self.assertIn(
+            "/readyz",
+            " ".join(str(part) for part in doc["healthcheck"]["test"]),
+            "doc 健康检查必须探 /readyz（真跑解析管线），不能只探进程存活",
+        )
 
         for name, queue in (("worker-agent", "agent"), ("worker-io", "io")):
             with self.subTest(service=name):
@@ -887,6 +898,25 @@ class ArtifactsTest(unittest.TestCase):
             r"pip\s+wheel\s+--wheel-dir\s+/wheels\s+\"\.\[pdf\]\"",
             "docparse.Dockerfile 的 pip wheel 必须带 \".[pdf]\"（pypdfium2 依赖）",
         )
+
+    def test_doc_entrypoint_is_package_module(self):
+        """doc 入口必须来自 apps.docparse（包内），不能回退到 docker/ 下的临时脚本。"""
+        dockerfile = (DOCKER_DIR / "docparse.Dockerfile").read_text(encoding="utf-8")
+        self.assertNotIn(
+            "docparse_service.py",
+            dockerfile,
+            "docparse.Dockerfile 不应再拷贝/引用 docker/ 下的临时入口脚本",
+        )
+        self.assertIn(
+            'CMD ["python", "-m", "apps.docparse", "--port=8020"]',
+            dockerfile,
+        )
+        self.assertFalse(
+            (DOCKER_DIR / "docparse_service.py").exists(),
+            "临时入口脚本应已删除，入口统一在 apps/docparse/service.py",
+        )
+        self.assertTrue((REPO_ROOT / "apps" / "docparse" / "service.py").is_file())
+        self.assertTrue((REPO_ROOT / "apps" / "docparse" / "__main__.py").is_file())
 
     def test_scripts_are_syntactically_valid(self):
         bash = _usable_bash()

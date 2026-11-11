@@ -5,9 +5,9 @@
 # 分发与低频更新）、§1A.3（full 档 doc 3G / start_period 300s）。
 # 约束与另外三个镜像一致：多阶段、slim 基础镜像、非 root(10001)、不装编译器。
 #
-# 现状（2026-11-11）：apps/docparse 是纯库，尚无 erp_doc 常驻进程，因此 CMD 用
-# projects/smart-ERP/docker/docparse_service.py 提供 /healthz 与 /readyz（真跑一次
-# 解析管线）。S5 交付真入口后：删掉该文件、改 CMD，并同步 compose 与 tests/deploy。
+# 入口：`python -m apps.docparse`（apps/docparse/service.py），提供 /healthz 与
+# /readyz（真跑一次解析管线）。队列消费与文档接入 API 待后续任务补齐，补齐后只换
+# service.py 内实现，compose 的 doc.command 与 tests/deploy 断言保持同一入口。
 #
 # 构建（context 必须是仓库根）：
 #   docker build -f projects/smart-ERP/docker/docparse.Dockerfile \
@@ -47,12 +47,10 @@ RUN python -m pip install --no-index --find-links=/wheels --no-cache-dir /wheels
  && rm -rf /wheels /tmp/pycache
 
 WORKDIR /app
-# 临时健康入口（见文件头说明），S5 交付真进程后删除
-COPY projects/smart-ERP/docker/docparse_service.py /app/docparse_service.py
 RUN mkdir -p /app/config /data/objects && chown -R app:app /app /data
 
 USER app
 
 EXPOSE 8020
 
-CMD ["python", "/app/docparse_service.py", "--port=8020"]
+CMD ["python", "-m", "apps.docparse", "--port=8020"]

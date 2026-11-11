@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""doc 容器的临时入口（S5 尚未交付 erp_doc 常驻进程）。
+"""`erp_doc` 常驻进程入口（包内，不再依赖 docker/ 下的临时脚本）。
 
-背景：`apps/docparse` 目前是纯库（无 `__main__`、无 OCR 常驻服务、无队列消费），
-但 full 档需要一个「能起、能被 healthcheck 探活、镜像里的解析链路确实可用」的
-doc 容器。这个入口只用标准库：
+`apps/docparse` 目前是纯库（无队列消费），full 档仍需要一个「能起、能被 healthcheck
+探活、镜像里的解析链路确实可用」的 doc 容器。本入口只用标准库：
 
 - `GET /healthz`：进程自检，不查依赖；
-- `GET /readyz`：真跑一次 `DocParsePipeline.parse_bytes`（内联 CSV 夹具），
+- `GET /readyz`：真跑一次 `DocParsePipeline.parse_bytes`（内联夹具），
   管线能跑通返回 200，抛异常返回 503；
-- 其他路径：404。
+- 其他路径：404；
+- `--check`：只跑就绪自检后退出（0=就绪，2=未就绪），供镜像/CI 直接调用。
 
-S5 交付真正的 `erp_doc` 常驻进程后，删除本文件、把 docparse.Dockerfile 的 CMD
-换成那个入口，并同步 compose 的 doc.command 与 tests/deploy 断言。
+队列消费与真正的文档接入 API 仍待后续任务补齐；补齐后替换 `readiness()` 之外的部分即可，
+compose 的 `doc.command` 与 `tests/deploy` 断言按同一入口同步。
 """
 
 from __future__ import annotations
@@ -105,7 +105,7 @@ def port_from_env() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="docparse_service")
+    parser = argparse.ArgumentParser(prog="python -m apps.docparse")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--check", action="store_true", help="只跑就绪自检后退出")
