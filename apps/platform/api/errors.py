@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -42,6 +44,7 @@ class ProblemError(Exception):
         *,
         status_code: int | None = None,
         context: dict[str, str] | None = None,
+        roles: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
         super().__init__(detail)
         self.code = code
@@ -49,6 +52,8 @@ class ProblemError(Exception):
         self.status_code = status_code or ERROR_SPECS[code].http_status
         # 结构化排障字段（currency / tenant_id / at）；禁止回显他人合同价。
         self.context = context
+        # 角色差集（approval_* / execution_*，与 TicketDetailOut 同名同义）。
+        self.roles = roles
 
 
 def _code_for_status(status_code: int) -> ErrorCode:
@@ -65,11 +70,12 @@ def problem_response(
     status_code: int,
     headers: dict[str, str] | None = None,
     context: dict[str, str] | None = None,
+    roles: Mapping[str, Sequence[str]] | None = None,
 ) -> JSONResponse:
     """构造 problem+json 响应；``trace_id`` 取自当前请求上下文。"""
 
     body = problem(
-        code, detail, trace_id=current_trace_id() or None, context=context
+        code, detail, trace_id=current_trace_id() or None, context=context, roles=roles
     )
     return JSONResponse(
         status_code=status_code,
@@ -92,6 +98,7 @@ def install_error_handlers(app: FastAPI) -> None:
             exc.detail,
             status_code=exc.status_code,
             context=exc.context,
+            roles=exc.roles,
         )
 
     @app.exception_handler(RequestValidationError)

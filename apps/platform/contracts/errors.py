@@ -7,11 +7,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
+
+#: problem body 允许携带的角色差集字段：与 ``TicketDetailOut`` 同名同义，
+#: 不另造第三套名字。只有明确知道差集的错误（如执行闸拒）才携带。
+ROLE_GAP_FIELDS = (
+    "approval_required_roles",
+    "approval_missing_roles",
+    "execution_required_roles",
+    "execution_missing_roles",
+)
 
 
 class ErrorCode(str, Enum):
@@ -167,6 +177,11 @@ class ProblemDetail(BaseModel):
     # 排障上下文（如 currency / tenant_id / at）。只放「定位问题所需的最小事实」，
     # 严禁把价格表里其他币种的单价塞进来——那是别人的合同价。
     context: dict[str, str] | None = None
+    #: 角色差集（与 TicketDetailOut 同名字段同义）；缺省 null 表示该错误不涉及。
+    approval_required_roles: list[str] | None = None
+    approval_missing_roles: list[str] | None = None
+    execution_required_roles: list[str] | None = None
+    execution_missing_roles: list[str] | None = None
 
 
 def problem(
@@ -175,7 +190,12 @@ def problem(
     *,
     trace_id: str | None = None,
     context: dict[str, str] | None = None,
+    roles: Mapping[str, Sequence[str]] | None = None,
 ) -> ProblemDetail:
+    extra = {key: list(value) for key, value in (roles or {}).items()}
+    unknown = set(extra) - set(ROLE_GAP_FIELDS)
+    if unknown:
+        raise ValueError(f"未知的角色差集字段: {sorted(unknown)}")
     spec = ERROR_SPECS[code]
     return ProblemDetail(
         code=code,
@@ -185,6 +205,7 @@ def problem(
         retriable=spec.retriable,
         fail_code=spec.fail_code,
         context=context,
+        **extra,
     )
 
 

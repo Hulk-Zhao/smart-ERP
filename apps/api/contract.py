@@ -104,6 +104,12 @@ app 装配由平台底座负责：`apps/main.py` 调用 `install_platform(app)`�
 `trace_id`、`retriable`、`fail_code`、`context`（可选，结构化排障字段，如
 `currency / tenant_id / at`；**不含**任何单价）。常用映射：
 
+执行闸的 `409 E-POLICY-APPROVAL` 额外携带角色差集（与工单详情**同名字段同义**，
+`null` 表示该错误不涉及；禁止解析 `detail` 文本猜角色）：
+`approval_required_roles`、`approval_missing_roles`、`execution_required_roles`、
+`execution_missing_roles`。`execution_*` 是执行闸实际核对的一组（含 B 级连接器
+强制双签），`approval_*` 是审批链自身阈值——审批一票 ≠ 执行一票。
+
 | HTTP | code | 含义 |
 | --- | --- | --- |
 | 400 | E-IDEM-CONFLICT | 写接口缺少 Idempotency-Key |

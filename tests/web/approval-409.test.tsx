@@ -45,8 +45,8 @@ beforeEach(async () => {
     }
     if (request.method === 'POST' && request.path === `/v1/approvals/${DUAL_TICKET_ID}/approve`) {
       return problem(409, 'E-POLICY-APPROVAL', '审批未满足：还需 reviewer 审批', {
-        required_roles: ['reviewer', 'approver'],
-        missing_roles: ['reviewer'],
+        approval_required_roles: ['reviewer', 'approver'],
+        approval_missing_roles: ['reviewer'],
       });
     }
     return problem(404, 'E-RESOURCE-NOTFOUND', `unexpected ${request.method} ${request.path}`);
@@ -88,7 +88,7 @@ describe('审批页：双人意见脱敏 + 409 审批未满足', () => {
     await waitFor(() => {
       expect(screen.getByText(/409 · E-POLICY-APPROVAL/)).toBeInTheDocument();
     });
-    expect(screen.getByText('尚缺角色：')).toBeInTheDocument();
+    expect(screen.getByText('审批尚缺角色：')).toBeInTheDocument();
     expect(screen.getAllByText('复核人').length).toBeGreaterThan(0);
     expect(screen.getByText(/审批未满足：还需 reviewer 审批/)).toBeInTheDocument();
 
