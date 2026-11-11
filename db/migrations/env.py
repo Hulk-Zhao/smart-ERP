@@ -22,7 +22,13 @@ from apps.platform.db.base import SCHEMA, Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # 不能沿用默认的 disable_existing_loggers=True：独立迁移进程里它没有意义，
+    # 但 tests/agents 的 PG 夹具是在**测试进程内**调 command.upgrade()，默认值会把
+    # 导入期已存在的 erp.scheduler / erp.worker 等 logger 置为 disabled；
+    # assertLogs 只调 level 不改 disabled，于是出现「本地无 PG 绿、CI 带 PG 红」。
+    # 关掉它不承担任何职责：alembic.ini 只为 root/sqlalchemy/alembic 配 level，
+    # console handler 只挂在 root 上，不靠禁用其他 logger 来避免重复输出。
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 VERSION_TABLE = "alembic_version_erp"

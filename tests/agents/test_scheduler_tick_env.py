@@ -57,13 +57,7 @@ class SchedulerTickEnvTest(unittest.TestCase):
         self.assertIn(ENV_KEY, str(ctx.exception))
 
     def test_startup_log_reports_configured_lease_and_effective(self) -> None:
-        """启动日志必须自证：配置值 / 来源 / lease / 实际生效间隔。
-
-        CI 的 tests/agents 会先跑 ``alembic upgrade head``（PG 夹具），Alembic 的
-        ``fileConfig`` 默认 ``disable_existing_loggers=True``，会把导入期已存在的
-        ``erp.scheduler`` logger 置为 disabled；``assertLogs`` 只改 level 不改
-        disabled，所以这里显式恢复，跑完还原。
-        """
+        """启动日志必须自证：配置值 / 来源 / lease / 实际生效间隔。"""
         scheduler = sched.Scheduler(
             session_factory=None,
             owner="test",
@@ -72,16 +66,11 @@ class SchedulerTickEnvTest(unittest.TestCase):
             lease_seconds=30.0,
         )
         scheduler.stop()
-        was_disabled = sched.logger.disabled
-        sched.logger.disabled = False
-        try:
-            with (
-                self.assertLogs("erp.scheduler", level="INFO") as logs,
-                mock.patch.object(sched.Scheduler, "release", new=mock.AsyncMock()),
-            ):
-                asyncio.run(scheduler.run())
-        finally:
-            sched.logger.disabled = was_disabled
+        with (
+            self.assertLogs("erp.scheduler", level="INFO") as logs,
+            mock.patch.object(sched.Scheduler, "release", new=mock.AsyncMock()),
+        ):
+            asyncio.run(scheduler.run())
         joined = "\n".join(logs.output)
         self.assertIn("tick_seconds=60.0 source=env", joined)
         self.assertIn("lease=30.0s effective=15.0s", joined)
