@@ -149,9 +149,13 @@ class Worker:
         limit = self.lease_seconds * HEARTBEAT_MAX_LEASE_RATIO
         if self.heartbeat_seconds > limit:
             raise ValueError(
-                f"heartbeat_seconds={self.heartbeat_seconds} 超过租约的一半："
-                f"lease_seconds={self.lease_seconds}，上限 {limit}"
-                f"（{_HEARTBEAT_ENV}/--heartbeat-seconds）。"
+                f"heartbeat_seconds={self.heartbeat_seconds} 超过上限 {limit}："
+                f"上限 = lease_seconds({self.lease_seconds}) × "
+                f"{HEARTBEAT_MAX_LEASE_RATIO}（租约的一半）；"
+                f"heartbeat 来自 {_HEARTBEAT_ENV} 或 --heartbeat-seconds，"
+                "lease 来自 --lease-seconds。"
+                "注意：调小租约默认值也会让原本合法的 heartbeat 变非法，"
+                "不是心跳配置写错了。"
                 "心跳比租约还稀疏时，stale 回收和存活信号会滞后一整个租约窗口。"
             )
         self.queue = JobQueueStore(self.session_factory)
@@ -174,7 +178,7 @@ class Worker:
         """
         logger.info(
             "worker %s 启动 queues=%s concurrency=%s heartbeat_seconds=%s source=%s "
-            "lease=%ss renew=%ss heartbeat_limit=%ss",
+            "lease=%ss renew=%ss heartbeat_limit=%ss (lease/2)",
             self.worker_id,
             ",".join(self.queues),
             self.concurrency,

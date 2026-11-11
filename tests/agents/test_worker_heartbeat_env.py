@@ -81,13 +81,28 @@ class WorkerHeartbeatEnvTest(unittest.TestCase):
         self.assertIn("lease", str(ctx.exception))
         self.assertIn("300", str(ctx.exception))
 
+    def test_shrunk_lease_reports_limit_comes_from_lease(self) -> None:
+        """租约默认值被调小时，失败必须说清是 lease/2 收紧了上限。
+
+        场景：租约 60 → 40，配置里的 30 依然合法地存在，但 30 > 40/2 会让
+        所有现有部署起不来。这条不要求放宽闸门，只要求失败原因可读。
+        """
+        with self.assertRaises(ValueError) as ctx:
+            _worker(lease_seconds=40.0, heartbeat_seconds=30.0)
+        message = str(ctx.exception)
+        self.assertIn("lease_seconds(40.0)", message)
+        self.assertIn("上限 20.0", message)
+        self.assertIn("租约的一半", message)
+        self.assertIn("调小租约默认值", message)
+        self.assertIn(ENV_KEY, message)
+
     def test_startup_log_reports_heartbeat_source_lease_and_renew(self) -> None:
         worker = _worker()
         with self.assertLogs("erp.worker", level="INFO") as logs:
             worker._log_startup()
         joined = "\n".join(logs.output)
         self.assertIn("heartbeat_seconds=30.0 source=env", joined)
-        self.assertIn("lease=60.0s renew=20.0s heartbeat_limit=30.0s", joined)
+        self.assertIn("lease=60.0s renew=20.0s heartbeat_limit=30.0s (lease/2)", joined)
 
 
 if __name__ == "__main__":
