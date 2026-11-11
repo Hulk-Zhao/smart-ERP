@@ -56,9 +56,13 @@ class TicketRecord:
     business_key: str
     org_id: str
     period: str
-    systems: tuple[str, ...]
-    write_level: WriteLevel
-    amount: Decimal
+    # ``None`` ＝「涉及系统未知」（执行器建的历史工单没有这个信息）。
+    # 判可见性时按 fail-closed 处理：未知不等于全部，见 ``_in_scope``。
+    systems: tuple[str, ...] | None
+    # 执行器建的历史工单可能没有写等级/金额；这类行因 systems 未知而不可见，
+    # 但仍要能被 ``get`` 映射出来，好让详情统一走「范围未知」403。
+    write_level: WriteLevel | None
+    amount: Decimal | None
     touches_fund: bool
     state: TicketState = TicketState.PENDING_APPROVAL
     version: int = 1
@@ -70,7 +74,7 @@ class TicketRecord:
 
     @property
     def systems_list(self) -> list[str]:
-        return list(self.systems)
+        return list(self.systems or ())
 
     def sort_key(self) -> tuple[str, str]:
         return (self.created_at.isoformat(), str(self.ticket_id))
@@ -92,20 +96,20 @@ class TicketRepository:
         self._rows[ticket.ticket_id] = ticket
         return ticket
 
-    def get(self, *, tenant_id: UUID, ticket_id: UUID) -> TicketRecord | None:
+    async def get(self, *, tenant_id: UUID, ticket_id: UUID) -> TicketRecord | None:
         row = self._rows.get(ticket_id)
         if row is None or row.tenant_id != tenant_id:
             return None
         return row
 
-    def save(self, ticket: TicketRecord) -> None:
+    async def save(self, ticket: TicketRecord) -> None:
         ticket.updated_at = datetime.now(UTC)
         self._rows[ticket.ticket_id] = ticket
 
-    def all(self, *, tenant_id: UUID) -> tuple[TicketRecord, ...]:
+    async def all(self, *, tenant_id: UUID) -> tuple[TicketRecord, ...]:
         return tuple(row for row in self._rows.values() if row.tenant_id == tenant_id)
 
-    def list(
+    async def list(
         self,
         *,
         tenant_id: UUID,
@@ -151,6 +155,10 @@ class TicketRepository:
 
 def _in_scope(ticket: TicketRecord, scope: Scope) -> bool:
     if ticket.org_id != scope.org_id or ticket.period != scope.period:
+        return False
+    if ticket.systems is None:
+        # 涉及系统未知：fail-closed，看不见。若这里返回 True 或做 ``is None or ...``
+        # 的短路，NULL 就等于「租户内全部可见」——最坏的一种默认值。
         return False
     return set(ticket.systems) <= set(scope.system_ids)
 

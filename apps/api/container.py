@@ -22,6 +22,7 @@ from apps.api.store import (
     ReconDatasetRegistry,
     TicketRepository,
 )
+from apps.api.ticket_sql import TicketStorePort
 from apps.audit.ledger import AuditLedger
 from apps.platform.api.errors import ProblemError
 from apps.platform.connectors.sdk import Connector, ConnectorMeta
@@ -98,7 +99,8 @@ class IdempotencyStore:
 
 @dataclass
 class ApiContainer:
-    tickets: TicketRepository = field(default_factory=TicketRepository)
+    #: 工单投影端口；PR2 默认仍是内存实现，SQL 实现在 PR3 与事件化写入一起启用。
+    tickets: TicketStorePort = field(default_factory=TicketRepository)
     recon_batches: ReconBatchRepository = field(default_factory=ReconBatchRepository)
     recon_datasets: ReconDatasetRegistry = field(default_factory=ReconDatasetRegistry)
     ledger: AuditLedger = field(default_factory=AuditLedger)
