@@ -55,7 +55,7 @@ export function ApprovalsPage() {
         if (filter === 'fund') return item.touches_fund;
         if (filter === 'w3') return item.write_level === 'W3';
         if (filter === 'w2') return item.write_level === 'W2';
-        if (filter === 'missing') return item.missing_roles.length > 0;
+        if (filter === 'missing') return item.approval_missing_roles.length > 0;
         return true;
       }),
     [filter, items],
@@ -76,7 +76,7 @@ export function ApprovalsPage() {
       setRole(fallback);
       return;
     }
-    const nextRole = config.roles.find((item) => selected.missing_roles.includes(item)) ?? fallback;
+    const nextRole = config.roles.find((item) => selected.approval_missing_roles.includes(item)) ?? fallback;
     setRole(nextRole);
     setComment('');
     mutation.reset();
@@ -129,7 +129,7 @@ export function ApprovalsPage() {
     ? [
         { label: '金额', value: amount(selected.amount), mono: true },
         { label: '等级', value: selected.write_level, mono: false },
-        { label: '缺角色', value: `${selected.missing_roles.length} 个`, mono: false },
+        { label: '缺角色', value: `${selected.approval_missing_roles.length} 个`, mono: false },
         { label: '等待', value: waitingSince(selected.created_at), mono: false },
       ]
     : [];
@@ -225,10 +225,10 @@ export function ApprovalsPage() {
                       <div className="mt-1 min-w-0 truncate text-[12.5px] font-medium text-slate-800">{task.business_key}</div>
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10.5px] text-slate-400">
                         <span>等 {waitingSince(task.created_at)}</span>
-                        {task.missing_roles.length > 0 ? (
+                        {task.approval_missing_roles.length > 0 ? (
                           <span className="inline-flex items-center gap-0.5 text-amber-600">
                             <IconAlert width={10} height={10} />
-                            缺 {task.missing_roles.join('、')}
+                            缺 {task.approval_missing_roles.join('、')}
                           </span>
                         ) : (
                           <span className="text-emerald-600">角色齐</span>
@@ -291,11 +291,11 @@ export function ApprovalsPage() {
                 <div className="min-w-0 sm:col-span-2">
                   <div className="label">审批角色进度</div>
                   <div className="mt-1 flex flex-wrap gap-1.5">
-                    {detail.data.required_roles.length === 0 ? (
+                    {detail.data.approval_required_roles.length === 0 ? (
                       <span className="text-[12px] text-slate-500">无需审批角色</span>
                     ) : null}
-                    {detail.data.required_roles.map((item) => {
-                      const missing = detail.data!.missing_roles.includes(item);
+                    {detail.data.approval_required_roles.map((item) => {
+                      const missing = detail.data!.approval_missing_roles.includes(item);
                       return (
                         <span key={item} className="inline-flex items-center gap-1">
                           <RoleBadge role={item} />
@@ -306,9 +306,14 @@ export function ApprovalsPage() {
                       );
                     })}
                   </div>
-                  {detail.data.missing_roles.length > 0 ? (
+                  {detail.data.approval_missing_roles.length > 0 ? (
                     <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[10.5px] leading-4 text-amber-800">
-                      仍需角色：{detail.data.missing_roles.join('、')}。现在通过只会记录你的决定，不会推进到执行。
+                      仍需角色：{detail.data.approval_missing_roles.join('、')}。现在通过只会记录你的决定，不会推进到执行。
+                    </p>
+                  ) : detail.data.execution_missing_roles.length > 0 ? (
+                    <p className="mt-2 rounded-lg bg-sky-50 px-2.5 py-1.5 text-[10.5px] leading-4 text-sky-800">
+                      审批链已满足；执行仍需角色：{detail.data.execution_missing_roles.join('、')}
+                      （B 级连接器强制双签，审批一票 ≠ 执行一票）。
                     </p>
                   ) : (
                     <p className="mt-2 inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[10.5px] text-emerald-800">
@@ -391,7 +396,7 @@ export function ApprovalsPage() {
                     已提交：{mutation.data.decision === 'approved' ? '通过' : '驳回'}（{mutation.data.role}）。
                     {mutation.data.satisfied
                       ? ' 审批链已满足。'
-                      : ` 仍需角色：${mutation.data.missing_roles.join('、') || '—'}。`}
+                      : ` 仍需角色：${mutation.data.approval_missing_roles.join('、') || '—'}。`}
                     {mutation.data.ticket_state ? ` 工单状态：${mutation.data.ticket_state}。` : ''}
                   </div>
                 ) : null}
@@ -400,7 +405,7 @@ export function ApprovalsPage() {
               <div className="border-t border-slate-100 px-4 py-3">
                 <ApprovalOpinions
                   approvals={detail.data.approvals}
-                  requiredRoles={detail.data.required_roles}
+                  requiredRoles={detail.data.approval_required_roles}
                   viewerRole={role}
                   viewerId={config.viewerId}
                   initiatorId={detail.data.initiator_id}

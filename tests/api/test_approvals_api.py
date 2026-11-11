@@ -49,7 +49,7 @@ def test_approve_records_decision_without_executing(env):
         headers=env.headers(),
     ).json()
     assert detail["state"] == "待审批"
-    assert detail["missing_roles"] == []
+    assert detail["approval_missing_roles"] == []
 
 
 def test_approve_reject_requires_comment_and_is_not_self_approvable(env):

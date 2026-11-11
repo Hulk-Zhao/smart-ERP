@@ -197,9 +197,9 @@ export function TicketDetailPage() {
             { label: '金额', value: amount(detail.amount), mono: true, tone: '' },
             {
               label: '缺角色',
-              value: `${detail.missing_roles.length} 个`,
+              value: `${detail.approval_missing_roles.length} 个`,
               mono: false,
-              tone: detail.missing_roles.length > 0 ? 'text-amber-700' : 'text-emerald-700',
+              tone: detail.approval_missing_roles.length > 0 ? 'text-amber-700' : 'text-emerald-700',
             },
             { label: '审计影像', value: `${detail.audit_image_count} 张`, mono: false, tone: '' },
             { label: '系统', value: detail.systems.join(' / '), mono: false, tone: '' },
@@ -290,7 +290,7 @@ export function TicketDetailPage() {
             <div className="card-body">
               <ApprovalOpinions
                 approvals={detail.approvals}
-                requiredRoles={detail.required_roles}
+                requiredRoles={detail.approval_required_roles}
                 viewerRole={config.roles[0] ?? null}
                 viewerId={config.viewerId}
                 initiatorId={detail.initiator_id}
@@ -362,17 +362,17 @@ export function TicketDetailPage() {
           <section className="card min-w-0">
             <div className="card-head">
               <h2 className="section-title">审批进度</h2>
-              <span className={`badge ${detail.missing_roles.length ? 'bg-amber-50 text-amber-700 ring-amber-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200'}`}>
-                缺 {detail.missing_roles.length} 个角色
+              <span className={`badge ${detail.approval_missing_roles.length ? 'bg-amber-50 text-amber-700 ring-amber-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200'}`}>
+                缺 {detail.approval_missing_roles.length} 个角色
               </span>
             </div>
             <div className="card-body space-y-2.5">
               <div className="space-y-1.5">
-                {detail.required_roles.length === 0 ? (
+                {detail.approval_required_roles.length === 0 ? (
                   <span className="text-[12px] text-slate-500">无需审批角色</span>
                 ) : null}
-                {detail.required_roles.map((item) => {
-                  const missing = detail.missing_roles.includes(item);
+                {detail.approval_required_roles.map((item) => {
+                  const missing = detail.approval_missing_roles.includes(item);
                   return (
                     <div key={item} className="flex items-center gap-2 text-[12px]">
                       <span
@@ -390,6 +390,14 @@ export function TicketDetailPage() {
                   );
                 })}
               </div>
+              {detail.execution_required_roles.length > 0 ? (
+                <p className="rounded-lg bg-sky-50 px-2.5 py-2 text-[10.5px] leading-4 text-sky-800">
+                  执行要求：{detail.execution_required_roles.join('、')}
+                  {detail.execution_missing_roles.length > 0
+                    ? `；仍缺 ${detail.execution_missing_roles.join('、')}（B 级连接器强制双签，审批一票 ≠ 执行一票）。`
+                    : '；已满足，可执行。'}
+                </p>
+              ) : null}
               <p className="rounded-lg bg-slate-50 px-2.5 py-2 text-[10.5px] leading-4 text-slate-500">
                 审批意见按当前身份脱敏展示；发起人看不到审批意见正文。
               </p>

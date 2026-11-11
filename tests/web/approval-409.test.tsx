@@ -27,8 +27,10 @@ beforeEach(async () => {
           touches_fund: true,
           steps: [],
           audit_image_count: 0,
-          required_roles: ['reviewer', 'approver'],
-          missing_roles: ['approver'],
+          approval_required_roles: ['reviewer', 'approver'],
+          approval_missing_roles: ['approver'],
+          execution_required_roles: ['reviewer', 'approver'],
+          execution_missing_roles: ['approver'],
           approvals: [
             {
               role: 'reviewer',

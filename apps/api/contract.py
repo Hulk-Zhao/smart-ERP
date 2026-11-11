@@ -51,6 +51,17 @@ app 装配由平台底座负责：`apps/main.py` 调用 `install_platform(app)`�
 - 审批与执行分离：审批人用 `/approvals/*` 落意见；发起人/执行体用
   `/tickets/{id}/actions/approve` 统一过闸并执行已锁定的写计划。
 
+## 审批票 ≠ 执行票（required_roles 拆成两组字段）
+- `approval_required_roles / approval_missing_roles`：**审批链**要求，只由写等级/
+  金额/资金属性决定，`ApprovalDecisionOut.satisfied` 就是它的判定结果。
+- `execution_required_roles / execution_missing_roles`：**执行闸**要求，用同一个
+  `ApprovalService.required_roles` 推导，但额外把「目标连接器是否 B 级」作为
+  `force_dual` 输入（与 `AccessGate` 同一判据）。B 级连接器强制双签，因此
+  `execution_required_roles` 可能比 `approval_required_roles` 多一票。
+- 两者不是同名字段的两套口径：`execution_*` 是 `approval_*` 在给定连接器下的
+  严格超集。审批 `satisfied=true` 只代表审批链满足；`execution_missing_roles`
+  非空时执行仍返回 409 `E-POLICY-APPROVAL`。
+
 ## 计量（结果计费，W0 只读）
 - `GET /v1/metering/batches/{batch_id}/statement` 只输出程序性事实（是否自动放行、
   是否需人工、有无证据链），不判断「结论是否正确」；`format=csv` 导出逐行明细。

@@ -67,8 +67,8 @@ def test_get_ticket_detail_shows_required_and_missing_roles(env):
     body = response.json()
     assert body["state"] == "待审批"
     assert body["write_level"] == "W1"
-    assert body["required_roles"] == ["reviewer"]
-    assert body["missing_roles"] == ["reviewer"]
+    assert body["approval_required_roles"] == ["reviewer"]
+    assert body["approval_missing_roles"] == ["reviewer"]
     assert body["steps"] == []
 
 
@@ -97,7 +97,7 @@ def test_approve_executes_pending_write_through_gateway(env):
     assert detail_body["state"] == "执行中"
     assert detail_body["audit_image_count"] == 1
     assert len(detail_body["approvals"]) == 1
-    assert detail_body["missing_roles"] == []
+    assert detail_body["approval_missing_roles"] == []
 
 
 def test_approve_is_idempotent_and_rejects_key_reuse_with_new_body(env):
@@ -127,6 +127,23 @@ def test_write_without_idempotency_key_is_rejected_before_any_effect(env):
     assert response.status_code == 400
     assert response.json()["code"] == "E-IDEM-CONFLICT"
     assert env.connector.writes == []
+
+
+def test_role_fields_come_from_the_same_rule_on_a_level_connector(env):
+    """A 级连接器不触发强制双签：同一规则、无附加输入 → 两组字段相等。"""
+
+    for ticket, expected in (("normal", ["reviewer"]), ("dual", ["reviewer", "approver"])):
+        response = env.client.get(
+            f"{PREFIX}/tickets/{env.tickets[ticket]}",
+            params=env.scope_params(),
+            headers=env.headers(),
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        # FakeConnector 是 A 级：force_dual=False，审批组与执行组必须一致。
+        assert body["approval_required_roles"] == expected
+        assert body["execution_required_roles"] == expected
+        assert body["approval_missing_roles"] == body["execution_missing_roles"]
 
 
 def test_reject_action_records_decision_and_terminates(env):

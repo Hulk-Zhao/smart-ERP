@@ -71,7 +71,7 @@ export function OverviewPage() {
   const executing = items.filter((item) => item.state === '执行中' || item.state === '校验中');
   const w3 = items.filter((item) => item.write_level === 'W3');
   const fundAmount = tasks.filter((item) => item.touches_fund).reduce((sum, item) => sum + Number(item.amount || 0), 0);
-  const missingRole = tasks.filter((item) => item.missing_roles.length > 0);
+  const missingRole = tasks.filter((item) => item.approval_missing_roles.length > 0);
   const distribution = TICKET_STATES.map((state) => ({
     state,
     count: items.filter((item) => item.state === state).length,
@@ -82,7 +82,7 @@ export function OverviewPage() {
     const score = (task: typeof left) =>
       (task.write_level === 'W3' ? 100 : task.write_level === 'W2' ? 40 : 0) +
       (task.touches_fund ? 30 : 0) +
-      (task.missing_roles.length > 0 ? 20 : 0);
+      (task.approval_missing_roles.length > 0 ? 20 : 0);
     const diff = score(right) - score(left);
     if (diff !== 0) return diff;
     return new Date(left.created_at).getTime() - new Date(right.created_at).getTime();
@@ -275,10 +275,10 @@ export function OverviewPage() {
                           <span>{task.scene_code}</span>
                           <span>发起 {shortId(task.initiator_id)}</span>
                           <span>等 {waitingSince(task.created_at)}</span>
-                          {task.missing_roles.length > 0 ? (
+                          {task.approval_missing_roles.length > 0 ? (
                             <span className="inline-flex items-center gap-0.5 text-amber-600">
                               <IconAlert width={11} height={11} />
-                              缺 {task.missing_roles.map((role) => ROLE_LABELS[role] ?? role).join('、')}
+                              缺 {task.approval_missing_roles.map((role) => ROLE_LABELS[role] ?? role).join('、')}
                             </span>
                           ) : (
                             <span className="text-emerald-600">角色齐</span>

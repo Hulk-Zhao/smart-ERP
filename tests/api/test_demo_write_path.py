@@ -336,7 +336,6 @@ def test_wrong_whitelist_is_rejected_before_any_external_write(
 
 def test_compensation_only_action_cannot_be_forward_write(write_env: WriteEnv) -> None:
     """目标草稿真实存在：去掉 compensation_only 后这里会真的把它删掉。"""
-
     c_code = "PO-STUB-DEMO-W2-001"
     write_env.stub.state.add_receipt(
         {
@@ -355,3 +354,109 @@ def test_compensation_only_action_cannot_be_forward_write(write_env: WriteEnv) -
     assert [r["cCode"] for r in write_env.stub.state.receipts] == [c_code]
     assert write_env.stub.state.reversals == []
     assert [r for r in write_env.stub.state.requests if r["method"] == "DELETE"] == []
+
+
+_ROLE_FIELDS = (
+    "approval_required_roles",
+    "approval_missing_roles",
+    "execution_required_roles",
+    "execution_missing_roles",
+)
+
+
+def _detail(write_env: WriteEnv, ticket: str) -> dict:
+    response = write_env.client.get(
+        f"{PREFIX}/tickets/{write_env.tickets[ticket]}",
+        params=[("org_id", ORG), ("period", PERIOD), ("system_ids", SYSTEM)],
+        headers=write_env.headers(),
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_approval_roles_and_execution_roles_are_separately_named(
+    write_env: WriteEnv,
+) -> None:
+    """同一张 B 级 W2 工单：审批一票即可满足，执行仍需 reviewer + approver。
+
+    这两个答案来自**同一个** ``ApprovalService.required_roles``：
+    审批侧 ``force_dual=False``，执行侧把「连接器是 B 级」作为 ``force_dual``
+    （与 ``AccessGate`` 同一判据），所以执行要求是审批要求的超集。
+    """
+
+    before = _detail(write_env, "w2")
+    assert before["approval_required_roles"] == ["approver"]
+    assert before["approval_missing_roles"] == ["approver"]
+    assert before["execution_required_roles"] == ["approver", "reviewer"]
+    assert before["execution_missing_roles"] == ["approver", "reviewer"]
+
+    approved = write_env.decision(
+        "w2", role="approver", who="approver", key="k-roles-approve"
+    )
+    assert approved.status_code == 200, approved.text
+    body = approved.json()
+    # 审批链已满足（一票），但执行闸还缺 reviewer（双签）。
+    assert body["satisfied"] is True
+    assert body["approval_required_roles"] == ["approver"]
+    assert body["approval_missing_roles"] == []
+    assert body["execution_required_roles"] == ["approver", "reviewer"]
+    assert body["execution_missing_roles"] == ["reviewer"]
+
+    blocked = write_env.execute("w2", key="k-roles-exec-blocked")
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["code"] == "E-POLICY-APPROVAL"
+    assert write_env.stub.state.receipts == []
+
+    reviewed = write_env.decision(
+        "w2", role="reviewer", who="reviewer", key="k-roles-review"
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    reviewed_body = reviewed.json()
+    assert reviewed_body["execution_required_roles"] == ["approver", "reviewer"]
+    assert reviewed_body["execution_missing_roles"] == []
+
+    executed = write_env.execute("w2", key="k-roles-exec")
+    assert executed.status_code == 200, executed.text
+    out = executed.json()
+    assert out["approval_required_roles"] == ["approver"]
+    assert out["approval_missing_roles"] == []
+    assert out["execution_required_roles"] == ["approver", "reviewer"]
+    assert out["execution_missing_roles"] == []
+
+
+def test_single_required_roles_field_cannot_carry_two_meanings(
+    write_env: WriteEnv,
+) -> None:
+    """负向：旧实现两个入口共用 ``required_roles``，却分别表示审批/执行要求。
+
+    改动前实测：审批入口 ``required_roles=["approver"]``，执行入口
+    ``required_roles=["approver","reviewer"]``——同名不同义，调用方无法判断
+    「还差几票」。本用例断言该歧义字段已不存在，且三个入口的角色字段集合
+    一致；在旧实现上第一步就会红（``required_roles``/``missing_roles`` 仍在）。
+    """
+
+    assert write_env.decision("w2", key="k-roles-n1").status_code == 200
+    assert write_env.decision(
+        "w2", role="reviewer", who="reviewer", key="k-roles-n2"
+    ).status_code == 200
+    executed = write_env.execute("w2", key="k-roles-n3")
+    assert executed.status_code == 200, executed.text
+
+    env_detail = _detail(write_env, "w2")
+    for body in (env_detail, executed.json()):
+        assert "required_roles" not in body
+        assert "missing_roles" not in body
+        assert set(_ROLE_FIELDS) <= set(body)
+
+    action = executed.json()
+    assert (
+        env_detail["execution_required_roles"]
+        == action["execution_required_roles"]
+        == ["approver", "reviewer"]
+    )
+    assert (
+        env_detail["approval_required_roles"]
+        == action["approval_required_roles"]
+        == ["approver"]
+    )
+

@@ -114,7 +114,11 @@ from apps.recon.models import (
 )
 from apps.security.approvals import ApprovalRecord, TicketFacts
 from apps.security.gate import AccessGrant, AccessRequest
-from apps.security.identity import SessionToken, UserPrincipal
+from apps.security.identity import (
+    SessionToken,
+    UserPrincipal,
+    connector_security_level,
+)
 from apps.security.roles import (
     assert_can_export_audit,
     assert_can_read_ticket,
@@ -332,7 +336,11 @@ async def _hydrate_approvals(container: ApiContainer, ticket: TicketRecord) -> N
     container.approvals.replace(str(ticket.ticket_id), records)
 
 
-def _required_roles(container: ApiContainer, ticket: TicketRecord) -> tuple[str, ...]:
+def _approval_required_roles(
+    container: ApiContainer, ticket: TicketRecord
+) -> tuple[str, ...]:
+    """审批阶段要求：决定 ``satisfied`` 的治理阈值，不含执行期凭据附加项。"""
+
     if ticket.write_level is WriteLevel.W3:
         return ()
     return container.approvals.required_roles(
@@ -342,7 +350,9 @@ def _required_roles(container: ApiContainer, ticket: TicketRecord) -> tuple[str,
     )
 
 
-def _missing_roles(container: ApiContainer, ticket: TicketRecord) -> tuple[str, ...]:
+def _approval_missing_roles(
+    container: ApiContainer, ticket: TicketRecord
+) -> tuple[str, ...]:
     if ticket.write_level is WriteLevel.W3:
         return ()
     return container.approvals.missing_roles(
@@ -351,6 +361,50 @@ def _missing_roles(container: ApiContainer, ticket: TicketRecord) -> tuple[str, 
         amount=ticket.amount,
         touches_fund=ticket.touches_fund,
         initiator_id=ticket.initiator_id,
+    )
+
+
+def _execution_dual_required(container: ApiContainer, ticket: TicketRecord) -> bool:
+    """执行阶段是否被连接器强制双签（B 级）。
+
+    与 ``AccessGate`` 用同一条判据（``connector_security_level == "B"``），
+    不是另一套规则；只是审批入口此前没接这个输入。
+    """
+
+    connector = container.connectors.get(_write_system(ticket))
+    if connector is None:
+        # 详情/待办不应因连接器未装配而 502；执行侧仍会自己报 CONN_UNAVAILABLE。
+        return False
+    return connector_security_level(connector.meta) == "B"
+
+
+def _execution_required_roles(
+    container: ApiContainer, ticket: TicketRecord
+) -> tuple[str, ...]:
+    """执行阶段要求：审批阈值 + 连接器凭据附加的双签。"""
+
+    if ticket.write_level is WriteLevel.W3:
+        return ()
+    return container.approvals.required_roles(
+        level=ticket.write_level,
+        amount=ticket.amount,
+        touches_fund=ticket.touches_fund,
+        force_dual=_execution_dual_required(container, ticket),
+    )
+
+
+def _execution_missing_roles(
+    container: ApiContainer, ticket: TicketRecord
+) -> tuple[str, ...]:
+    if ticket.write_level is WriteLevel.W3:
+        return ()
+    return container.approvals.missing_roles(
+        ticket_id=str(ticket.ticket_id),
+        level=ticket.write_level,
+        amount=ticket.amount,
+        touches_fund=ticket.touches_fund,
+        initiator_id=ticket.initiator_id,
+        force_dual=_execution_dual_required(container, ticket),
     )
 
 
@@ -530,8 +584,11 @@ async def approve_ticket(
         action="approve",
         state=ticket.state.value,
         version=ticket.version,
-        required_roles=list(grant.required_roles),
-        missing_roles=[],
+        approval_required_roles=list(_approval_required_roles(container, ticket)),
+        approval_missing_roles=list(_approval_missing_roles(container, ticket)),
+        # 执行闸刚刚放行，这里的角色是四道闸实际核对过的那一组（含 B 级双签）。
+        execution_required_roles=list(grant.required_roles),
+        execution_missing_roles=[],
         executed_steps=executed,
     )
 
@@ -663,6 +720,12 @@ async def reject_ticket(
     resolve_transition(
         ticket.state, TicketState.REJECTED, "rejected", TransitionContext()
     )
+    # 角色要求要在清空 pending_write 之前取：执行侧的双签判定依赖目标连接器。
+    approval_roles = _approval_required_roles(container, ticket)
+    approval_missing = _approval_missing_roles(container, ticket)
+    execution_roles = _execution_required_roles(container, ticket)
+    execution_missing = _execution_missing_roles(container, ticket)
+
     version = await container.tickets.transition(
         tenant_id=session.tenant_id,
         ticket_id=ticket.ticket_id,
@@ -682,8 +745,10 @@ async def reject_ticket(
         action="reject",
         state=ticket.state.value,
         version=ticket.version,
-        required_roles=list(_required_roles(container, ticket)),
-        missing_roles=list(_missing_roles(container, ticket)),
+        approval_required_roles=list(approval_roles),
+        approval_missing_roles=list(approval_missing),
+        execution_required_roles=list(execution_roles),
+        execution_missing_roles=list(execution_missing),
     )
 
 
@@ -973,7 +1038,7 @@ async def list_pending_approvals(
     tasks: list[ApprovalTaskOut] = []
     for ticket in rows:
         await _hydrate_approvals(container, ticket)
-        required = _required_roles(container, ticket)
+        required = _approval_required_roles(container, ticket)
         if not required:
             continue
         if ticket.initiator_id == session.user_id:
@@ -991,8 +1056,10 @@ async def list_pending_approvals(
                 amount=_amount_text(ticket.amount),
                 touches_fund=ticket.touches_fund,
                 initiator_id=ticket.initiator_id,
-                required_roles=list(required),
-                missing_roles=list(_missing_roles(container, ticket)),
+                approval_required_roles=list(required),
+                approval_missing_roles=list(_approval_missing_roles(container, ticket)),
+                execution_required_roles=list(_execution_required_roles(container, ticket)),
+                execution_missing_roles=list(_execution_missing_roles(container, ticket)),
                 created_at=ticket.created_at,
             )
         )
@@ -1032,7 +1099,11 @@ async def decide_approval(
         container, ticket, session, body.role, decision, body.comment
     )
 
+    # 双签判定依赖目标连接器，必须在 pending_write 清空之前取；
+    # 「还缺几张票」则要在本次决定入缓存之后才算。
+    execution_roles = _execution_required_roles(container, ticket)
     if decision == "rejected":
+        execution_missing = _execution_missing_roles(container, ticket)
         # 审批行与状态推进同一事务：任一侧失败都整体回滚，不会留下
         # 「工单已驳回但审批记录没落库」或反之。
         resolve_transition(
@@ -1054,13 +1125,15 @@ async def decide_approval(
         ticket.pending_write = None
     else:
         await _persist_decision(container, ticket, record)
+        execution_missing = _execution_missing_roles(container, ticket)
 
-    required = _required_roles(container, ticket)
+    required = _approval_required_roles(container, ticket)
     return ApprovalDecisionOut(
         ticket_id=ticket.ticket_id,
         role=record.role,
         decision=record.decision,
         decided_at=record.decided_at,
+        # satisfied 只表示「审批链是否满足」；执行是否可放行看 execution_missing_roles。
         satisfied=container.approvals.satisfied(
             ticket_id=str(ticket.ticket_id),
             level=ticket.write_level,
@@ -1068,8 +1141,10 @@ async def decide_approval(
             touches_fund=ticket.touches_fund,
             initiator_id=ticket.initiator_id,
         ),
-        required_roles=list(required),
-        missing_roles=list(_missing_roles(container, ticket)),
+        approval_required_roles=list(required),
+        approval_missing_roles=list(_approval_missing_roles(container, ticket)),
+        execution_required_roles=list(execution_roles),
+        execution_missing_roles=list(execution_missing),
         ticket_state=ticket.state.value,
     )
 
@@ -1797,8 +1872,10 @@ def _ticket_detail(container: ApiContainer, ticket: TicketRecord) -> TicketDetai
             )
             for record in records
         ],
-        required_roles=list(_required_roles(container, ticket)),
-        missing_roles=list(_missing_roles(container, ticket)),
+        approval_required_roles=list(_approval_required_roles(container, ticket)),
+        approval_missing_roles=list(_approval_missing_roles(container, ticket)),
+        execution_required_roles=list(_execution_required_roles(container, ticket)),
+        execution_missing_roles=list(_execution_missing_roles(container, ticket)),
         audit_image_count=len(ticket.steps),
         rollback_available=sync_rollback_enabled(),
     )
