@@ -151,7 +151,9 @@ class U8Transport:
         body = outcome.record
         fingerprint = request_hash({"action": action_key, "body": body})
 
-        decision = await self._idem.begin(str(request.idem_key), fingerprint)
+        decision = await self._idem.begin(
+            str(request.idem_key), fingerprint, action_key=action_key
+        )
         if decision.status is IdemStatus.REPLAY and decision.response is not None:
             stored = dict(decision.response)
             return U8TransportResponse(
@@ -201,7 +203,9 @@ class U8Transport:
             raise ConnectorError(ErrorKind.INVALID, f"动作 {action_key} 缺 cCode，无法冲销")
         fingerprint = request_hash({"action": action_key, "cCode": c_code})
 
-        decision = await self._idem.begin(str(request.idem_key), fingerprint)
+        decision = await self._idem.begin(
+            str(request.idem_key), fingerprint, action_key=action_key
+        )
         if decision.status is IdemStatus.REPLAY and decision.response is not None:
             stored = dict(decision.response)
             return U8TransportResponse(
