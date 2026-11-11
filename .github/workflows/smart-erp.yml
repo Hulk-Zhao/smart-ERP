@@ -641,10 +641,11 @@ jobs:
           image="smart-erp/${{ matrix.image }}:${tag}"
           case "${{ matrix.image }}" in
             app)
-              # 同一镜像被 api / worker / scheduler / migrate 四个 command 使用；
-              # 只 import apps.main 等于只守了 api，漏包换个入口照样复发。
+              # 同一镜像被 api / worker / scheduler / compensation / migrate 五个
+              # command 使用；只 import apps.main 等于只守了 api，漏包换个入口照样
+              # 复发（#89 刚新增 compensation 入口）。
               docker run --rm "$image" python -c \
-                "import apps.main, core.runtime.worker, core.runtime.scheduler"
+                "import apps.main, core.runtime.worker, core.runtime.scheduler, apps.agents.compensation_worker"
               docker run --rm --entrypoint alembic "$image" --version
               ;;
             connector-gw)
