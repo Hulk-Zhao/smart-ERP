@@ -107,6 +107,105 @@ def test_heartbeat_and_fail_reject_stale_gen(db: str) -> None:
     asyncio.run(_run())
 
 
+def test_enqueue_without_delay_writes_null_run_at(db: str) -> None:
+    """入队无延迟必须写 NULL，而不是 now()+0：否则回拨又把任务藏进未来。"""
+
+    async def _run() -> None:
+        async with db_env(db) as env:
+            queue = JobQueueStore(env.sf)
+            job_id = await queue.enqueue("agent", "echo")
+            async with env.sf() as session:
+                run_at = (
+                    await session.execute(
+                        text("SELECT run_at FROM erp.job_queue WHERE id = :id"),
+                        {"id": job_id},
+                    )
+                ).scalar_one()
+            assert run_at is None
+
+    asyncio.run(_run())
+
+
+def test_fail_with_zero_backoff_writes_null_run_at(db: str) -> None:
+    """backoff=0 的失败结算写 NULL：库时钟回拨 1.4s 时仍能被 claim。
+
+    「回拨」的模拟：另一行的 run_at 是「回拨前写的 now()+1.4s」，回拨后看起来在未来；
+    NULL 行不受影响——这条用例是 0011 值得迁移的直接证据。
+    """
+
+    async def _run() -> None:
+        async with db_env(db) as env:
+            queue = JobQueueStore(env.sf)
+            job_id = await queue.enqueue("agent", "echo")
+            claimed = await queue.claim(["agent"], owner="w-fail", lease_seconds=30)
+            assert claimed is not None and claimed.id == job_id
+
+            state = await queue.fail(
+                job_id,
+                owner="w-fail",
+                lease_gen=claimed.lease_gen,
+                error="boom",
+                backoff_seconds=0.0,
+            )
+            assert state == "queued"
+            async with env.sf() as session:
+                run_at = (
+                    await session.execute(
+                        text("SELECT run_at FROM erp.job_queue WHERE id = :id"),
+                        {"id": job_id},
+                    )
+                ).scalar_one()
+            assert run_at is None, "backoff=0 必须写 NULL，不能写 now()+0"
+
+            # 模拟回拨 1.4s 之后的时间戳：高优先级但 run_at 在「未来」的行不可领
+            hidden_id = await queue.enqueue("agent", "echo", priority=9)
+            async with env.sf() as session, session.begin():
+                await session.execute(
+                    text(
+                        "UPDATE erp.job_queue "
+                        "SET run_at = now() + interval '1.4 seconds' WHERE id = :id"
+                    ),
+                    {"id": hidden_id},
+                )
+
+            again = await queue.claim(["agent"], owner="w-after", lease_seconds=30)
+            assert again is not None and again.id == job_id
+            async with env.sf() as session:
+                hidden_state = (
+                    await session.execute(
+                        text("SELECT state FROM erp.job_queue WHERE id = :id"),
+                        {"id": hidden_id},
+                    )
+                ).scalar_one()
+            assert hidden_state == "queued", "回拨期间 run_at 在未来的行应被隐藏"
+
+    asyncio.run(_run())
+
+
+def test_reclaim_requeue_with_zero_backoff_writes_null_run_at(db: str) -> None:
+    """回收重排（backoff=0）同样写 NULL，避免回拨把刚回收的任务藏起来。"""
+
+    async def _run() -> None:
+        async with db_env(db) as env:
+            queue = JobQueueStore(env.sf)
+            job_id = await queue.enqueue("agent", "echo")
+            claimed = await queue.claim(["agent"], owner="w-slow", lease_seconds=0.05)
+            assert claimed is not None
+
+            await asyncio.sleep(0.1)
+            assert await queue.reclaim_stale(backoff_seconds=0.0) == 1
+            async with env.sf() as session:
+                run_at = (
+                    await session.execute(
+                        text("SELECT run_at FROM erp.job_queue WHERE id = :id"),
+                        {"id": job_id},
+                    )
+                ).scalar_one()
+            assert run_at is None
+
+    asyncio.run(_run())
+
+
 def test_run_at_null_is_immediately_claimable(db: str) -> None:
     """NULL = 立即可领取；未来的 run_at 即使 priority 更高也不能被领。"""
 

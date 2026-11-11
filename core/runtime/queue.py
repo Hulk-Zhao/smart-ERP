@@ -6,11 +6,12 @@
   + ``lease_gen``+1；``run_at IS NULL`` 表示「立即可领取」；
 - 成功：``succeeded``（终态）；``complete`` / ``fail`` / ``heartbeat`` 都必须带回
   ``lease_gen``，与库里不一致时抛 :class:`LeaseLostError`（显式失败，不静默）；
-- 失败：未到 ``max_attempts`` → 回 ``queued`` 并按退避设置 ``run_at``；
+- 失败：未到 ``max_attempts`` → 回 ``queued`` 并按退避设置 ``run_at``
+  （``backoff=0`` 时写 NULL = 立即可领取，避免回拨把任务藏进未来）；
   到上限 → ``dead``（终态，不再自动重试，等人工重放）；
 - 回收：``running`` 且 ``lease_expires_at`` 超过 ``grace_seconds`` 宽限仍未续租
   才视为 owner 已死（``exclude_owner`` 可排除调用方自己持有的行），
-  未超限回 ``queued``，超限转 ``dead``；
+  未超限回 ``queued``（``backoff=0`` 同样写 NULL），超限转 ``dead``；
 - 单跑由状态机（``state='running'`` + 租约）保证，不靠唯一索引硬撞。
 """
 
@@ -123,6 +124,7 @@ _SETTLE_FAILED_SQL = text(
        SET state = CASE WHEN attempts >= max_attempts THEN 'dead' ELSE 'queued' END,
            run_at = CASE
                       WHEN attempts >= max_attempts THEN run_at
+                      WHEN :immediate THEN NULL
                       ELSE now() + make_interval(secs => :backoff_seconds)
                     END,
            last_error = :error,
@@ -158,7 +160,9 @@ class JobQueueStore:
                         "INSERT INTO erp.job_queue "
                         "(queue, kind, payload, priority, max_attempts, run_at) "
                         "VALUES (:queue, :kind, CAST(:payload AS jsonb), :priority, "
-                        ":max_attempts, now() + make_interval(secs => :delay)) "
+                        ":max_attempts, "
+                        "CASE WHEN :immediate THEN NULL "
+                        "ELSE now() + make_interval(secs => :delay) END) "
                         "RETURNING id"
                     ),
                     {
@@ -168,6 +172,7 @@ class JobQueueStore:
                         "priority": priority,
                         "max_attempts": max_attempts,
                         "delay": delay_seconds,
+                        "immediate": delay_seconds <= 0,
                     },
                 )
             ).scalar_one()
@@ -349,6 +354,7 @@ class JobQueueStore:
                             "lease_gen": lease_gen,
                             "error": error,
                             "backoff_seconds": backoff_seconds,
+                            "immediate": backoff_seconds <= 0,
                         },
                     )
                 ).scalar_one_or_none()
@@ -391,6 +397,7 @@ class JobQueueStore:
                                    END,
                            run_at = CASE
                                       WHEN attempts >= max_attempts THEN run_at
+                                      WHEN :immediate THEN NULL
                                       ELSE now() + make_interval(secs => :backoff)
                                     END,
                            last_error = CASE
@@ -420,6 +427,7 @@ class JobQueueStore:
                     "limit": limit,
                     "grace": grace_seconds,
                     "exclude_owner": exclude_owner,
+                    "immediate": backoff_seconds <= 0,
                 },
             )
             return int(result.rowcount or 0)
