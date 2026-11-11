@@ -181,6 +181,7 @@ def build_runtime(
     lease_ttl_seconds: int = 30,
     alert_sink: Any = None,
     metrics: Any = None,
+    sleep: Any = None,
 ) -> TicketRuntime:
     """把测试替身装配成运行时（写入仍走真实 WriteGateway）。"""
 
@@ -214,4 +215,5 @@ def build_runtime(
         lease_ttl_seconds=lease_ttl_seconds,
         alert_sink=alert_sink,
         metrics=metrics,
+        sleep=sleep or asyncio.sleep,
     )
