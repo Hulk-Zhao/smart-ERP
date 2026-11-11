@@ -79,7 +79,7 @@
     "ticket_steps": 20,
     "ticket_events": 65,
     "audit_images": 18,
-    "approval_records": 25,
+    "approval_records": 26,
     "recon_line_links": 16,
     "price_book": 1
   },
@@ -144,6 +144,6 @@
     "ticket_case.csv": "4957287b083c2eae78c41917013d7528b7a023b8445484b24168297db07f2e2d",
     "promotion.csv": "9e78318b4bbec9c5f86650940a78a8762e63042c5ca38c752a24846e0fe8cb09",
     "rebate_accrual.csv": "1227f4e650ca7438e934fb74eef4a2efb0c4cce57be7531f96e93e365fdc2dc6",
-    "erp_seed.json": "43dfc3edc9fd7a9775f9b0ad9f3b8e3412e62453101b2f685475dcd554b25648"
+    "erp_seed.json": "23003e49ef6176fd8b9f34e68bc4f5e8b1c2166492ed29b66de8ea698f614e96"
   }
 }

@@ -171,8 +171,16 @@ export ERP_U8_BASE_URL=http://127.0.0.1:8013          # PowerShell: $env:ERP_U8_
 
 | 工单号 | 写入等级 | 预期结果 |
 | --- | --- | --- |
-| `DEMO-W2-WRITE-9001` | W2 | U8 是 B 级连接器，强制双人复核（`reviewer` + `approver`）；审批通过后真实 `POST` 到桩，回执含 U8 单号/时间戳/关键字段，审计影像有 `field_diff` |
+| `DEMO-W2-WRITE-9001` | W2 | U8 是 B 级连接器，强制双人复核（`reviewer` + `approver`）；两票齐后由发起人触发执行，真实 `POST` 到桩，回执含 U8 单号/时间戳/关键字段，审计影像有 `field_diff` |
 | `DEMO-W3-FUND-9002` | W3 | 在 AccessGate 被 `E-POLICY-W3FORBIDDEN` 拒绝，桩的 `/stub/requests` 保持为空（**零外部写入**） |
+
+> 演示口径（重要）：`DEMO-W2-WRITE-9001` 的 `reviewer` 票由种子预置在
+> `erp.approval_record`（操作人 `bbbbbbbb…`、时间 `12:15`、理由见 comment），
+> 现场只需以 `dddddddd…` 补 `approver` 一票；两票齐后 `satisfied=true`，但工单
+> **不会因此自动执行**。真正触发写入的是发起人（执行体 `aaaaaaaa…`）调用
+> `POST /v1/tickets/{id}/actions/approve`；审批人身份调该接口会 403
+> `E-AUTHZ-001`（职责分离约束，不是缺陷）。单令牌环境请按「审批人点票 +
+> 执行体触发」两步演示，不要用审批人令牌冒充发起人。
 
 核对「单据到底有没有到 / 有没有冲销」：
 

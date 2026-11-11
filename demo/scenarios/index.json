@@ -45,7 +45,7 @@
         "ticket_steps": 20,
         "ticket_events": 65,
         "audit_images": 18,
-        "approval_records": 25,
+        "approval_records": 26,
         "recon_line_links": 16,
         "price_book": 1
       },
@@ -125,7 +125,7 @@
         "ticket_steps": 20,
         "ticket_events": 65,
         "audit_images": 18,
-        "approval_records": 25,
+        "approval_records": 26,
         "recon_line_links": 16,
         "price_book": 1
       },
@@ -205,7 +205,7 @@
         "ticket_steps": 20,
         "ticket_events": 65,
         "audit_images": 18,
-        "approval_records": 25,
+        "approval_records": 26,
         "recon_line_links": 16,
         "price_book": 1
       },
