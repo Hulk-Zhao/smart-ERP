@@ -40,7 +40,7 @@ from apps.audit.monitor import AuditChainMonitor
 from apps.audit.store import SqlAuditStore
 from apps.platform.config import get_settings
 from apps.platform.db.session import build_engine, build_session_factory
-from core.runtime.queue import JobQueueStore
+from core.runtime.queue import DEFAULT_RECLAIM_GRACE_SECONDS, JobQueueStore
 from observability.metrics import MetricsRegistry
 
 logger = logging.getLogger("erp.scheduler")
@@ -103,6 +103,9 @@ class Scheduler:
     scope: str = DEFAULT_SCOPE
     lease_seconds: float = DEFAULT_LEASE_SECONDS
     tick_seconds: float = DEFAULT_TICK_SECONDS
+    # 回收宽限：scheduler 不持有 job 租约，按任务租约的续约节奏（默认 60/3）取值，
+    # 避免库时钟前跳时把还活着的 worker 的任务判死。测试可置 0 走严格语义。
+    reclaim_grace_seconds: float = DEFAULT_RECLAIM_GRACE_SECONDS
     # tick 的来源（cli/env/default），只用于启动日志对账，不参与调度决策。
     tick_source: str = "default"
     audit_verify: bool = False
@@ -173,7 +176,11 @@ class Scheduler:
 
     # ---------------------------------------------------------------- tick
     async def tick(self) -> dict[str, int]:
-        reclaimed = await self.jobs.reclaim_stale()
+        # scheduler 不认领 job_queue，exclude_owner 只是防御（同名 owner 也不会误伤自己）。
+        reclaimed = await self.jobs.reclaim_stale(
+            exclude_owner=self.owner,
+            grace_seconds=self.reclaim_grace_seconds,
+        )
         self.stats.reclaimed += reclaimed
         result = {"reclaimed": reclaimed}
         if reclaimed:

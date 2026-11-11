@@ -7,14 +7,38 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from contextlib import contextmanager
 
 from sqlalchemy import text
 
-from core.runtime.queue import JobQueueStore
+from core.runtime.queue import Job, JobQueueStore
 from core.runtime.scheduler import Scheduler
 from core.runtime.worker import HANDLERS, Worker
 from tests.agents.dbutil import db_env
 from tools.health import HealthConfig, check_once, run_check
+
+
+@contextmanager
+def _worker_logging_enabled():
+    """Alembic 的 fileConfig 会 disable 导入期已存在的 logger，断言日志前要恢复。"""
+
+    logger = logging.getLogger("erp.worker")
+    was_disabled = logger.disabled
+    logger.disabled = False
+    try:
+        yield
+    finally:
+        logger.disabled = was_disabled
+
+
+def _steal_sql() -> str:
+    """把任务改回 queued、清空 owner：等价于「另一个 worker 已把这条回收并重新持有」。"""
+
+    return (
+        "UPDATE erp.job_queue SET state = 'queued', lease_owner = NULL, "
+        "lease_expires_at = NULL WHERE id = :id"
+    )
 
 
 async def _enqueue(
@@ -261,6 +285,7 @@ def test_scheduler_tick_reclaims_stale_jobs(db: str) -> None:
                 owner="scheduler-tick",
                 scope="tick-test",
                 lease_seconds=5.0,
+                reclaim_grace_seconds=0.0,  # 这里测「过期就回收」，宽限本身另行覆盖
             )
             assert await scheduler.acquire() is True
             result = await scheduler.tick()
@@ -329,3 +354,224 @@ def test_health_sync_check_mode_returns_failure_without_heartbeat(db: str) -> No
     result = run_check(HealthConfig(target="worker", database_url=db))
     assert not result.ok
     assert "心跳" in result.payload.get("reason", "")
+
+
+def test_complete_lease_taken_over_logs_warning_with_fate(db: str, caplog) -> None:
+    """``complete()`` 返回 False 不是静默无事：必须 WARNING，并说清结果去向。"""
+
+    async def _run() -> tuple[int, dict[str, str]]:
+        async with db_env(db) as env:
+            queue = JobQueueStore(env.sf)
+            job_id = await queue.enqueue("agent", "steal-on-complete")
+
+            async def _steal(job: Job) -> None:
+                async with env.sf() as session, session.begin():
+                    await session.execute(text(_steal_sql()), {"id": job.id})
+
+            worker = Worker(
+                session_factory=env.sf,
+                queues=["agent"],
+                worker_id="w-steal",
+                concurrency=1,
+                lease_seconds=5.0,
+                heartbeat_seconds=0.05,
+                poll_seconds=0.01,
+                handlers={**HANDLERS, "steal-on-complete": _steal},
+            )
+            with _worker_logging_enabled():
+                stats = await worker.run(max_jobs=1)
+            assert stats.done == 0
+            assert stats.discarded == 1
+
+            async with env.sf() as session:
+                row = (
+                    await session.execute(
+                        text(
+                            "SELECT state, lease_owner FROM erp.job_queue WHERE id = :id"
+                        ),
+                        {"id": job_id},
+                    )
+                ).mappings().one()
+            return job_id, dict(row)
+
+    caplog.set_level(logging.WARNING)
+    job_id, row = asyncio.run(_run())
+
+    # 落账确实没成功（行仍是回收后的 queued），所以这条警告不是误报
+    assert row["state"] == "queued" and row["lease_owner"] is None
+
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "erp.worker" and record.levelno == logging.WARNING
+    ]
+    assert warnings, "complete() 返回 False 时必须留下 WARNING"
+    text_all = "\n".join(warnings)
+    assert f"任务 {job_id} 完成落账失败" in text_all
+    assert "租约已被他人接管，本次结果被丢弃" in text_all
+    assert "预期 state=running lease_owner=w-steal" in text_all
+    # 实际值 + 会不会重跑，两者都要能在日志里直接读到
+    assert "实际 state=queued lease_owner=None" in text_all
+    assert "会被重新领取再跑一遍" in text_all
+    assert "at-least-once" in text_all
+
+
+def test_heartbeat_lease_taken_over_logs_warning(db: str, caplog) -> None:
+    """续租失败同样是「结果将被丢弃」的信号，不能只在 complete 时才出声。"""
+
+    async def _run() -> int:
+        async with db_env(db) as env:
+            queue = JobQueueStore(env.sf)
+            job_id = await queue.enqueue("agent", "steal-on-heartbeat")
+
+            async def _steal_then_hold(job: Job) -> None:
+                async with env.sf() as session, session.begin():
+                    await session.execute(text(_steal_sql()), {"id": job.id})
+                # 撑过第一次续租（lease/3 = 0.1s），让 heartbeat_lease 先撞上 False
+                await asyncio.sleep(0.15)
+
+            worker = Worker(
+                session_factory=env.sf,
+                queues=["agent"],
+                worker_id="w-steal-beat",
+                concurrency=1,
+                lease_seconds=0.3,
+                heartbeat_seconds=0.05,
+                poll_seconds=0.01,
+                handlers={**HANDLERS, "steal-on-heartbeat": _steal_then_hold},
+            )
+            with _worker_logging_enabled():
+                stats = await worker.run(max_jobs=1)
+            assert stats.done == 0
+            assert stats.discarded == 1
+            return job_id
+
+    caplog.set_level(logging.WARNING)
+    job_id = asyncio.run(_run())
+
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "erp.worker" and record.levelno == logging.WARNING
+    ]
+    renew = [line for line in warnings if f"任务 {job_id} 续租失败" in line]
+    assert renew, f"heartbeat_lease 返回 False 时必须留下 WARNING：{warnings}"
+    joined = "\n".join(renew)
+    assert "租约已被他人接管，本次结果被丢弃" in joined
+    assert "预期 state=running lease_owner=w-steal-beat" in joined
+    assert "实际 state=queued lease_owner=None" in joined
+    assert "会被重新领取再跑一遍" in joined
+
+
+def test_discarded_result_is_not_counted_as_done(db: str, caplog) -> None:
+    """落账失败不能计成 done：stats.discarded +1，关停汇总行要写清「跑完 N、丢弃 M」。"""
+
+    async def _run() -> None:
+        async with db_env(db) as env:
+            queue = JobQueueStore(env.sf)
+            await queue.enqueue("agent", "steal-for-stats")
+
+            async def _steal(job: Job) -> None:
+                async with env.sf() as session, session.begin():
+                    await session.execute(text(_steal_sql()), {"id": job.id})
+
+            worker = Worker(
+                session_factory=env.sf,
+                queues=["agent"],
+                worker_id="w-discard",
+                concurrency=1,
+                lease_seconds=5.0,
+                heartbeat_seconds=0.05,
+                poll_seconds=0.01,
+                handlers={**HANDLERS, "steal-for-stats": _steal},
+            )
+            with _worker_logging_enabled():
+                stats = await worker.run(max_jobs=1)
+            assert stats.done == 0, "结果没落账，不能计成 done"
+            assert stats.discarded == 1
+            assert stats.failed == 0
+
+    caplog.set_level(logging.INFO)
+    asyncio.run(_run())
+
+    summary = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "erp.worker" and "退出" in record.getMessage()
+    ]
+    assert summary, "关停时必须打汇总行"
+    assert any("跑完 0、丢弃 1" in line for line in summary), summary
+
+
+def test_reclaim_stale_excludes_own_lease_but_reclaims_others(db: str) -> None:
+    """自己 sweep 时不能回收自己的行；别人过期的照旧回收，避免写成「什么都不回收」。"""
+
+    async def _run() -> tuple[int, int, int, dict[int, tuple[str, str | None]]]:
+        async with db_env(db) as env:
+            queue = JobQueueStore(env.sf)
+            own_expired = await queue.enqueue("agent", "echo")
+            other_expired = await queue.enqueue("agent", "echo")
+            own_live = await queue.enqueue("agent", "echo")
+
+            claimed = await queue.claim(
+                ["agent"], owner="self-worker", lease_seconds=0.05
+            )
+            assert claimed is not None and claimed.id == own_expired
+            claimed = await queue.claim(
+                ["agent"], owner="other-worker", lease_seconds=0.05
+            )
+            assert claimed is not None and claimed.id == other_expired
+            claimed = await queue.claim(
+                ["agent"], owner="self-worker", lease_seconds=60.0
+            )
+            assert claimed is not None and claimed.id == own_live
+
+            await asyncio.sleep(0.1)  # 前两条的租约已过期
+            reclaimed = await queue.reclaim_stale(
+                exclude_owner="self-worker", grace_seconds=0.0
+            )
+            assert reclaimed == 1
+
+            async with env.sf() as session:
+                rows = (
+                    await session.execute(
+                        text(
+                            "SELECT id, state, lease_owner FROM erp.job_queue "
+                            "WHERE id = ANY(:ids)"
+                        ),
+                        {"ids": [own_expired, other_expired, own_live]},
+                    )
+                ).mappings()
+                snapshot = {
+                    int(row["id"]): (str(row["state"]), row["lease_owner"])
+                    for row in rows
+                }
+            return own_expired, other_expired, own_live, snapshot
+
+    own_expired, other_expired, own_live, rows = asyncio.run(_run())
+    # 本人持有：过期了也不回收（时钟前跳时这条就是命）；未过期的更不该动
+    assert rows[own_expired] == ("running", "self-worker")
+    assert rows[own_live] == ("running", "self-worker")
+    # 他人持有且已过期：仍要回收，证明排除条件不是「一刀切不回收」
+    assert rows[other_expired] == ("queued", None)
+
+
+def test_reclaim_stale_grace_delays_expired_lease(db: str) -> None:
+    """宽限窗口内「看起来过期」不算死；过了宽限才回收。"""
+
+    async def _run() -> tuple[int, int]:
+        async with db_env(db) as env:
+            queue = JobQueueStore(env.sf)
+            await queue.enqueue("agent", "echo")
+            claimed = await queue.claim(
+                ["agent"], owner="dead-worker", lease_seconds=0.05
+            )
+            assert claimed is not None
+            await asyncio.sleep(0.1)  # 已过期约 0.05s，仍在 5s 宽限内
+            within_grace = await queue.reclaim_stale(grace_seconds=5.0)
+            after_grace = await queue.reclaim_stale(grace_seconds=0.0)
+            return within_grace, after_grace
+
+    within_grace, after_grace = asyncio.run(_run())
+    assert within_grace == 0, "宽限内不能回收：一次漏拍 + 秒级前跳不应判死"
+    assert after_grace == 1, "过了宽限必须能回收，否则真死的 worker 永远转圈"

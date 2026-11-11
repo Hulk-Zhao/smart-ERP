@@ -113,6 +113,8 @@ async def _handle_sleep(job: Job) -> None:
 class WorkerStats:
     done: int = 0
     failed: int = 0
+    # 落账被拒（租约已被接管）：handler 跑完了，但结果没进账本，不能算 done。
+    discarded: int = 0
 
 
 @dataclass
@@ -211,11 +213,43 @@ class Worker:
                 },
             )
 
+    async def _describe_lease_loss(self, job_id: int) -> str:
+        """租约落账失败时读回库里的真实状态，说明实际值以及任务会不会重跑。"""
+
+        async with self.session_factory() as session:
+            row = (
+                await session.execute(
+                    text(
+                        "SELECT state, lease_owner FROM erp.job_queue WHERE id = :job_id"
+                    ),
+                    {"job_id": job_id},
+                )
+            ).mappings().one_or_none()
+        if row is None:
+            return "实际：库中已无此行；任务不会重跑，本次结果丢失"
+        state = str(row["state"])
+        actual_owner = row["lease_owner"]
+        if state == "queued":
+            fate = "任务已回 queued，会被重新领取再跑一遍（at-least-once，handler 必须幂等）"
+        elif state == "running":
+            fate = (
+                f"任务已被 owner={actual_owner} 重新持有，会由它再跑一遍"
+                "（at-least-once，handler 必须幂等）"
+            )
+        elif state == "dead":
+            fate = "任务已转 dead（attempts 用尽），不会自动重跑，本次结果永久丢失，需人工重放"
+        else:
+            fate = f"任务已是终态 {state}，不会重跑，本次结果被丢弃"
+        return f"实际 state={state} lease_owner={actual_owner}；{fate}"
+
     async def _heartbeat_loop(self) -> None:
         while not self._stop.is_set():
             try:
                 await self._beat("busy" if self._in_flight else "idle")
-                reclaimed = await self.queue.reclaim_stale()
+                reclaimed = await self.queue.reclaim_stale(
+                    exclude_owner=self.worker_id,
+                    grace_seconds=self.lease_renew_seconds,
+                )
                 if reclaimed:
                     logger.warning("回收 stale running 任务 %s 条", reclaimed)
             except Exception:  # noqa: BLE001 - 心跳失败不拖死消费主循环
@@ -246,9 +280,19 @@ class Worker:
             if done:
                 break
             # 长任务续租，避免执行中被别的 worker 判 stale 抢走
-            await self.queue.heartbeat_lease(
+            renewed = await self.queue.heartbeat_lease(
                 job.id, owner=self.worker_id, lease_seconds=self.lease_seconds
             )
+            if not renewed:
+                detail = await self._describe_lease_loss(job.id)
+                logger.warning(
+                    "任务 %s 续租失败：租约已被他人接管，本次结果被丢弃"
+                    "（到 complete 时不会再落 succeeded）。"
+                    "预期 state=running lease_owner=%s；%s",
+                    job.id,
+                    self.worker_id,
+                    detail,
+                )
         try:
             job_task.result()
         except asyncio.CancelledError:
@@ -267,8 +311,20 @@ class Worker:
             )
             logger.warning("任务 %s 失败 attempts=%s -> %s", job.id, job.attempts, state)
         else:
-            await self.queue.complete(job.id, owner=self.worker_id)
-            self.stats.done += 1
+            completed = await self.queue.complete(job.id, owner=self.worker_id)
+            if completed:
+                self.stats.done += 1
+            else:
+                # 结果没落账：计 discarded 而不是 done，否则汇总会「全绿但实际被重跑」。
+                self.stats.discarded += 1
+                detail = await self._describe_lease_loss(job.id)
+                logger.warning(
+                    "任务 %s 完成落账失败：租约已被他人接管，本次结果被丢弃。"
+                    "预期 state=running lease_owner=%s；%s",
+                    job.id,
+                    self.worker_id,
+                    detail,
+                )
 
     async def _consume(self, max_jobs: int | None, processed: list[int]) -> None:
         while not self._stop.is_set():
@@ -307,7 +363,10 @@ class Worker:
                     signal.signal(sig, lambda *_: self.stop())
 
         await self._beat("starting")
-        reclaimed = await self.queue.reclaim_stale()
+        reclaimed = await self.queue.reclaim_stale(
+            exclude_owner=self.worker_id,
+            grace_seconds=self.lease_renew_seconds,
+        )
         if reclaimed:
             logger.warning("启动回收 stale running 任务 %s 条", reclaimed)
         self._log_startup()
@@ -351,7 +410,11 @@ class Worker:
                 pass
             await self._beat("stopped")
         logger.info(
-            "worker %s 退出 done=%s failed=%s", self.worker_id, self.stats.done, self.stats.failed
+            "worker %s 退出：跑完 %s、丢弃 %s、失败 %s",
+            self.worker_id,
+            self.stats.done,
+            self.stats.discarded,
+            self.stats.failed,
         )
         return self.stats
 
