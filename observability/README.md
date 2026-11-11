@@ -319,7 +319,7 @@ registry.observe_recon_result(result, duration_seconds=elapsed)  # result 为 ap
 | 指标 | 生产写入点（进程） | serve `/metrics` | 规则状态 |
 |---|---|---|---|
 | `smart_erp_recon_batches_total` / `_duration_seconds` | `apps/api/service.py:1137`（api） | `apps/main.py:54` → `api:8010` | 生效（2 条） |
-| `smart_erp_write_stage_*` | `apps/platform/policy/gateway.py:226`（api） | `apps/main.py:54` → `api:8010` | **注释**：阈值无真实基线（采集点已具备） |
+| `smart_erp_write_stage_*` | `apps/platform/policy/gateway.py:226`（api） | `apps/main.py:54` → `api:8010` | **已删除（2026-11-11 实测）**：演示档 48/48 工单 `pending_write=null`，`WriteGateway.execute` 从未执行，指标恒 absent |
 | `smart_erp_unresolved_tickets` | `apps/agents/compensation_worker.py:287`（compensation） | `:302` → `compensation:8013` | 生效 |
 | `smart_erp_compensation_overdue` | `:289`（compensation） | `:302` → `compensation:8013` | 生效（3 条） |
 | `smart_erp_compensation_future_retry` | `:290`（compensation） | `:302` → `compensation:8013` | 生效 |
@@ -327,8 +327,21 @@ registry.observe_recon_result(result, duration_seconds=elapsed)  # result 为 ap
 | `smart_erp_audit_chain_broken` | `apps/audit/monitor.py:123`、`:144`（scheduler） | `core/runtime/scheduler.py::_amain` → `scheduler:8011` | 生效（P0） |
 | `up`（内置） | Prometheus | — | 生效（`SmartErpScrapeTargetDown`） |
 | `smart_erp_compensation_backlog` | `:288`（compensation） | `:302` → `compensation:8013` | 否（等重试周期基线） |
-| `smart_erp_recon_runs_failed_total` | `apps/api/service.py:1145`、`:1148`（api） | `apps/main.py:54` → `api:8010` | 否（建议规则已写，等结账周期基线） |
+| `smart_erp_recon_runs_failed_total` | `apps/api/service.py:1145`、`:1148`（api） | `apps/main.py:54` → `api:8010` | **已删除（2026-11-11 实测）**：46/46 请求 503 `E-CONN-UNAVAILABLE`，`recon_batches_total` 恒 absent |
 | `smart_erp_tickets_*` | 无 | — | 无规则，需要时先接 `record_ticket()` |
+
+> **2026-11-11 实测：两条注释规则都删除，而不是启用**（方法与环境见 §9.2，原始记录见 `docs/product/tech/ledger/S7.jsonl`）
+>
+> | 规则 | 实测分布 | 为什么不能定阈值 |
+> |---|---|---|
+> | 写失败率 `SmartErpWriteFailureRateHigh` | `smart_erp_write_stage_total/_failures_total` 在空载、三套 demo 场景、1,000 与 10,000 行对账后**全部 absent**；工单 48 条，`pending_write` 48/48 为 `null` | 分母不是 0 而是不存在。`clamp_min(...,0.001)` 会把任何一次失败放大成 100% 常驻告警，而当前连一次失败都产生不了——留着只是「已覆盖写入」的错觉 |
+> | 对账请求失败率 `SmartErpReconRunFailureRateHigh` | 46 次真实 `POST /v1/recon/runs`：**46/46 返回 503**，`code=E-CONN-UNAVAILABLE`、`stage=input`；`smart_erp_recon_batches_total` 在三个 api 进程里全 absent | 指标 100% 反映「api 进程未装配连接器」这一个缺陷（全仓没有读取 `ERP_CONNECTOR_GW_URL` 的代码），不是业务失败率；分母缺失时失败率无法定义 |
+>
+> 两条都改成规则文件里的 tombstone（附重新引入条件）。判据是同一句：
+> **恒不触发的规则也是不存在的规则**——留着一条永远不响的规则，比没有这条规则更危险，
+> 因为它会让人以为这条链路已经被覆盖。
+> 另注：请求体校验失败（422）在进入 handler 前就被拒，本来就不计入 `recon_runs_failed_total`，
+> 该指标的分母天生偏小，这也是重建基线时必须一并修的采集缺口。
 
 > **2026-11-11 的两次修正**（都曾在文档里写错，必须留痕）：
 > 1. 「2 条生效 / 9 条注释」这个口径是错的——`ERP_METRICS_ENABLED` 当时没有在 compose 注入，
@@ -349,11 +362,12 @@ registry.observe_recon_result(result, duration_seconds=elapsed)  # result 为 ap
 | demo 档怎么办 | ⚠️ 不装监控，规则不评估 | demo 上不得写「已告警」；这是刻意的档位差异，不是遗漏 |
 | 阈值基线 | ⚠️ 0 / 5 / 15m 与 5s / 30s 仍是分析值 | 已生效但需在真实数据上复核；`overdue` 的 P2/P1 分档保证单条不会半夜叫醒人 |
 
-`recon_runs_failed_total` 的建议规则（已写进规则文件、**未启用**）：
+`recon_runs_failed_total` 的建议规则（原为注释，**2026-11-11 实测后已删除**，理由见本节上表）：
 `sum(rate(smart_erp_recon_runs_failed_total[15m])) / clamp_min(sum(rate(smart_erp_recon_batches_total[15m])), 0.001) > 0.05`，
-`for: 15m`，P1。依据：失败是 `stage=input/engine/persist` 的硬错误，比 `pending_manual` 这类业务分流更严重，
-阈值可比「批次未自动完成率 2%」宽；分母用已处理批次数，避免夜间空窗把 1 次失败放大成高失败率。
-**5% / 15m 只是候选**，必须等一个结账周期的真实基线再定，不凭猜启用。
+`for: 15m`，P1。分母用已处理批次数、避免夜间空窗把 1 次失败放大成高失败率的思路仍然成立；
+但它依赖「有成功批次」这个前提，而当前 api 进程没有装配连接器，46/46 请求都在 `input` 阶段 503，
+`recon_batches_total` 恒 absent。**在修好装配并跑出一个成功批次之前，这条规则不具备可评估性**，
+故不保留空壳；重新引入时沿用上面的表达式与本节记录的采集缺口（422 不计入分母）。
 
 > 结论：full 档已具备「写入进程 === serve 进程 + 抓取 + 规则评估 + Alertmanager 接收」四段闭环。
 > demo 档仍然没有评估器，只能写「规则已定义、无评估器」。
@@ -440,7 +454,7 @@ smart_erp_audit_chain_broken 0
 
 ## 7. 告警规则
 
-规则文件：[alerts.rules.yaml](./alerts.rules.yaml)（Prometheus rule file，`groups[0].rules` 共 13 条：生效 11、注释 2）。
+规则文件：[alerts.rules.yaml](./alerts.rules.yaml)（Prometheus rule file，`groups[0].rules` 共 11 条：**全部生效**；2026-11-11 实测后删除了原先注释的 2 条，理由见 §6.1.3）。
 
 > **评估器只在 full 档存在**：`deploy/smart-erp/docker-compose.yml` 的 `prometheus` 服务
 > （profile `full`）通过 `rule_files` 直接挂载本文件，抓取 `api:8010`、`scheduler:8011`、
@@ -457,7 +471,7 @@ smart_erp_audit_chain_broken 0
 | 告警 | 状态 | 级别 | `for` | 触发口径 | 为什么值得半夜叫醒人 |
 |---|---|---|---|---|---|
 | `SmartErpScrapeTargetDown` | 生效 | P1 | 5m | `up == 0` | 目标掉线时 `max()/rate()` 全部安静，与健康同形；不单独兜住会让整套告警变装饰 |
-| `SmartErpWriteFailureRateHigh` | 注释（待基线） | P1 | 10m | `write` 阶段失败率 > 5% | 采集点已具备（`gateway.py:226`），唯一阻塞是阈值没有真实基线 |
+| `SmartErpWriteFailureRateHigh` | **已删除（2026-11-11 实测）** | P1 | 10m | `write` 阶段失败率 > 5% | 演示档 `pending_write` 48/48 为 null，指标恒 absent；分母不存在，留着是空壳（理由与重引入条件见 §6.1.3 / 规则文件 tombstone） |
 | `SmartErpUnresolvedTicketsGrowing` | 生效 | P1 | 10m | `max()` 后 30 分钟增量 > 5 且总量 > 10 | unresolved 只增不减 = 没人接住的失败在堆积，会变成对账差异与付款错误 |
 | `SmartErpCompensationOverdueP2` | 生效 | P2 | 5m | `overdue > 0` | 补偿到期未被领取，说明 claim 侧开始停摆 |
 | `SmartErpCompensationOverdueP1Volume` | 生效 | P1 | 5m | `overdue > 5` | 量级说明不是单条卡住，而是领取链路大面积不工作 |
@@ -468,7 +482,7 @@ smart_erp_audit_chain_broken 0
 | `SmartErpReconBatchFailureRateHigh` | 生效 | P1 | 15m | 待人工 + 无法对账占比 > 2% | 对账是关账前置，夜间不修复会让人工队列指数级放大 |
 | `SmartErpAuditChainBroken` | 生效 | **P0** | 1m | `max(smart_erp_audit_chain_broken) > 0` | 审计链断链后「谁改了什么」无法自证，每小时都产生新的不可信记录 |
 | `SmartErpReconBatchP95Slow` | 生效 | P2 | 10m | 批次 P95 > 120s | 只影响速度不影响正确性，工作时间处理；与失败率告警同发时升级 P1 |
-| `SmartErpReconRunFailureRateHigh` | 注释（建议，待基线） | P1 | 15m | 对账硬失败率 > 5% | 硬错误比业务分流严重，但阈值需真实基线，不凭猜启用 |
+| `SmartErpReconRunFailureRateHigh` | **已删除（2026-11-11 实测）** | P1 | 15m | 对账硬失败率 > 5% | 46/46 请求 503 `E-CONN-UNAVAILABLE`，`recon_batches_total` 恒 absent；指标当前测的是装配缺陷，不是业务失败率（理由见 §6.1.3） |
 
 每条规则都带 `annotations.why_paged` 与 `runbook`，解释「为什么叫醒」和「先看哪里」。
 
@@ -547,15 +561,17 @@ startsAt=2026-11-11T07:32:02Z  fingerprint=d35411f308a167ef  receiver=erp-unrout
 ## 9. 测试与验证
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/observability -q   # 81 条：约定 / 树 / 链路 / 成本 / 导出 / 指标 / 对账质量 / 告警 / 暴露面
+.\.venv\Scripts\python.exe -m pytest tests/observability -q   # 82 条：约定 / 树 / 链路 / 成本 / 导出 / 指标 / 对账质量 / 告警 / 暴露面
 .\.venv\Scripts\python.exe -m pytest tests/e2e -q             # 11 条：健康检查 / 只读 / W3 / 越权 / 审批 / 路由门禁
 ```
 
-全量回归（本分支 rebase 到 `2dac800` 后实跑）：`tests=1219 failures=0 errors=0 skipped=78`（跳过均为未提供 `ERP_TEST_DATABASE_URL` 的 PG 用例：集成 52 / 权限 20 / 守卫 4 / 并发 2）。
+本地实跑（本分支基于 main `9502d83`）：`pytest tests/observability` **82 passed**、
+`pytest tests/deploy`（4 skipped，需 docker 断言）、`promtool check rules` → `SUCCESS: 11 rules found`。
+全量回归以 CI 为准：本机默认 Python 3.11 无法收集使用 PEP 695 语法的用例（`uv --python 3.12` 可跑观测面，全量未跑）。
 
 `tests/observability/test_metrics.py` 覆盖：高基数标签拒绝、文本格式与累计桶、span→指标折算（成功 / F6 / rejected / unclassified）、业务指标、补偿到期/未来重试 gauge、时钟偏移的有符号值与进程内最大回拨、非法采样值拒绝、`/metrics` 的 200 与 OpenAPI 排除、非 GET 405、默认不挂载与 `ERP_METRICS_ENABLED` 开关。
 `tests/observability/test_recon_quality.py` 覆盖：词表封闭且无 accuracy 指标、观测层不 import `apps.recon`（AST 断言）、只统计供应商侧行、`unaccounted = supplier_lines − 各行之和 == 0` 的自检、`BatchStatus→result` 映射与未知状态报错、降级原因取缺失项而非自由文本、直方图桶边界（`le` 为小于等于）、四条标签红线。
-`tests/observability/test_alerts.py` 覆盖：YAML 解析、生效规则恰为 11 条且每条都引用有**生产写入点**的指标（`WRITER_LOCATIONS` 逐条核对）、`why_paged`/`runbook` 完整；2 条注释规则必须带「待真实基线」标记（不允许无理由静默停用）、补偿/时钟 6 条的 severity/`for`/表达式原样保留、P0 审计链为生效且 `for: 1m`、已删除的 `SmartErpCompensationBacklogHigh` 不再被引用；以及 overdue（P2/P1 量级/P1 时长）、future_retry、clock_skew（P2/P1 分档）在真实 `/metrics` 文本上的触发演示。
+`tests/observability/test_alerts.py` 覆盖：YAML 解析、生效规则恰为 11 条且每条都引用有**生产写入点**的指标（`WRITER_LOCATIONS` 逐条核对）、`why_paged`/`runbook` 完整；注释态规则集合必须为**空**（2026-11-11 起停用只有「删除 + 理由」一种形态）、被删的写失败率/对账请求失败率必须留下实测数字与重新引入条件、补偿/时钟 6 条的 severity/`for`/表达式原样保留、P0 审计链为生效且 `for: 1m`、已删除的 `SmartErpCompensationBacklogHigh` 不再被引用；以及 overdue（P2/P1 量级/P1 时长）、future_retry、clock_skew（P2/P1 分档）在真实 `/metrics` 文本上的触发演示。
 
 `tests/deploy/test_compose_deploy.py` 覆盖：full 档含 `prometheus` / `alertmanager` 且只在 full 出现、镜像 tag 固定、健康检查、卷、总内存预算；`test_monitoring_scrapes_every_metrics_serving_process` 断言抓取目标恰为 api/scheduler/compensation 三个、规则文件直接挂载、Alertmanager 作为告警接收方；`test_metrics_env_injected_wherever_code_reads_it` 扫描代码里真正读取的 `ERP_METRICS_*` 键，compose 漏注入直接失败（这条专治「配置键存在、代码会读、运行时没注入」）。
 
@@ -570,7 +586,7 @@ docker run --rm --entrypoint promtool `
   prom/prometheus:latest check rules /rules/observability/alerts.rules.yaml
 ```
 
-必须看到 `SUCCESS: 11 rules found`（当前 13 条里：11 条生效、2 条注释待基线，见 §6.1.2/§6.1.3）。**没有 docker / 拉不到镜像时，不得宣称规则已验证**：只能标注“YAML 结构已校验，PromQL 未验证”，并按发布阻塞项处理。注意这只证明语法；要证明「线上有告警」还得按 §7 的端到端方式看到 `inactive → pending → firing` 与 Alertmanager 条目。
+必须看到 `SUCCESS: 11 rules found`（**全部生效**；原注释的 2 条已于 2026-11-11 实测后删除，见 §6.1.2/§6.1.3）。**没有 docker / 拉不到镜像时，不得宣称规则已验证**：只能标注“YAML 结构已校验，PromQL 未验证”，并按发布阻塞项处理。注意这只证明语法；要证明「线上有告警」还得按 §7 的端到端方式看到 `inactive → pending → firing` 与 Alertmanager 条目。
 
 3. 确认 `ERP_METRICS_ENABLED` 目标状态：full 档默认 `true`（Prometheus 需要抓）；demo 档如不接内网抓取可关。开启时确认 nginx 已 `deny /erp/api/metrics`、且未设置 `ERP_API_BIND=0.0.0.0`（§6.0）。
 4. 部署后逐个确认抓取端点（2026-11-11 实测均为 200）：`api:8010/metrics`、`scheduler:8011/metrics`、`compensation:8013/metrics`；任一不是 200，对应规则就是哑的。
@@ -579,6 +595,54 @@ docker run --rm --entrypoint promtool `
 E2E 说明：健康检查直接打真实的 `apps.main`；只读接口与写入接口是测试专用 `/_e2e/*` 路由，内部调用真实的 `AccessGate`（四道闸）与 `WriteGateway`（唯一写出口），连接器为进程内替身，不启动 PG / 网络。
 
 **测试路由收口**：`apps/main.py` 不含任何 `/_e2e` 路由，也不 import 测试模块；路由只存在于 `tests/e2e/e2e_support.py`，且仅当 `ERP_APP_ENV=test` 时挂到测试进程内新建的 app 实例上。默认、`prod`、`staging`、`dev` 等配置下路径**不存在**（`GET /_e2e/...` 返回 404），也不会出现在 `GET /openapi.json` 的 paths 中。C12 镜像级全链路用例待 S8 镜像产物就绪后补。
+
+### 9.2 对账性能基线（2026-11-11 实测）
+
+**测的是哪一段**：`POST /v1/recon/runs` 的服务端处理链——
+请求体校验（JSON→Pydantic）→ 引擎（`build_request` + `reconcile`，含重复计费识别、匹配、归因）→
+落库（批次 1 行 + 每条对账行 1 行 INSERT）→ `GET /v1/recon/runs/{id}/diffs` 首页 50 条（含 `result_view` 反序列化）。
+**不含**：网络传输、文件上传/解压、连接器拉数（当前 api 未装配连接器）、前端渲染。
+因此对外不能说「系统处理 10 万行 X 秒」，只能说这一段服务端耗时。
+
+**为什么在进程内计时而不是打 HTTP**：当前 api 进程没有装配连接器，
+`POST /v1/recon/runs` 一律 503 `E-CONN-UNAVAILABLE`（见 §6.1.3），HTTP 端到端不可能产出成功批次。
+故在 app 镜像内直接调用同一份 `apps.api.service.run_recon`，只绕过 `pick_meta` 的装配断言与 `_authorize`
+（权限校验不参与计时），校验、引擎、store、真实 PG 全部是生产代码。口径缺陷已如实写在上面，不冒充 HTTP 端到端。
+
+**环境**：Windows 11（10.0.26200）· AMD Ryzen 9 9955HX 16C/32T · 31.2 GiB RAM ·
+Docker Desktop 32 CPU / 15.2 GiB · PostgreSQL 15 容器同机 · api 单进程单 worker · 对账引擎单线程。
+
+**数据集**：字段与数量/金额分布取自 `demo/scenarios/manufacturing-multi-plant/recon_case.csv`；
+每行 `(supplier_code, item_code)` 唯一（200 供应商 × 500 物料），我方与供应商 1:1，每 100 行注入 1 行数量差异。
+**不含**「同供应商同物料多单」这类会产生候选笛卡尔积的形态——那属于另一个问题（见瓶颈第 1 条）。
+
+| 档位（每侧行数） | 校验 | 引擎 | 落库 | 结果可查 | 服务端合计 |
+|---|---|---|---|---|---|
+| 1 万（2 万行对象） | 0.25s | 28.7s | 14.3s | 0.48s | **44.4s** |
+| 5 万（10 万行对象） | 0.78s | 598.2s | 57.2s | 2.0s | **674.3s（11 分 14 秒）** |
+| 10 万（20 万行对象） | 1.39s | 2268.9s | 63.5s | 3.0s | **2380.1s（39 分 40 秒）** |
+
+明细（10 万档原始输出）：`engine_parse` 2.72s、`engine_reconcile` 2266.21s、`_batch_view` 41.85s、
+`snapshot` 0.46s、`price` 0.04s、`save` 63.54s、`run_recon` 合计 2377.04s、首页 3.04s；
+批次状态「待人工复核」，首页 50 条差异，`batch_id 2544c22e`。
+
+**瓶颈判断**
+1. **引擎匹配是 O(n²)，且随数据量放大到压倒性**：`reconcile` 占服务端耗时 65%（1 万）→ 89%（5 万）→ **95.5%（10 万）**；
+   行数 5 倍时引擎耗时 20.8 倍（28.7s → 598.2s），再翻倍时 3.79 倍（598.2s → 2268.9s，n² 理论值 4 倍）。
+   代码在 `apps/recon/matching.py:448-452`：每个供应商行都 `enumerate(our_lines)` 全量打分；
+   `matching.py:278-285` 的合单候选也是全量扫描。
+2. **落库是 N 次往返**：`apps/api/recon_store.py` 的 `save()` 每行一条 INSERT（约 0.3–0.6ms/行），
+   5 万行 57.2s、10 万行 63.5s。线性，但常数大，行数再往上会顶到第二。
+3. 视图投影（`_batch_view`）10 万行 41.9s、结果首页 3.0s，都不是主因。
+4. 内存：5 万行/侧时进程 RSS 约 1.0 GiB；10 万行/侧引擎阶段（第 18 分钟采样）RSS 850 MiB，
+   容器无内存上限、未 OOM、未见交换——**当前瓶颈是 CPU 计算，不是内存**。
+
+**优化建议（一条，先做第一个）**：把匹配从「全表扫描」改成「按 `(supplier_code, item_code, period)` 分桶后桶内打分」，
+`matching.py:448-452` 的双层循环即可从 O(n²) 降到 O(n·桶内行数)；
+随后把 `save()` 的逐行 INSERT 换成 `executemany` / 多值 VALUES。前者决定复杂度，后者决定常数，两者都不需要改协议。
+
+**4C4G 目标的差距**：本基线是 16C/32T 工作站，但引擎单线程，核数不是变量；真正的变量是 PG 与宿主 IO。
+4C4G 上落库会更慢，**必须重测后再对外报数**，不要把本表数字直接贴给 POC 客户。
 
 ---
 
