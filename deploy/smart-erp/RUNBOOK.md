@@ -423,3 +423,63 @@ curl -m 3 -sS http://<公网IP>:8010/metrics   # 期望：连接失败
 - 验收口径：发布后先看 `erp_api` 的 `/healthz` 200，再看公网 `/erp/api/healthz`；
   两者都过才认为升级完成，期间 502 不计入故障时长。
 
+## 7. 监控与告警（仅 full 档）
+
+`prometheus` 与 `alertmanager` 只挂在 `full` profile；`demo` 档刻意不装评估器，保持 1200MiB 预算。
+在 demo 上只能写「规则已定义、无评估器」，**不得写「已告警」**。
+
+**抓取目标**（都在 compose 内网，不发布宿主端口）：
+
+| job | 地址 | 说明 |
+|---|---|---|
+| `erp-api` | `api:8010/metrics` | 写与暴露同进程（`apps/main.py`） |
+| `erp-scheduler` | `scheduler:8011/metrics` | 审计链 P0 指标；端点由 `core/runtime/metrics_server.py` 提供 |
+| `erp-compensation` | `compensation:8013/metrics` | 补偿积压 / 到期 / 未来重试 / 时钟偏移 / unresolved |
+
+> **抓取一律直连容器端口，不经过任何 nginx。** `api:8010` / `scheduler:8011` / `compensation:8013`
+> 都是 compose 内网的服务名 + 端口，Prometheus 直接连；`web-nginx.conf` 里对
+> `/erp/api/metrics` 的 404 只作用于**本机预览入口（web:8080）**，hk-web 的 `deny all`
+> 只作用于公网路径，两者都不影响采集。**不要**为了「统一入口」把抓取改成经 nginx 取
+> `/erp/api/metrics`——那样会拿到 404，且该 404 不是指标关闭的证据。
+
+规则文件是**直接挂载**的 `observability/alerts.rules.yaml`（不复制），改完规则 `docker compose restart prometheus` 即生效。
+
+### 7.1 本期不接外部通知渠道（明确取舍，不是遗漏）
+
+`alertmanager.yml` 的 receiver `erp-unrouted` 是**空接收器**：告警会被接收、去重、可用 API 查询，
+但**不会发给任何人**——没有邮件、没有飞书、没有短信、没有 webhook。
+
+因此：
+
+- 值班方式**只有一种**：人看 firing 面板（`Prometheus /alerts` 或 Alertmanager UI）。
+- 任何验收、发布记录、看板、周报**不得写「已告警」「已通知」「已触达值班」**；
+  只能说「已进入 Alertmanager，receiver 为空，无人接收」。
+- 评估器本身掉线由 `SmartErpScrapeTargetDown` 兜住，但它同样只到 Alertmanager。
+
+**将来接通道时的最低要求**：改 `alertmanager.yml` 加真实 receiver 后，必须用**接收端的实际记录**
+证明送达（邮件到达、群消息出现、webhook 服务端日志），Alertmanager 页面显示 `sent` 不算证据；
+并在本节替换掉「本期不接外部通知渠道」这段，写明接收人与升级路径。
+
+### 7.2 自检命令
+
+```bash
+# 抓取目标是否都 up（应看到 3 个 target、health=up）
+docker compose -f deploy/smart-erp/docker-compose.yml --profile full exec prometheus \
+  wget -qO- 'http://localhost:9090/api/v1/targets?state=active'
+
+# 规则当前状态（inactive / pending / firing）
+docker compose -f deploy/smart-erp/docker-compose.yml --profile full exec prometheus \
+  wget -qO- 'http://localhost:9090/api/v1/rules?type=alert'
+
+# Alertmanager 实际收到的条目
+docker compose -f deploy/smart-erp/docker-compose.yml --profile full exec alertmanager \
+  wget -qO- 'http://localhost:9093/api/v2/alerts'
+```
+
+**「会响」的唯一证据**是规则状态从 `inactive` → `pending` → `firing`，并在 `/api/v2/alerts`
+里出现对应条目；只贴 YAML 或 `promtool` 的 `SUCCESS` 不算验证。
+
+> 2026-11-11 实测（full 档同等配置）：篡改一条 `erp.audit_image` 后，
+> `SmartErpAuditChainBroken` 在 t+0s `inactive` → t+11s `pending` → t+83s `firing`，
+> Alertmanager `/api/v2/alerts` 出现 `severity=P0` 条目，`status.state=active`，receiver=`erp-unrouted`。
+

@@ -1,0 +1,25 @@
+# smart-ERP Alertmanager（full 档专属）
+#
+# 本期不接外部通知渠道（邮件/飞书/短信都未开通），receiver 留空但必须存在。
+# 也就是说：告警到 Alertmanager 为止，没有任何人被叫醒；值班靠人看 firing 面板
+# （Prometheus /alerts 或 Alertmanager UI），验收/看板不得写「已告警」「已通知」。
+# 「告警送到了 Alertmanager」的证据是 GET /api/v2/alerts 里的实际条目，不是 YAML。
+# 接通知渠道时只改这一份文件，规则与抓取不受影响；接完后必须用接收端的实际记录证明送达，
+# Alertmanager 显示 "sent" 不算证据。
+
+route:
+  receiver: erp-unrouted
+  group_by: ["alertname", "severity"]
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  # 空 receiver：告警进入 Alertmanager、可被 API 查询与去重，但暂不外发。
+  - name: erp-unrouted
+
+inhibit_rules:
+  # 同一目标掉线时，抑制它承载的指标告警（避免 P1 掉线 + 一串 P2 噪音）。
+  - source_matchers: ['alertname="SmartErpScrapeTargetDown"']
+    target_matchers: ['severity=~"P1|P2"']
+    equal: ["job"]

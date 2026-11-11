@@ -40,6 +40,8 @@ export type {
   ReconRunIn,
   ScopeIn,
   SessionOut,
+  SuggestIn,
+  SuggestOut,
   TicketDetailOut,
   TicketOut,
   TicketStepOut,

@@ -47,8 +47,18 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 TEST_ENV_FILE = Path(__file__).resolve().parent / "compose.env"
 
 DEMO_SERVICES = {"api", "worker", "scheduler", "connector-gw", "web"}
-FULL_ONLY_SERVICES = {"doc", "worker-agent", "worker-io", "migrate", "compensation"}
+FULL_ONLY_SERVICES = {
+    "doc",
+    "worker-agent",
+    "worker-io",
+    "migrate",
+    "compensation",
+    "prometheus",
+    "alertmanager",
+}
 EXPECTED_SERVICES = DEMO_SERVICES | FULL_ONLY_SERVICES
+# 监控组件：镜像由上游发布，不参与本仓库的 ERP_IMAGE_TAG 强制约束
+MONITORING_SERVICES = {"prometheus", "alertmanager"}
 # 任何档位都不许出现的容器（共用 PG15，队列在 PG，对象存储走本地卷/MinIO 外部）
 FORBIDDEN_SERVICES = {"pg", "postgres", "redis", "cache", "minio"}
 MEMORY_BUDGET_MIB = 1200
@@ -88,6 +98,34 @@ def _env_example_keys() -> dict:
 def _compose_env_refs() -> set:
     text = COMPOSE_FILE.read_text(encoding="utf-8")
     return set(re.findall(r"\$\{(ERP_[A-Z0-9_]+)", text))
+
+
+#: 生产代码目录（不含 tests / docs）：只扫这些目录里「真被代码读」的键。
+CODE_DIRS = ("apps", "core", "observability", "tools", "scripts")
+_METRICS_KEY_RE = re.compile(r"\b(ERP_METRICS_[A-Z0-9_]+)\b")
+
+
+def _code_read_metrics_keys() -> set:
+    """扫出生产代码里真的以字面量出现的 ERP_METRICS_* 键。
+
+    这是「配置声明了但没进运行时」那类坑的自动发现器：键在代码里被读取，
+    只要 compose 没注入，就等价于运行时的值永远缺失（例如默认关闭 → /metrics 404 →
+    规则永远 absent）。新增可观测键时不需要人记得，这条会直接红。
+    """
+
+    keys: set = set()
+    for directory in CODE_DIRS:
+        base = REPO_ROOT / directory
+        if not base.is_dir():
+            continue
+        for path in base.rglob("*.py"):
+            keys.update(_METRICS_KEY_RE.findall(path.read_text(encoding="utf-8")))
+    return keys
+
+
+def _load_monitoring(name: str) -> dict:
+    with (DEPLOY_DIR / "monitoring" / name).open(encoding="utf-8") as fp:
+        return yaml.safe_load(fp)
 
 
 def _usable_bash():
@@ -140,7 +178,7 @@ class ComposeStaticTest(unittest.TestCase):
         )
 
     def test_profiles_partition(self):
-        """demo 档 5 个服务，full 档额外 5 个；两档都覆盖的常驻服务列 demo+full。"""
+        """demo 档 5 个服务，full 档额外 7 个；两档都覆盖的常驻服务列 demo+full。"""
         for name in DEMO_SERVICES:
             with self.subTest(service=name):
                 profiles = self.services[name]["profiles"]
@@ -215,6 +253,14 @@ class ComposeStaticTest(unittest.TestCase):
         self.assertIn("${ERP_IMAGE_TAG:?", raw)
         for name, svc in self.services.items():
             with self.subTest(service=name):
+                if name in MONITORING_SERVICES:
+                    # Prometheus/Alertmanager 是上游镜像：钉死版本号，且必须是 x.y.z
+                    self.assertRegex(
+                        svc["image"],
+                        r"^prom/(prometheus|alertmanager):v\d+\.\d+\.\d+$",
+                        f"{name} 必须钉死上游版本号（不允许 latest / 浮 tag）",
+                    )
+                    continue
                 self.assertIn(
                     "${ERP_IMAGE_TAG:?", svc["image"],
                     f"{name} 的 image 必须用 ${{ERP_IMAGE_TAG:?...}} 强制传 tag",
@@ -250,6 +296,99 @@ class ComposeStaticTest(unittest.TestCase):
         missing = sorted(v for v in used if v not in declared)
         self.assertEqual(missing, [], f"以下变量未在 .env.example 登记：{missing}")
 
+    def test_metrics_env_injected_wherever_code_reads_it(self):
+        """代码真读的可观测键必须进 compose，且声明要暴露指标的服务默认开启。
+
+        历史事故：ERP_METRICS_ENABLED 在代码里被读取、schema 里也登记了，
+        但 compose 从未注入 → 解析默认 False → /metrics 404 → 「生效的 2 条规则」
+        其实一条样本都拿不到。这条断言不依赖任何人记得。
+        """
+
+        read_keys = _code_read_metrics_keys()
+        self.assertIn(
+            "ERP_METRICS_ENABLED", read_keys,
+            "扫描器失效了：observability/metrics.py 里应当有该键字面量",
+        )
+        injected = _compose_env_refs()
+        missing = sorted(key for key in read_keys if key not in injected)
+        self.assertEqual(
+            missing,
+            [],
+            f"以下键被生产代码读取但 compose 未注入（运行时永远拿不到值）：{missing}",
+        )
+
+        # 声明要暴露 /metrics 的服务必须显式拿到开关，且默认值是 true
+        for name in ("api", "scheduler"):
+            with self.subTest(service=name):
+                env = self.services[name]["environment"]
+                self.assertIn(
+                    "ERP_METRICS_ENABLED",
+                    env,
+                    f"{name} 承载指标写入，却没有 ERP_METRICS_ENABLED 注入",
+                )
+                self.assertEqual(
+                    str(env["ERP_METRICS_ENABLED"]), "${ERP_METRICS_ENABLED:-true}",
+                    f"{name} 的指标开关默认必须为 true，否则规则永远 absent",
+                )
+
+        # 补偿执行器在代码里是 enabled=True（不可关），不参与该开关；这里锁住现状，
+        # 避免有人「顺手」给它注入一个代码不读的键（配置假象）。
+        self.assertNotIn(
+            "ERP_METRICS_ENABLED",
+            self.services["compensation"].get("environment") or {},
+        )
+
+    def test_config_schema_validator_passes(self):
+        """代码读取 / schema 登记 / compose 注入三者一致（含 services 归属）。"""
+
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "validate_config_schema.py")],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_monitoring_scrapes_every_metrics_serving_process(self):
+        """抓取目标必须覆盖所有 serve /metrics 的进程，缺一个就是一条永远哑的规则。"""
+
+        prometheus = _load_monitoring("prometheus.yml")
+        targets = {
+            target
+            for scrape in prometheus["scrape_configs"]
+            for static in scrape["static_configs"]
+            for target in static["targets"]
+        }
+        self.assertEqual(
+            targets,
+            {"api:8010", "scheduler:8011", "compensation:8013"},
+            "抓取目标与本仓库实际 serve /metrics 的进程不一致",
+        )
+        # 规则文件必须真的被加载：声明路径 == compose 挂载点
+        rule_paths = prometheus.get("rule_files") or []
+        self.assertEqual(rule_paths, ["/etc/prometheus/rules/smart-erp.rules.yaml"])
+        mounts = [str(m) for m in self.services["prometheus"].get("volumes", [])]
+        self.assertIn(
+            "../../observability/alerts.rules.yaml:/etc/prometheus/rules/smart-erp.rules.yaml:ro",
+            mounts,
+            "规则文件必须直接从仓库挂载，不能复制副本（复制会与源码分叉）",
+        )
+        # 告警要送达 Alertmanager：目标名必须是 compose 服务名
+        alerting = prometheus["alerting"]["alertmanagers"][0]["static_configs"][0]["targets"]
+        self.assertEqual(alerting, ["alertmanager:9093"])
+
+    def test_monitoring_is_full_profile_only(self):
+        """demo 档不能因为加监控变重：两个监控服务都只属于 full。"""
+
+        for name in MONITORING_SERVICES:
+            with self.subTest(service=name):
+                self.assertEqual(self.services[name]["profiles"], ["full"])
+                self.assertNotIn("ports", self.services[name], "监控端口不发布到宿主")
+        self.assertEqual(
+            _load_monitoring("alertmanager.yml")["receivers"][0]["name"], "erp-unrouted"
+        )
+
     def test_env_example_has_no_secret(self):
         text = ENV_EXAMPLE.read_text(encoding="utf-8")
         self.assertIn("CHANGE_ME_PASSWORD", text, "口令必须是显式占位符")
@@ -273,8 +412,10 @@ class ComposeStaticTest(unittest.TestCase):
         worker, gw = self.services["worker"], self.services["connector-gw"]
         self.assertNotIn("ports", worker, "worker 不发布宿主端口")
         self.assertNotIn("ports", gw, "8012 只在内网，不得发布到宿主")
-        # 8011 没有常驻进程监听（健康判定走 tools.health --check），不应再声明 expose
+        # 8011 现在归 scheduler 的 /metrics 监听：只 expose 给 Prometheus，不发布宿主
         self.assertNotIn("expose", worker, "worker 不 expose 8011：没有进程监听")
+        self.assertIn("8011", [str(p) for p in self.services["scheduler"].get("expose", [])])
+        self.assertNotIn("ports", self.services["scheduler"], "8011 不得发布到宿主")
         self.assertIn("8012", [str(p) for p in gw.get("expose", [])])
 
     def test_networks(self):
@@ -288,7 +429,7 @@ class ComposeStaticTest(unittest.TestCase):
         for name in ("api", "worker", "scheduler", "worker-agent", "worker-io", "migrate"):
             with self.subTest(service=name):
                 self.assertIn("erp-db-net", self.services[name].get("networks", []))
-        for name in ("connector-gw", "web", "doc"):
+        for name in ("connector-gw", "web", "doc", "prometheus", "alertmanager"):
             with self.subTest(service=name):
                 self.assertNotIn("erp-db-net", self.services[name].get("networks", []))
 
@@ -296,11 +437,15 @@ class ComposeStaticTest(unittest.TestCase):
         volumes = self.compose["volumes"]
         self.assertEqual(volumes["erp_objects"]["name"], "smart-erp_objects")
         self.assertEqual(volumes["erp_logs"]["name"], "smart-erp_logs")
+        self.assertEqual(volumes["prometheus_data"]["name"], "smart-erp_prometheus")
+        self.assertEqual(volumes["alertmanager_data"]["name"], "smart-erp_alertmanager")
         mounts = " ".join(
             str(m) for svc in self.services.values() for m in svc.get("volumes", [])
         )
         self.assertIn("erp_objects", mounts)
         self.assertIn("erp_logs", mounts)
+        self.assertIn("prometheus_data:/prometheus", mounts)
+        self.assertIn("alertmanager_data:/alertmanager", mounts)
 
     def test_healthchecks_hit_contract_paths(self):
         for name, svc in self.services.items():
@@ -313,6 +458,14 @@ class ComposeStaticTest(unittest.TestCase):
                 self.assertIsNotNone(hc, f"{name} 缺 healthcheck")
                 self.assertIn("start_period", hc, f"{name} 缺 start_period")
                 command = " ".join(str(part) for part in hc["test"])
+
+                if name in MONITORING_SERVICES:
+                    # 上游镜像自带 /-/healthy；契约路径只约束本仓库自己的 HTTP 服务
+                    urls = re.findall(r"https?://[^\s'\"]+", command)
+                    self.assertTrue(urls, f"{name} 的 healthcheck 未指向 HTTP 路径")
+                    for url in urls:
+                        self.assertEqual(urlparse(url).path, "/-/healthy", url)
+                    continue
 
                 if name in ("worker", "worker-agent", "worker-io", "scheduler"):
                     # 心跳探针：不依赖 HTTP，也不触发业务写
@@ -612,9 +765,13 @@ class ComposeStaticTest(unittest.TestCase):
         self.assertIn("install -d -m 0750 -o 10001 -g 10001", deploy_script)
         self.assertIn("inbox", deploy_script)
 
-        # 备份对象只有 named volume；inbox 不是 named volume，结构上就不会被卷备份带走
+        # 备份对象只有业务 named volume；inbox 不是 named volume，结构上就不会被卷备份带走。
+        # 监控卷（Prometheus TSDB / Alertmanager silences）不属于业务数据，不进业务备份。
         named_volumes = set(self.compose.get("volumes", {}))
-        self.assertEqual(named_volumes, {"erp_objects", "erp_logs"})
+        self.assertEqual(
+            named_volumes,
+            {"erp_objects", "erp_logs", "prometheus_data", "alertmanager_data"},
+        )
 
 
 class ArtifactsTest(unittest.TestCase):
@@ -821,8 +978,17 @@ class ComposeRenderTest(unittest.TestCase):
     def test_positive_config_full_profile(self):
         result = self._config(TEST_ENV_FILE, profile="full")
         self.assertEqual(result.returncode, 0, result.stderr)
-        # full 档必须把 4 个差异服务渲染进来，且 demo 常驻服务仍在
-        for name in ("api", "web", "doc", "worker-agent", "worker-io", "migrate"):
+        # full 档必须把差异服务渲染进来，且 demo 常驻服务仍在
+        for name in (
+            "api",
+            "web",
+            "doc",
+            "worker-agent",
+            "worker-io",
+            "migrate",
+            "prometheus",
+            "alertmanager",
+        ):
             self.assertIn(name, result.stdout, f"full 档缺少 {name}")
 
     def test_positive_config(self):

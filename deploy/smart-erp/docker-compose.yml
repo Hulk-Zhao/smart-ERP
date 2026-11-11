@@ -1,5 +1,5 @@
 # =============================================================================
-# 聚合型 AI ERP · 云端精简档（demo：4C4G 现机 5 容器 / full：8G 起 10 容器）
+# 聚合型 AI ERP · 云端精简档（demo：4C4G 现机 5 容器 / full：8G 起 12 容器）
 # -----------------------------------------------------------------------------
 # 依据：docs/product/tech/01-技术架构.md §1A.3（compose 拓扑）/ §1A.4（网络与端口）
 #       §1A.6（健康检查与限额）/ §1A.7（共用 PG15 隔离）
@@ -7,8 +7,10 @@
 # 档位差异（与 §1A.3 差异表一致）：
 #   demo：api / worker（agent+io 合一）/ scheduler / connector-gw / web，合计 1200MiB；
 #   full：demo 全部 + doc（3G）/ worker-agent（2G）/ worker-io（1G）/ migrate（一次性）
-#         / compensation（256m，补偿执行器）。
+#         / compensation（256m，补偿执行器）/ prometheus（320m，规则评估）
+#         / alertmanager（96m，告警接收）。
 #         full 档通过 `--profile full` 启动；migrate 不进常驻循环（restart: "no"）。
+#   监控只在 full 档：demo 拿不到 Prometheus 也不该假装有告警（规则文件头已写明）。
 #
 # 档位口径（唯一权威，T802 定稿 2026-11-11）：只有 demo / full 两个档位，
 #   `--profile` 只接受 demo、full 这两个取值；**不存在 ops 档**，也不计划新增第三档。
@@ -94,8 +96,8 @@ services:
       ERP_LLM_MODEL: ${ERP_LLM_MODEL:-}
       ERP_LLM_TIMEOUT_SECONDS: ${ERP_LLM_TIMEOUT_SECONDS:-60}
       ERP_ASSISTANT_RATE_LIMIT_PER_MINUTE: ${ERP_ASSISTANT_RATE_LIMIT_PER_MINUTE:-10}
-      # 默认不挂载 /metrics；验收时临时在 .env 置 1/true/yes/on（RUNBOOK §5.2 三行矩阵）
-      ERP_METRICS_ENABLED: "${ERP_METRICS_ENABLED:-}"
+      # full 档的 Prometheus 抓这里；默认开启（内网端点，nginx 对 /erp/api/metrics 直接 404）
+      ERP_METRICS_ENABLED: "${ERP_METRICS_ENABLED:-true}"
       ERP_METRICS_PATH: "${ERP_METRICS_PATH:-/metrics}"
       # demo 静态会话：默认关闭；开启时 ERP_APP_ENV 必须为 demo，否则 api 拒绝启动。
       # 令牌只在部署期注入，API 不提供任何签发端点（apps/api/demo_session.py）。
@@ -209,11 +211,19 @@ services:
       # 演示环境不再每 tick 给有审计影像的租户补锚点行（避免与演示无关的写入和告警噪声）。
       ERP_AUDIT_ANCHOR: ${ERP_AUDIT_ANCHOR:-1}
       ERP_CONNECTOR_GW_URL: ${ERP_CONNECTOR_GW_URL:-http://connector-gw:8012}
+      # 审计链 gauge 写在本进程内存，必须由本进程 serve /metrics（README §6.1.2 第 5 条）。
+      # 端口只 expose 不发布；关闭开关等于让 P0 规则永远 absent，默认必须为 true。
+      ERP_METRICS_ENABLED: ${ERP_METRICS_ENABLED:-true}
+      ERP_METRICS_PORT: ${ERP_METRICS_PORT:-8011}
+      ERP_METRICS_PATH: ${ERP_METRICS_PATH:-/metrics}
     volumes:
       - erp_logs:/app/logs
     networks:
       - smart-erp-net
       - erp-db-net
+    expose:
+      # 8011 只在内网可抓：Prometheus → scheduler:8011
+      - "8011"
     mem_limit: 96m
     cpus: 0.2
     healthcheck:
@@ -532,12 +542,88 @@ services:
     cpus: 0.2
     logging: *default-logging
 
+  # ---------------------------------------------------------------------------
+  # prometheus：规则评估器（full 档专属；demo 档不装监控，保持 1200MiB 预算）
+  # 「规则不评估 = 规则不存在」：没有本进程时 alerts.rules.yaml 只是文本。
+  # 规则文件直接挂仓库内的 observability/alerts.rules.yaml，不复制副本（单一事实源）。
+  # 只挂 smart-erp-net：不需要 DB 网络。
+  # 预算 320m / 0.35 核（3 个目标、低基数，15d TSDB 远小于该预算）
+  # ---------------------------------------------------------------------------
+  prometheus:
+    profiles: ["full"]
+    image: prom/prometheus:v2.53.0
+    container_name: erp_prometheus
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # 15d 只需约 200MiB（3 个目标、低基数）；不设无限保留，避免 4C4G 宿主机被时序库吃满
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../../observability/alerts.rules.yaml:/etc/prometheus/rules/smart-erp.rules.yaml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - smart-erp-net
+    expose:
+      # 9090 只在内网：运维排查走 docker exec/port-forward，不发布宿主端口
+      - "9090"
+    mem_limit: 320m
+    cpus: 0.35
+    healthcheck:
+      # prom/prometheus 基于 busybox，自带 wget；不额外装探针依赖
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # alertmanager：告警去重与路由（full 档专属）
+  # 当前无外部通知渠道，receiver 为空；「收到告警」的证据是 /api/v2/alerts。
+  # 预算 96m / 0.15 核
+  # ---------------------------------------------------------------------------
+  alertmanager:
+    profiles: ["full"]
+    image: prom/alertmanager:v0.27.0
+    container_name: erp_alertmanager
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    networks:
+      - smart-erp-net
+    expose:
+      - "9093"
+    mem_limit: 96m
+    cpus: 0.15
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9093/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
+
 volumes:
   # demo 档没有 MinIO：对象走 LocalObjectStore 落在 erp_objects（§1A.3）
   erp_objects:
     name: smart-erp_objects
   erp_logs:
     name: smart-erp_logs
+  # 15d 时序库；容量远小于 320m 内存上限，不单独限大小
+  prometheus_data:
+    name: smart-erp_prometheus
+  # 告警静默/通知记录（Alertmanager 的 nflog + silences）
+  alertmanager_data:
+    name: smart-erp_alertmanager
 
 networks:
   # 栈内互访网络

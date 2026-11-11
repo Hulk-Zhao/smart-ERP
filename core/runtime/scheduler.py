@@ -20,6 +20,9 @@
   可关），结论写入 ``smart_erp_audit_chain_broken``；同时默认每天给每个有审计
   影像的租户固化一条链锚点（``--no-audit-anchor`` 或 ``ERP_AUDIT_ANCHOR=0`` 可关，
   demo 档建议关掉）；
+- 暴露：``ERP_METRICS_ENABLED`` 开启时在 ``ERP_METRICS_PORT``（默认 8011）起一个
+  只走内网的 ``/metrics``；"写这个 gauge 的进程必须自己 serve"，否则
+  ``smart_erp_audit_chain_broken`` 永远是 absent（README §6.1.2 第 5 条）；
 - 退出：释放租约（``owner`` 置空、``expires_at`` 置 now），下一个副本立即接管。
 """
 
@@ -43,8 +46,9 @@ from apps.audit.monitor import AuditChainMonitor
 from apps.audit.store import SqlAuditStore
 from apps.platform.config import get_settings
 from apps.platform.db.session import build_engine, build_session_factory
+from core.runtime.metrics_server import DEFAULT_METRICS_PORT, MetricsServer
 from core.runtime.queue import DEFAULT_RECLAIM_GRACE_SECONDS, JobQueueStore
-from observability.metrics import MetricsRegistry
+from observability.metrics import MetricsRegistry, metrics_enabled
 
 logger = logging.getLogger("erp.scheduler")
 
@@ -437,7 +441,35 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
+_METRICS_PORT_ENV = "ERP_METRICS_PORT"
+
+
+def _metrics_port_from_env() -> int:
+    """空值回落默认端口；非数字或越界直接抛 SystemExit 并带上键名。"""
+
+    raw = os.environ.get(_METRICS_PORT_ENV)
+    if raw is None or not raw.strip():
+        return DEFAULT_METRICS_PORT
+    try:
+        value = int(raw)
+    except ValueError:
+        raise SystemExit(
+            f"{_METRICS_PORT_ENV}={raw!r} 不是整数；留空或删除该变量则使用默认 "
+            f"{DEFAULT_METRICS_PORT}"
+        ) from None
+    if not 1 <= value <= 65535:
+        raise SystemExit(f"{_METRICS_PORT_ENV}={raw!r} 必须在 1-65535 之间")
+    return value
+
+
 async def _amain(args: argparse.Namespace) -> SchedulerStats:
+    # 审计链 gauge 写在 scheduler 进程内存里，必须由同一个进程 serve /metrics；
+    # 绑定失败直接抛出（进程退出），不允许「进程在跑、端点 404」这种静默降级。
+    registry = MetricsRegistry()
+    metrics_server: MetricsServer | None = None
+    if metrics_enabled():
+        metrics_server = MetricsServer(registry, port=_metrics_port_from_env())
+        await metrics_server.start()
     engine = build_engine(get_settings())
     try:
         scheduler = Scheduler(
@@ -453,11 +485,14 @@ async def _amain(args: argparse.Namespace) -> SchedulerStats:
             audit_image_interval_seconds=args.audit_image_interval_seconds,
             audit_anchor=args.audit_anchor,
             audit_anchor_source=args.audit_anchor_source,
+            metrics=registry,
         )
         max_ticks = 1 if args.once else args.ticks
         return await scheduler.run(max_ticks=max_ticks, install_signals=True)
     finally:
         await engine.dispose()
+        if metrics_server is not None:
+            await metrics_server.stop()
 
 
 def main(argv: Sequence[str] | None = None) -> None:
