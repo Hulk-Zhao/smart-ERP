@@ -526,3 +526,141 @@ docker exec s8-demo-pg psql -U postgres -d postgres -c \
 **不要放开 api 的 `ERP_DB_MAX_OVERFLOW`（已固定为 0），也不要放宽
 `db/00-provision.sql` 里的 `CONNECTION LIMIT 20`**——后者是用例守护的显式契约。
 
+## 9. 演示写路径：`u8-stub` 是**模拟外部系统**，不是真 U8
+
+> ⚠️ **它不是 U8，也不是任何真实 ERP。** `u8-stub` 起的是仓库内的
+> `apps/connectors/u8/stub_server.py`：启动横幅自报「模拟外部系统」，
+> 响应体带 `"simulated": true`，响应头带 `X-Simulated-System: u8-stub`，
+> 数据只在容器内存里，重启即清空。
+>
+> 所以「审批通过」在这条链路上只证明**写路径能跑通**，不证明对接过 U8。
+> 演示、周报、看板里不得写成「已写入 U8」「已对接 ERP」。
+> **禁止**在 full/生产档把 `ERP_U8_BASE_URL` 指向它——那等于把「写外部系统」
+> 换成「写进本机内存」，审计影像会记录一次并不存在的对接。
+
+### 9.1 一条命令
+
+桩已进 `docker-compose.yml` 的 **demo profile**，`scripts/demo-up.sh` 会把它一起拉起来：
+
+```bash
+bash scripts/demo-up.sh            # 起栈 + 桩（等 healthy 的清单里含 erp_u8_stub）
+bash scripts/demo-up.sh --down     # 连桩一起停
+```
+
+只补桩（栈已在跑）：
+
+```bash
+docker compose -f deploy/smart-erp/docker-compose.yml --profile demo up -d u8-stub
+```
+
+| 项 | 值 |
+| --- | --- |
+| 服务 / 容器 | `u8-stub` / `erp_u8_stub` |
+| 档位 | **仅 demo**；full 档 `config --services` 不含它 |
+| 端口 | 容器内 8021；宿主只绑 `127.0.0.1:8021`（演示取证用，不外发） |
+| 限额 | 64MiB / 0.1 核（不占 §1A.3 的 1200MiB 业务预算） |
+| api 侧 | `ERP_U8_BASE_URL=http://u8-stub:8021`（容器网络内名，不是 127.0.0.1） |
+| 健康探针 | `GET /stub/healthz`（桩自己的路径，非 C13 的 `/healthz`） |
+
+api **没有**对 `u8-stub` 的 `depends_on`，这是有意的：桩停着，api 照样能起，
+写入走到连接错误就显式失败（见 §9.3）。别为了「依赖整齐」补上它。
+
+### 9.2 演示时怎么确认「写到了桩上」
+
+工单变绿不算证据，要看桩自己的留痕（**唯一实证**）：
+
+```bash
+curl -s http://127.0.0.1:8021/stub/requests  | python -m json.tool   # 桩收到的全部请求
+curl -s http://127.0.0.1:8021/stub/receipts  | python -m json.tool   # 已落草稿回执（cCode / received_at）
+curl -s http://127.0.0.1:8021/stub/reversals  | python -m json.tool   # 已冲销单号（补偿后出现）
+```
+
+正常一次 W2 写入在 `/stub/requests` 里应看到三条（预检 → 写入 → 复核）：
+
+```
+GET  /u8/api/purchase-order-drafts?source_doc_no=PO-STUB-…
+POST /u8/api/purchase-order-drafts
+GET  /u8/api/purchase-order-drafts?source_doc_no=PO-STUB-…
+```
+
+`/stub/receipts` 里对应 `source_doc_no` 的 `cCode` 就是审批响应 `executed_steps[].object_id`
+（形如 `PO-STUB-000001`）。两者对不上，说明写入没落在桩上。
+
+`DEMO-W3-FUND-9002` 是反例：W3 在 AccessGate 就被 `E-POLICY-W3FORBIDDEN` 拒绝，
+**`/stub/requests` 不新增**——拒绝发生在出门之前。
+
+### 9.3 桩没起来时必须**显式失败**
+
+演示失败路径：
+
+```bash
+docker compose -f deploy/smart-erp/docker-compose.yml --profile demo stop u8-stub
+# 此时审批 W2 工单 → HTTP 500 E-CONN-UNAVAILABLE（retriable=true, fail_code=F5）
+# 工单仍停在「待审批」，version 不变，/stub/receipts 不可达
+docker compose -f deploy/smart-erp/docker-compose.yml --profile demo start u8-stub
+```
+
+**任何一次「桩没起来但工单变绿」都说明写路径被旁路了，按 P0 查**：
+先看 `docker logs erp_api | grep -i u8`，再确认 api 容器里的 `ERP_U8_BASE_URL`
+不是空串、也没有被别的 profile 覆盖成可解析但无关的地址。
+
+### 9.4 故障注入与重置（只影响桩）
+
+```bash
+curl -X POST http://127.0.0.1:8021/stub/fault -H 'Content-Type: application/json' -d '{"fail_posts": 3}'
+curl -X POST http://127.0.0.1:8021/stub/reset      # 清空请求/回执/注入状态
+```
+
+### 9.5 演示时哪一步是预置的、哪一步是现场点的
+
+`DEMO-W2-WRITE-9001` 的四个环节来源不同，**不要以为两次审批都是当场做的**：
+
+| 环节 | 身份 | 来源 |
+| --- | --- | --- |
+| 建单 / 发起 | `aaaaaaaa`（执行体，**不是**演示登录用户 `dddddddd`） | **种子预置** |
+| 第一条复核（reviewer） | 第二个 `user_id` | **种子预置**一条 reviewer 记录（由 S1 补进种子；未带上时演示前先补） |
+| 第二条复核（approver） | 演示登录用户 `dddddddd` | **现场点**（演示动作只有这一步） |
+| 触发写入 | 发起人 `aaaaaaaa`（执行体） | 由执行体触发，不是演示用户点的 |
+
+W2 要求两个 **distinct** `user_id` 各落一条记录，一个账号满足不了，所以第一条必须在种子里
+预置。演示话术应是「第一票已由评审人落库，我现在以审批人身份补第二票」；说成
+「两次审批都是我当场点的」与事实不符。
+
+若界面上一直停在「缺少角色 ['approver', 'reviewer']」，先查种子是否预置了 reviewer 记录
+——那是夹具问题，不是审批人权限问题。发起人 `aaaaaaaa` 也意味着「点通过」本身点得动：
+审批动作由演示用户发起，不需要等于发起人。
+
+### 9.6 2026-11-11 实测（`0fef5ff`，demo 档，api 与新桩同镜像）
+
+> 这次实测证明的是**写路径**（桩在/不在的差别），不是上面的演示动线：
+> 演示静态令牌只有一个用户，所以用了一张把 `initiator_id` 设为演示用户的一次性工单
+> （`DEMO-W2-HTTP-9003`），两条审批记录由 reviewer / approver 两个独立身份落库。
+> 日常演示请按 `demo/README.md` 走 §9.5 的动线，不要复制这张临时工单。
+
+**不起桩 → 写入显式失败**（工单保持 `待审批|1`，`/stub/receipts` 连接被拒 `HTTP=000 exit=7`）：
+
+```
+HTTP/1.1 500 Internal Server Error
+{"type":"about:blank","code":"E-CONN-UNAVAILABLE","title":"连接器不可用",
+ "detail":"服务内部错误: ConnectorError","retriable":true,"fail_code":"F5"}
+```
+
+**起桩 → 写入成功**（HTTP 200，`state=执行中`，`executed_steps[0].object_id=PO-STUB-000001`）：
+
+```json
+{"ticket_id":"a1111111-…","action":"approve","state":"执行中","version":3,
+ "missing_roles":[],
+ "executed_steps":[{"step_no":1,"action_key":"u8.po.create_draft","system":"u8",
+   "object_id":"PO-STUB-000001","state":"succeeded","level":"W1",
+   "idem_key":"demo-demo-w2-http-9003"}]}
+```
+
+`/stub/receipts` 命中同一 `source_doc_no`：
+
+```json
+{"simulated":true,"items":[{"cCode":"PO-STUB-000001",
+ "source_doc_no":"PO-STUB-DEMO-W2-HTTP-9003","cVenCode":"S-STL-0001",
+ "dPODate":"2026-11-11","line_count":1,"received_at":"2026-11-11T10:15:11.200416Z",
+ "simulated":true,"system":"u8-stub（模拟外部系统，不是真实 U8）"}]}
+```
+

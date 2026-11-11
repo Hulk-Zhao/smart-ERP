@@ -18,7 +18,7 @@
 档位口径只有 `demo` / `full` 两个取值，**不存在 ops 档**（T802 定稿）：
 
 - `--profile` 只接受 `demo`、`full`；取其它值 compose 会直接报 no such profile；
-- `demo` = api / worker / scheduler / connector-gw / web（合计 1200MiB）；
+- `demo` = api / worker / scheduler / connector-gw / web（1200MiB）+ u8-stub（64MiB，模拟外部系统，演示写入用）；
 - `full` = 在 demo 基础上加 doc / worker-agent / worker-io / migrate，api 改为 `api-prod` 且只绑回环；
 - 代码侧 `ERP_APP_ENV` 是自由字符串（无枚举校验），上表三个值是本项目约定值，`local` 仅本地用。
 
@@ -59,7 +59,7 @@
 | `ERP_GW_EGRESS_ALLOWLIST_FILE` | /app/config/gw-egress.yaml | /app/config/gw-egress.yaml | /app/config/gw-egress.yaml |
 | `ERP_OBJECT_STORE_DRIVER` | local | local | minio |
 | `ERP_OBJECT_STORE_PATH` | /data/objects | /data/objects | /data/objects |
-| `ERP_U8_BASE_URL` | http://127.0.0.1:9090 | http://u8-demo.internal:8080 | http://u8.internal:8080 |
+| `ERP_U8_BASE_URL` | http://127.0.0.1:9090 | http://u8-stub:8021 | http://u8.internal:8080 |
 | `ERP_FILE_INBOX` | —（留空=不启用） | /data/inbox | —（留空=不启用） |
 | `ERP_METERING_UNIT_PRICE` | 0.05 | 0.20 | 0.20 |
 | `ERP_METERING_CURRENCY` | CNY | CNY | CNY |
@@ -81,6 +81,10 @@
 > `ERP_DB_MAX_OVERFLOW`：compose 里 **api 固定注入 `${ERP_DB_MAX_OVERFLOW:-0}`**——单 api 进程内有多个
 > 独立引擎共用 `erp_app` 的 20 连接上限，overflow 必须为 0；上面 demo/prod 的 `4` 只对
 > worker / scheduler / compensation 生效。多副本部署要按 `erp_app` 连接上限重新核算，不要直接放开。
+
+> `ERP_U8_BASE_URL`（U8 写出口）：demo 档由 compose 起 `u8-stub`（`u8-stub` 服务，仅 demo profile），
+> api 注入 `http://u8-stub:8021`。**它是模拟外部系统，不是真 U8**：回执/请求留痕只在
+> `/stub/receipts`、`/stub/requests`，不会产生任何真实单据；full/prod 必须覆盖为真实地址。
 
 ## 3. 差异点与原因
 
