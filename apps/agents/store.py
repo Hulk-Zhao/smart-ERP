@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -241,8 +241,14 @@ class TicketStore:
         actor_id: UUID | None = None,
         trace_id: str | None = None,
         payload: Mapping[str, Any] | None = None,
+        before_append: Callable[[AsyncSession], None] | None = None,
     ) -> EventRecord:
-        """校验 + 追加事件 + 更新投影，同一事务内完成。"""
+        """校验 + 追加事件 + 更新投影，同一事务内完成。
+
+        ``before_append`` 在锁定工单行、校验通过之后、追加事件之前执行，
+        用于把「必须与本次状态推进同生共死」的行写进同一事务（例如驳回决定
+        对应的 ``approval_record``）。默认 ``None``，执行器路径行为不变。
+        """
 
         async with self._sf() as session, session.begin():
             ticket = await session.scalar(
@@ -253,6 +259,9 @@ class TicketStore:
 
             target_state = TicketState(target)
             resolve_transition(ticket.state, target_state, trigger, context)
+
+            if before_append is not None:
+                before_append(session)
 
             body: dict[str, Any] = dict(payload or {})
             body["trigger"] = trigger

@@ -512,6 +512,11 @@ class MetricsRegistry:
             "smart_erp_audit_chain_broken",
             "审计链断链标志：0 正常，1 检测到断链（P0，不计入业务成功率）",
         )
+        self.audit_orphan_steps = Gauge(
+            "smart_erp_audit_orphan_steps",
+            "ticket_step.audit_image_id 指向不存在的 audit_image 行的条数"
+            "（审计链显示有外部证据但证据行不存在）",
+        )
         self._metrics: tuple[Any, ...] = (
             self.tickets_total,
             self.ticket_failures_total,
@@ -532,6 +537,7 @@ class MetricsRegistry:
             self.db_clock_skew_seconds,
             self.db_clock_skew_backwards_seconds_max,
             self.audit_chain_broken,
+            self.audit_orphan_steps,
         )
 
     @property
@@ -691,6 +697,9 @@ class MetricsRegistry:
 
     def set_audit_chain_broken(self, broken: bool) -> None:
         self.audit_chain_broken.set(1 if broken else 0)
+
+    def set_audit_orphan_steps(self, count: int) -> None:
+        self.audit_orphan_steps.set(_count_value(count, "audit_orphan_steps"))
 
     # -- span 映射 -----------------------------------------------------
     def observe_trace(self, trace: Any) -> None:

@@ -108,7 +108,7 @@ from apps.recon.models import (
     Money,
     ReconMetrics,
 )
-from apps.security.approvals import TicketFacts
+from apps.security.approvals import ApprovalRecord, TicketFacts
 from apps.security.gate import AccessGrant, AccessRequest
 from apps.security.identity import SessionToken, UserPrincipal
 from apps.security.roles import (
@@ -270,6 +270,24 @@ def _require_initiator(ticket: TicketRecord, session: SessionToken) -> None:
         )
 
 
+async def _hydrate_approvals(container: ApiContainer, ticket: TicketRecord) -> None:
+    """把库里的审批记录整体水合进 ``ApprovalService`` 的进程内缓存。
+
+    ``AccessGate`` / ``WriteGateway`` 的审批判定是同步的（不能在中途查库），
+    所以每个请求入口在进入判定链之前先用库里的真源替换该工单的缓存：
+    容器重建后判定与 ``GET /tickets/{id}`` 的 ``approvals`` 都来自库，
+    ``missing_roles`` 不会因为进程内字典是空的而回到「全部缺失」。
+    """
+
+    store = container.approval_records
+    if store is None:
+        return  # 无库模式：进程内缓存即真源（单测默认）
+    records = await store.list_for(
+        tenant_id=ticket.tenant_id, ticket_id=ticket.ticket_id
+    )
+    container.approvals.replace(str(ticket.ticket_id), records)
+
+
 def _required_roles(container: ApiContainer, ticket: TicketRecord) -> tuple[str, ...]:
     if ticket.write_level is WriteLevel.W3:
         return ()
@@ -355,6 +373,7 @@ async def get_ticket(
     scope = _require_scope(session, build_scope(scope_in))
     ticket = await _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
+    await _hydrate_approvals(container, ticket)
     return _ticket_detail(container, ticket)
 
 
@@ -371,6 +390,7 @@ async def approve_ticket(
     ticket = await _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
     _require_initiator(ticket, session)
+    await _hydrate_approvals(container, ticket)
     if ticket.state is not TicketState.PENDING_APPROVAL:
         raise ProblemError(
             ErrorCode.STATE_ILLEGAL,
@@ -526,6 +546,7 @@ async def reject_ticket(
     scope = _require_scope(session, build_scope(body.scope))
     ticket = await _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
+    await _hydrate_approvals(container, ticket)
     if ticket.state is not TicketState.PENDING_APPROVAL:
         raise ProblemError(
             ErrorCode.STATE_ILLEGAL,
@@ -544,7 +565,9 @@ async def reject_ticket(
         amount=ticket.amount,
         touches_fund=ticket.touches_fund,
     )
-    _record_decision(container, ticket, session, body.role, "rejected", body.comment)
+    record = _build_decision(
+        container, ticket, session, body.role, "rejected", body.comment
+    )
 
     resolve_transition(
         ticket.state, TicketState.REJECTED, "rejected", TransitionContext()
@@ -557,7 +580,9 @@ async def reject_ticket(
         context=TransitionContext(),
         actor_id=session.user_id,
         payload={"pending_write": None},
+        approval_record=record,
     )
+    container.approvals.remember(record)
     ticket.state = TicketState.REJECTED
     ticket.version = version
     ticket.pending_write = None
@@ -642,6 +667,7 @@ async def compensate_ticket(
     scope = _require_scope(session, build_scope(body.scope))
     ticket = await _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
+    await _hydrate_approvals(container, ticket)
     # C1：自己发起的工单可直接回滚；他人工单仅 IT/CIO 与 CFO，且必须带理由。
     rollback_other = assert_can_rollback(
         principal_of(session),
@@ -846,6 +872,7 @@ async def list_pending_approvals(
     )
     tasks: list[ApprovalTaskOut] = []
     for ticket in rows:
+        await _hydrate_approvals(container, ticket)
         required = _required_roles(container, ticket)
         if not required:
             continue
@@ -885,6 +912,7 @@ async def decide_approval(
     scope = _require_scope(session, build_scope(body.scope))
     ticket = await _require_ticket(container, session, ticket_id)
     _require_ticket_in_scope(ticket, scope)
+    await _hydrate_approvals(container, ticket)
     if ticket.state is not TicketState.PENDING_APPROVAL:
         raise ProblemError(
             ErrorCode.STATE_ILLEGAL,
@@ -900,11 +928,13 @@ async def decide_approval(
         amount=ticket.amount,
         touches_fund=ticket.touches_fund,
     )
-    record = _record_decision(
+    record = _build_decision(
         container, ticket, session, body.role, decision, body.comment
     )
 
     if decision == "rejected":
+        # 审批行与状态推进同一事务：任一侧失败都整体回滚，不会留下
+        # 「工单已驳回但审批记录没落库」或反之。
         resolve_transition(
             ticket.state, TicketState.REJECTED, "rejected", TransitionContext()
         )
@@ -916,10 +946,14 @@ async def decide_approval(
             context=TransitionContext(),
             actor_id=session.user_id,
             payload={"pending_write": None},
+            approval_record=record,
         )
+        container.approvals.remember(record)
         ticket.state = TicketState.REJECTED
         ticket.version = version
         ticket.pending_write = None
+    else:
+        await _persist_decision(container, ticket, record)
 
     required = _required_roles(container, ticket)
     return ApprovalDecisionOut(
@@ -940,15 +974,17 @@ async def decide_approval(
     )
 
 
-def _record_decision(
+def _build_decision(
     container: ApiContainer,
     ticket: TicketRecord,
     session: SessionToken,
     role: str,
     decision: str,
     comment: str,
-):
-    return container.approvals.record(
+) -> ApprovalRecord:
+    """校验并构造审批记录；落库/入缓存由调用方按「通过 / 驳回」分别决定。"""
+
+    return container.approvals.build(
         ticket_id=str(ticket.ticket_id),
         role=role,
         approver=principal_of(session),
@@ -956,6 +992,17 @@ def _record_decision(
         decision=decision,  # type: ignore[arg-type]
         comment=comment,
     )
+
+
+async def _persist_decision(
+    container: ApiContainer, ticket: TicketRecord, record: ApprovalRecord
+) -> None:
+    """通过决定：先落库再进缓存；落库失败时不留下进程内「已审批」的假象。"""
+
+    store = container.approval_records
+    if store is not None:
+        await store.add(tenant_id=ticket.tenant_id, record=record)
+    container.approvals.remember(record)
 
 
 # --------------------------------------------------------------------------- 对账

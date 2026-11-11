@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager, suppress
+
 import uvicorn
 from fastapi import FastAPI
 
@@ -17,6 +20,21 @@ from observability.metrics import install_metrics
 SERVICE_NAME = "smart-erp-api"
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """启动孤儿 ``audit_image_id`` 巡检；测试容器未装配时为空操作。"""
+
+    scanner = get_container().audit_integrity
+    task = asyncio.create_task(scanner.run_forever()) if scanner is not None else None
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     app = FastAPI(
@@ -25,6 +43,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         root_path=settings.api_root_path,
         docs_url="/docs",
         openapi_url="/openapi.json",
+        lifespan=_lifespan,
     )
     # 请求 ID / trace_id / 超时 / problem+json 错误处理统一由平台层装配；
     # 业务路由在各自模块里挂到 apps.platform.api.api_router 即可。

@@ -114,12 +114,16 @@ class TicketRepository:
         actor_id: UUID | None = None,
         trace_id: str | None = None,
         payload: Mapping[str, Any] | None = None,
+        approval_record: Any = None,
     ) -> int:
         """状态推进：与 ``TicketStore.transition`` 同一套校验与语义。
 
         返回**对外版本号**（建单即 1），与 SQL 适配器一致；内存实现没有事件表，
         因此这里不产生事件，只同步投影。``payload`` 里显式出现的
         ``pending_write`` 会覆盖写计划（与事件重放口径一致）。
+
+        ``approval_record`` 只为与 SQL 适配器同签名而存在：内存模式没有「事务内
+        落审批行」这回事，审批记录由服务层在推进后调用 ``remember`` 进缓存。
         """
 
         row = self._rows.get(ticket_id)
