@@ -195,10 +195,11 @@ WIRED_METRICS = {
     "smart_erp_recon_runs_failed_total",
 }
 
-#: 注释态规则的锚点与归属流标记。任何一条被注释的规则都必须二选一：
-#: 「采集点待接线（归属流：…）」或「待真实基线」——不允许无理由地静默停用。
+#: 注释态规则的锚点与归属流标记。任何一条被注释的规则都必须三选一：
+#: 「采集点待接线（归属流：…）」「待评估器（归属流：…）」或「待真实基线」——
+#: 不允许无理由地静默停用，也不允许用「已有写入点」冒充「可观测」。
 _COMMENTED_ALERT_RE = re.compile(r"^\s*#\s*-\s*alert:\s*(?P<name>[A-Za-z0-9_]+)\s*$", re.M)
-_MARKER_PREFIXES = ("采集点待接线（归属流：", "待真实基线")
+_MARKER_PREFIXES = ("采集点待接线（归属流：", "待评估器（归属流：", "待真实基线")
 
 
 def _commented_alert_names() -> list[str]:

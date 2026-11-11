@@ -4,7 +4,7 @@
 #   - /etc/prometheus/rules/smart-erp.rules.yaml
 # 语法校验：python -c "import yaml; yaml.safe_load(open('observability/alerts.rules.yaml'))"
 #
-# ⚠ 部署内没有评估器（2026-11-11 核实，基准 origin/main 0f597b3）
+# ⚠ 部署内没有评估器（2026-11-11 核实，基准 origin/main fa5de4f）
 #   本文件是「规则定义」，不是「正在生效的告警」。deploy/ 全目录没有 Prometheus /
 #   Alertmanager，也没有任何 scrape_configs 或 rule_files 配置；compose 的 10 个服务里
 #   没有任何进程读取或评估本文件。下面标「生效」的 2 条，真实状态是：语法通过、有采集点，
@@ -14,15 +14,19 @@
 # 标签约定：severity = P0（立即叫醒，安全/审计）| P1（15 分钟内响应）| P2（工作时间处理）。
 # 每条规则都写 why_paged：说明为什么值得半夜叫醒人，而不是“指标看起来不对”。
 # ---------------------------------------------------------------------------
-# 当前状态（2026-11-11，基准 origin/main 0f597b3）
+# 当前状态（2026-11-11，基准 origin/main fa5de4f + scheduler /metrics 分支）
 #   生效 2 条：SmartErpReconBatchFailureRateHigh、SmartErpReconBatchP95Slow
 #     依赖的 recon_batches_total / recon_batch_duration_seconds 已有生产采集点；
 #     但部署内无评估器（见上），它们目前不会产生任何告警。
-#   注释 9 条：3 条 T702 历史规则（write 失败率 / unresolved 增长 / 审计链 P0）
-#     + 6 条补偿与时钟新规则。原因：依赖指标零生产采集点，启用即永不触发；
+#   注释 9 条：
+#     - 1 条仅缺采集点：SmartErpWriteFailureRateHigh（`record_stage()` 已存在，但 api 的
+#       /metrics 受 `ERP_METRICS_ENABLED` 控制且默认为空→未挂载）。
+#     - 8 条采集点已具备、缺评估器：3 条 T702 历史规则 + 6 条补偿与时钟规则。
+#       scheduler 已自 serve /metrics（8014 内网），补偿执行器在 full 档自 serve（8013），
+#       但部署内没有 Prometheus / Alertmanager，规则写了也不会被评估。
 #     假的安全感比没有安全感更危险。归属流：apps/write、apps/tickets、
 #     apps/audit、apps/agents、apps/runtime。
-#     取消注释条件：见每条规则上方「采集点待接线（归属流：…；解锁条件：…）」
+#     取消注释条件：见每条规则上方的归属流标记（「采集点待接线」或「待评估器」）
 #     以及 README §6.1.3 的「取消注释的前置条件」列。
 #   建议 1 条：SmartErpReconRunFailureRateHigh 已有采集点，等真实基线后再启用。
 # ---------------------------------------------------------------------------
@@ -255,7 +259,7 @@ groups:
       # P0：审计链断链（最高优先级）
       # 指标：smart_erp_audit_chain_broken（0 正常 / 1 断链）
       # ------------------------------------------------------------------
-      # 采集点待接线（归属流：apps/audit；解锁条件：scheduler 进程自己 serve /metrics + 人为断链 0→1 演练；首次写入前序列 absent，必须当未知而非 0。写入点见分支 feat/audit-chain-metric-wiring）
+      # 待评估器（归属流：apps/audit；写入点 apps/audit/monitor.py:123、:144，scheduler 已自 serve /metrics：core/runtime/scheduler.py:319，8014 内网；解锁条件：评估器接入 + 人为断链 0→1 演练，首次写入前序列 absent，必须当未知而非 0）
       # - alert: SmartErpAuditChainBroken
       #   expr: max(smart_erp_audit_chain_broken) > 0
       #   for: 1m

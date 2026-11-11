@@ -199,19 +199,19 @@ location = /erp/api/metrics { deny all; }   # 或 return 404;
 | `smart_erp_write_stage_total` | counter | `stage` | `sum()` | 无 | `WriteGateway` 阶段执行次数，`stage ∈ preview/write/verify/compensate` |
 | `smart_erp_write_stage_failures_total` | counter | `stage` | `sum()` | 无 | 阶段失败次数（`error` 或 `rejected`），与上者相除即失败率 |
 | `smart_erp_write_stage_duration_seconds` | histogram | `stage` | 先 `sum by (le)` 再 `histogram_quantile` | 无 | 阶段耗时（秒），默认桶 5ms–10s |
-| `smart_erp_recon_batches_total` | counter | `result` | `sum()` / `sum by (result)` | `apps/api/service.py:991` | 对账批次结果：`matched`（已对账）/`pending_manual`（待人工）/`unreconcilable`（无法对账） |
-| `smart_erp_recon_batch_duration_seconds` | histogram | — | 先 `sum by (le)` 再 `histogram_quantile` | `apps/api/service.py:991` | 批次耗时（秒），默认桶 1s–600s |
-| `smart_erp_recon_supplier_lines_total` | counter | `outcome` | `sum()` / `sum by (outcome)` | `apps/api/service.py:991` | 供应商侧行按行级结果计数（封闭词表见 §6.1.1）；自动匹配率与人工介入率的分子分母 |
-| `smart_erp_recon_batch_auto_match_ratio` | histogram | — | 先 `sum by (le)` 再 `histogram_quantile` | `apps/api/service.py:991` | 单批次自动匹配率（0–1），桶 0.5/0.7/0.8/0.9/0.95/0.99/1.0。**不是准确率**，见 §6.1.1 |
-| `smart_erp_recon_degraded_batches_total` | counter | `reason` | `sum()` / `sum by (reason)` | `apps/api/service.py:991` | 降级（无法对账）批次按缺失项种类归因：`scope`/`supplier`/`item`/`base_unit`/`unit_conversion`/`line_data`/`other` |
-| `smart_erp_recon_runs_failed_total` | counter | `stage`、`code` | `sum()` / `sum by (stage,code)` | `apps/api/service.py:983`、`:986` | 对账请求失败次数，`stage ∈ input/engine/persist`，`code` 取 `ErrorCode.value` 或 `unclassified` |
-| `smart_erp_unresolved_tickets` | gauge | — | 全局口径 `max()`；分片队列 `sum()` | 无 | 当前 unresolved 工单数 |
-| `smart_erp_compensation_backlog` | gauge | — | `sum()` | 无 | 当前待处理补偿任务数（对应 P1 规则已删除，见 §6.1.3） |
-| `smart_erp_compensation_overdue` | gauge | — | `max()` | 无（待 apps/agents） | 到期（>60s）却仍是 `queued` 的补偿任务数；**必须含 `next_retry_at IS NULL` 分支**，否则修复后的无闸门行会静默 |
-| `smart_erp_compensation_future_retry` | gauge | — | `max()` | 无（待 apps/agents） | `next_retry_at > now()+18s` 的 queued 数；唯一能直接抓到墙钟回拨的队列信号 |
-| `smart_erp_db_clock_skew_seconds` | gauge | — | `max(abs(...))` | 无（待 apps/agents） | 应用单调时钟与墙钟之差：`Δwall − Δtick`，**负值=回拨**（唯一允许负值的 gauge） |
-| `smart_erp_db_clock_skew_backwards_seconds_max` | gauge | — | `max()` | 无（待 apps/agents） | 进程启动以来最大回拨幅度；只做排查/看板，**不单独告警**（单调最大值置位后不会回落） |
-| `smart_erp_audit_chain_broken` | gauge | — | `max()` | 无 | 审计链断链标志：0 正常 / 1 断链（P0） |
+| `smart_erp_recon_batches_total` | counter | `result` | `sum()` / `sum by (result)` | `apps/api/service.py:1096` | 对账批次结果：`matched`（已对账）/`pending_manual`（待人工）/`unreconcilable`（无法对账） |
+| `smart_erp_recon_batch_duration_seconds` | histogram | — | 先 `sum by (le)` 再 `histogram_quantile` | `apps/api/service.py:1096` | 批次耗时（秒），默认桶 1s–600s |
+| `smart_erp_recon_supplier_lines_total` | counter | `outcome` | `sum()` / `sum by (outcome)` | `apps/api/service.py:1096` | 供应商侧行按行级结果计数（封闭词表见 §6.1.1）；自动匹配率与人工介入率的分子分母 |
+| `smart_erp_recon_batch_auto_match_ratio` | histogram | — | 先 `sum by (le)` 再 `histogram_quantile` | `apps/api/service.py:1096` | 单批次自动匹配率（0–1），桶 0.5/0.7/0.8/0.9/0.95/0.99/1.0。**不是准确率**，见 §6.1.1 |
+| `smart_erp_recon_degraded_batches_total` | counter | `reason` | `sum()` / `sum by (reason)` | `apps/api/service.py:1096` | 降级（无法对账）批次按缺失项种类归因：`scope`/`supplier`/`item`/`base_unit`/`unit_conversion`/`line_data`/`other` |
+| `smart_erp_recon_runs_failed_total` | counter | `stage`、`code` | `sum()` / `sum by (stage,code)` | `apps/api/service.py:1104`、`:1107` | 对账请求失败次数，`stage ∈ input/engine/persist`，`code` 取 `ErrorCode.value` 或 `unclassified` |
+| `smart_erp_unresolved_tickets` | gauge | — | 全局口径 `max()`；分片队列 `sum()` | `apps/agents/compensation_worker.py:291`（full 档；worker 侧 `apps/agents/runtime.py:535` 无端点） | 当前 unresolved 工单数 |
+| `smart_erp_compensation_backlog` | gauge | — | `sum()` | `apps/agents/compensation_worker.py:288` | 当前待处理补偿任务数（对应 P1 规则已删除，见 §6.1.3） |
+| `smart_erp_compensation_overdue` | gauge | — | `max()` | `apps/agents/compensation_worker.py:289`（worker 侧 `runtime.py:527` 无端点） | 到期（>60s）却仍是 `queued` 的补偿任务数；**必须含 `next_retry_at IS NULL` 分支**，否则修复后的无闸门行会静默 |
+| `smart_erp_compensation_future_retry` | gauge | — | `max()` | `apps/agents/compensation_worker.py:290`（worker 侧 `runtime.py:528` 无端点） | `next_retry_at > now()+18s` 的 queued 数；唯一能直接抓到墙钟回拨的队列信号 |
+| `smart_erp_db_clock_skew_seconds` | gauge | — | `max(abs(...))` | `apps/agents/compensation_worker.py:183`（worker 侧 `runtime.py:510` 无端点） | 应用单调时钟与墙钟之差：`Δwall − Δtick`，**负值=回拨**（唯一允许负值的 gauge） |
+| `smart_erp_db_clock_skew_backwards_seconds_max` | gauge | — | `max()` | `apps/agents/compensation_worker.py:183` | 进程启动以来最大回拨幅度；只做排查/看板，**不单独告警**（单调最大值置位后不会回落） |
+| `smart_erp_audit_chain_broken` | gauge | — | `max()` | `apps/audit/monitor.py:123`、`:144`（scheduler 进程，自 serve `core/runtime/scheduler.py:319`） | 审计链断链标志：0 正常 / 1 断链（P0） |
 
 > **多副本必须聚合**：以上指标都是**进程内累加**，N 个副本就产生 N 条同标签序列。只看单个 pod 的数字会低估全局量；Prometheus 查询必须按上表聚合。规则文件已按聚合口径编写（`sum(...)`、`sum by (le)`、`max(...)`）。
 
@@ -293,16 +293,18 @@ registry.observe_recon_result(result, duration_seconds=elapsed)  # result 为 ap
    (a) **哪个进程**写这个指标（`文件:行`）？(b) 那个进程**是否 serve `/metrics`**（给出挂载点 `文件:行`）？
    指标值是进程内内存，只有 serve `/metrics` 的进程才会被 scrape；写在别的进程里的 gauge，
    抓到的一直是「没有这条序列」，与「一直正常」在告警上看起来完全一样。
-   `smart_erp_audit_chain_broken` 就是反例：写入点在 scheduler，而 `/metrics` 只挂在 api/web
-   （`apps/main.py:35`）与补偿执行器（`apps/agents/compensation_worker.py:302`），唯独没有 scheduler，
-   两边不通，所以这条 P0 继续保持注释——不明就里地取消注释，等于恢复一条哑告警。
+   `smart_erp_audit_chain_broken` 曾栽在这里：写入在 scheduler，而 `/metrics` 只挂在 api/web
+   与补偿执行器，scheduler 没有端点，两边不通。2026-11-11 已让 scheduler 自 serve
+   （`core/runtime/scheduler.py:319`，8014 内网），这条 P0 的「写入进程 === serve 进程」才成立。
+   但成立只是必要条件，不等于可解锁——还要过第 6 条。
 6. **规则不评估 = 规则不存在**：仓库里没有任何抓取/评估进程时，写好的规则与注释掉的规则在故障当天
    没有区别。2026-11-11 核实：`deploy/` 全目录没有 Prometheus / Alertmanager，也没有
    `scrape_configs` / `rule_files`；compose 的 10 个服务里没有任何进程读取 `alerts.rules.yaml`。
    当前 2 条「生效」规则的真实状态只是「语法合法 + 有采集点」，**不构成可观测性**。
+   给 scheduler 加上 `/metrics` 只解决了「抓得到」，没有解决「有人评估」——两者缺一仍是零。
    评估器（含抓取配置）接入前，验收与文档不得写「已告警」「线上有告警」，只能写「规则已定义、待评估器」。
 
-### 6.1.3 采集点审计表（基准 `origin/main` `0f597b3`，2026-11-11）
+### 6.1.3 采集点审计表（基准 `origin/main` `fa5de4f` + 本分支，2026-11-11）
 
 可复现的审计命令（rebase 到 `origin/main` 后执行）：
 
@@ -310,18 +312,25 @@ registry.observe_recon_result(result, duration_seconds=elapsed)  # result 为 ap
 git grep -n -E "\.(record_ticket|record_stage|record_recon_batch|observe_recon_result|record_recon_failure|set_unresolved|set_compensation_backlog|set_compensation_overdue|set_compensation_future_retry|observe_clock_skew|set_audit_chain_broken|observe_trace)\(" -- . ':(exclude)observability' ':(exclude)tests' ':(exclude)docs'
 ```
 
-命中 8 行，两个文件：
+命中 15 行，四个文件：
 
-- `apps/api/service.py`：`:991`（`observe_recon_result`）、`:999` 与 `:1002`（`record_recon_failure`）；
+- `apps/api/service.py`：`:1096`（`observe_recon_result`）、`:1104` 与 `:1107`（`record_recon_failure`）；
+- `apps/api/audit_integrity.py`：`:89`（`set_audit_orphan_steps`，api 进程）；
 - `apps/agents/compensation_worker.py`：`:183`（`observe_clock_skew`）、`:288`（backlog）、`:289`（overdue）、
-  `:290`（future_retry）、`:291`（unresolved）。
+  `:290`（future_retry）、`:291`（unresolved）；
+- `apps/agents/runtime.py`：`:510`（clock skew）、`:527`（overdue）、`:528`（future_retry）、
+  `:535`（unresolved）——**worker 进程，没有 `/metrics` 端点**；
+- `apps/platform/policy/gateway.py`：`:226`（`record_stage`，api 进程的写闸门）；
+- `apps/audit/monitor.py`：`:123`、`:144`（`set_audit_chain_broken`，经 scheduler tick）。
 
 其余写入方法在 `observability/`、`tests/`、`docs/` 之外零命中。
-`/metrics` 的挂载点有两处：api/web 进程 `apps/main.py:35`，补偿执行器 `apps/agents/compensation_worker.py:302`。
+`/metrics` 的挂载点有三处：api/web `apps/main.py:54`（受 `ERP_METRICS_ENABLED` 控制，默认关）、
+补偿执行器 `apps/agents/compensation_worker.py:302`（`enabled=True`）、
+scheduler `core/runtime/scheduler.py:319`（`enabled=True`，8014 内网）。
 
-> 注意：`apps/audit/monitor.py` 的 `set_audit_chain_broken()` 只在分支
-> `feat/audit-chain-metric-wiring`（`4473014`）上，未合入 main，故不计入上面的 8 行。
-> 即便合入，它写的是 scheduler 进程的内存，而 `/metrics` 只在 web 进程——见第 5 条判据。
+> **同一指标有两个写入者时，只有一个能被抓到。** `compensation_worker` 与 `core.runtime.worker`
+> 的 `apps/agents/runtime.py` 都在写补偿/时钟/unresolved；后者没有 `/metrics`，写进内存也无人读取。
+> 表里按「能被 scrape 到的那个进程」记；worker 侧那几行只算重复劳动，不算采集点。
 
 > **更进一步：连那 2 条「生效」规则也没有评估器。** 2026-11-11 核实：`deploy/` 全目录无
 > Prometheus / Alertmanager，无 `scrape_configs` / `rule_files`，compose 的 10 个服务里没有进程
@@ -330,24 +339,24 @@ git grep -n -E "\.(record_ticket|record_stage|record_recon_batch|observe_recon_r
 
 | 指标 | 生产采集点 | 是否仍被 `alerts.rules.yaml` 引用 | 取消注释的前置条件 |
 |---|---|---|---|
-| `smart_erp_recon_batches_total` | `apps/api/service.py:991` | 是，启用（SmartErpReconBatchFailureRateHigh；但部署内无评估器） | 采集点已满足；仍缺抓取与评估器（§6.1.2 第 6 条） |
-| `smart_erp_recon_batch_duration_seconds` | `apps/api/service.py:991` | 是，启用（SmartErpReconBatchP95Slow；但部署内无评估器） | 同上 |
-| `smart_erp_recon_supplier_lines_total` | `apps/api/service.py:991` | 否（有采集点、无规则） | — |
-| `smart_erp_recon_batch_auto_match_ratio` | `apps/api/service.py:991` | 否（有采集点、无规则） | — |
-| `smart_erp_recon_degraded_batches_total` | `apps/api/service.py:991` | 否（有采集点、无规则） | — |
-| `smart_erp_recon_runs_failed_total` | `apps/api/service.py:999`、`:1002` | 否（建议规则已写、未启用） | 跑满一个结账周期拿到真实失败率基线后再定阈值（候选 5% / 15m） |
+| `smart_erp_recon_batches_total` | `apps/api/service.py:1096` | 是，启用（SmartErpReconBatchFailureRateHigh；但部署内无评估器） | 采集点已满足；仍缺抓取与评估器（§6.1.2 第 6 条） |
+| `smart_erp_recon_batch_duration_seconds` | `apps/api/service.py:1096` | 是，启用（SmartErpReconBatchP95Slow；但部署内无评估器） | 同上 |
+| `smart_erp_recon_supplier_lines_total` | `apps/api/service.py:1096` | 否（有采集点、无规则） | — |
+| `smart_erp_recon_batch_auto_match_ratio` | `apps/api/service.py:1096` | 否（有采集点、无规则） | — |
+| `smart_erp_recon_degraded_batches_total` | `apps/api/service.py:1096` | 否（有采集点、无规则） | — |
+| `smart_erp_recon_runs_failed_total` | `apps/api/service.py:1104`、`:1107` | 否（建议规则已写、未启用） | 跑满一个结账周期拿到真实失败率基线后再定阈值（候选 5% / 15m） |
 | `smart_erp_tickets_total` | 无 | 否（无规则） | 需要时先接 `record_ticket()` |
 | `smart_erp_ticket_failures_total` | 无 | 否（无规则） | 同上 |
 | `smart_erp_ticket_failures_unclassified_total` | 无 | 否（无规则） | 同上 |
-| `smart_erp_write_stage_total` | 无 | **是 → 已注释**（SmartErpWriteFailureRateHigh） | 归属 `apps/write`：`WriteGateway.execute()` 按阶段埋 `record_stage()`，且 `/metrics` 上出现 `stage="write"` 的非零序列 |
-| `smart_erp_write_stage_failures_total` | 无 | **是 → 已注释**（同上） | 同上 |
-| `smart_erp_write_stage_duration_seconds` | 无 | 否（无规则） | 同 `record_stage()`；接线后可直接用于阶段 SLO |
-| `smart_erp_unresolved_tickets` | `apps/agents/compensation_worker.py:291`（full 档；同进程 `:302` serve `/metrics`） | **是 → 已注释**（SmartErpUnresolvedTicketsGrowing） | ① 抓取目标 + `up`/`absent()` 守卫；② 规则用 `offset 30m`，需连续 30 分钟真实历史；③ 增长 5 / 底线 10 两个阈值待基线校准 |
-| `smart_erp_audit_chain_broken` | `apps/audit/monitor.py:123`、`:144`（经 `core/runtime/scheduler.py::Scheduler.tick`；**仅在未合入的分支 `feat/audit-chain-metric-wiring` 上，main 无**） | **是 → 已注释（P0）**（SmartErpAuditChainBroken） | ① 该分支合入 main；② **scheduler 进程自己 serve `/metrics`**（端点当前只在 api/web `apps/main.py:35` 与补偿执行器 `apps/agents/compensation_worker.py:302`，scheduler 没有，内存里的 gauge 抓不到）；③ 完成一次人为断链的 **0→1 演练**：首次写入 0 之前序列是 `absent`，规则必须把它当**未知**、不能当 0（`max(...) > 0` 在 absent 时不触发，≠ 链完好） |
+| `smart_erp_write_stage_total` | `apps/platform/policy/gateway.py:226`（api 进程的写闸门；`apps/main.py:54` serve，但 `ERP_METRICS_ENABLED` 默认为空→未挂载） | **是 → 已注释**（SmartErpWriteFailureRateHigh） | ① 部署显式打开 `ERP_METRICS_ENABLED`；② 抓取目标 + 评估器；③ `/metrics` 上确认 `stage="write"` 非零序列 |
+| `smart_erp_write_stage_failures_total` | `apps/platform/policy/gateway.py:226`（同上） | **是 → 已注释**（同上） | 同上 |
+| `smart_erp_write_stage_duration_seconds` | `apps/platform/policy/gateway.py:226`（同上） | 否（无规则） | 同 `record_stage()`；接线后可直接用于阶段 SLO |
+| `smart_erp_unresolved_tickets` | `apps/agents/compensation_worker.py:291`（full 档；同进程 `:302` serve）；`apps/agents/runtime.py:535`（worker 进程，无端点，写了也抓不到） | **是 → 已注释**（SmartErpUnresolvedTicketsGrowing） | ① 抓取目标 + `up`/`absent()` 守卫；② 规则用 `offset 30m`，需连续 30 分钟真实历史；③ 增长 5 / 底线 10 两个阈值待基线校准 |
+| `smart_erp_audit_chain_broken` | `apps/audit/monitor.py:123`、`:144`（经 `core/runtime/scheduler.py::Scheduler.tick`）；**scheduler 自己 serve**：`core/runtime/scheduler.py:319`（8014 内网，`enabled=True`） | **是 → 已注释（P0）**（SmartErpAuditChainBroken） | ① 抓取目标指向 `scheduler:8014`；② 评估器接入（§6.1.2 第 6 条）；③ 完成一次人为断链的 **0→1 演练**：首次写入 0 之前序列是 `absent`，规则必须把它当**未知**、不能当 0（`max(...) > 0` 在 absent 时不触发，≠ 链完好） |
 | `smart_erp_compensation_backlog` | `apps/agents/compensation_worker.py:288`（full 档；同进程 `:302` serve） | 否（规则已删：当时零采集点） | 采集点已具备，但恢复规则同样要先有抓取目标 + `up` 守卫 + 一个重试周期的积压基线 |
-| `smart_erp_compensation_overdue` | `apps/agents/compensation_worker.py:289`（full 档；写入进程即 serve 进程：`:302 install_metrics(..., enabled=True)`） | 是 → **已注释**（3 条） | ① 抓取目标 `erp_compensation:8013` + `up`/`absent()` 守卫；② demo 档无该容器，须写明「不适用」而非「一直绿」；③ 跑满一个重试周期拿基线后再定 0 / 5 / 15m |
-| `smart_erp_compensation_future_retry` | `apps/agents/compensation_worker.py:290`（full 档；同上，同进程 serve） | 是 → **已注释**（1 条） | ① 同上的抓取目标与守卫；② 基线应为 0，需实跑确认无假阳性；③ 执行器 `_METRIC_SQL` 用 `future=18.0`，与规则口径对齐 |
-| `smart_erp_db_clock_skew_seconds` | `apps/agents/compensation_worker.py:183`（`ClockSampler.sample`，由 `:292` 每轮触发；full 档同进程 serve） | 是 → **已注释**（2 条） | ① 抓取目标 + `up` 守卫；② 5s / 30s 阈值无实测数据；③ 采样间隔随 `ERP_COMPENSATION_POLL_SECONDS`（默认 1s） |
+| `smart_erp_compensation_overdue` | `apps/agents/compensation_worker.py:289`（full 档；同进程 `:302` serve）；`apps/agents/runtime.py:527`（worker 无端点） | 是 → **已注释**（3 条） | ① 抓取目标 `erp_compensation:8013` + `up`/`absent()` 守卫；② demo 档无该容器，须写明「不适用」而非「一直绿」；③ 跑满一个重试周期拿基线后再定 0 / 5 / 15m |
+| `smart_erp_compensation_future_retry` | `apps/agents/compensation_worker.py:290`（full 档；同上，同进程 serve）；`apps/agents/runtime.py:528`（worker 无端点） | 是 → **已注释**（1 条） | ① 同上的抓取目标与守卫；② 基线应为 0，需实跑确认无假阳性；③ 执行器 `_METRIC_SQL` 用 `future=18.0`，与规则口径对齐 |
+| `smart_erp_db_clock_skew_seconds` | `apps/agents/compensation_worker.py:183`（`ClockSampler.sample`，由 `:292` 每轮触发；full 档同进程 serve）；`apps/agents/runtime.py:510`（worker 无端点） | 是 → **已注释**（2 条） | ① 抓取目标 + `up` 守卫；② 5s / 30s 阈值无实测数据；③ 采样间隔随 `ERP_COMPENSATION_POLL_SECONDS`（默认 1s） |
 | `smart_erp_db_clock_skew_backwards_seconds_max` | `apps/agents/compensation_worker.py:183`（同上一行） | 否（不单独告警） | 只用于看板与排查：进程生命周期内单调最大，不随恢复归零，不适合做告警 |
 
 单独盯住的四类：
@@ -355,15 +364,40 @@ git grep -n -E "\.(record_ticket|record_stage|record_recon_batch|observe_recon_r
 - **有采集点但规则已删**：`compensation_backlog`（`apps/agents/compensation_worker.py:288`）。
   它当时是按「零采集点」删的，现在采集点有了，但恢复规则仍需抓取目标与基线；其余无。
 - **规则引用但无采集点、且仍在启用**：**无**。3 条历史规则（write 失败率 / unresolved / 审计链 P0）
-  已与 6 条新规则同样处理——保留完整语义并注释掉，每条上方都有「采集点待接线（归属流：…）」。
+  已与 6 条新规则同样处理——保留完整语义并注释掉，每条上方都有归属流标记
+  （`采集点待接线（归属流：…）` 或 `待评估器（归属流：…）`）。
   当前生效集合只剩 2 条对账规则，依赖的指标都有 `apps/api/service.py` 的真实采集点。
-- **有写入点、但写入进程不 serve `/metrics`**：`smart_erp_audit_chain_broken`（1 条 P0）。
-  这是最容易误判的一类：`git grep` 能搜到采集点、代码 review 看起来也接上了，但 scrape 永远抓不到。
-  判据同 §6.1.2 第 5 条，只看「哪个进程写」与「那个进程是否暴露 `/metrics`」两件事。
+- **有写入点、但写入进程不 serve `/metrics`**：**无**。`smart_erp_audit_chain_broken` 曾属于这一类，
+  2026-11-11 已让 scheduler 自 serve（`core/runtime/scheduler.py:319`）；教训保留在 §6.1.2 第 5 条。
+- **写入点在无端点的进程里（重复写入者）**：`apps/agents/runtime.py:510`、`:527`、`:528`、`:535`（worker 进程）。
+  它们与补偿执行器写同一批 gauge，抓不到但不影响已暴露的值；不算采集点。
 - **有采集点但无任何规则**：`recon_supplier_lines_total`、`recon_batch_auto_match_ratio`、
-  `recon_degraded_batches_total`、`recon_runs_failed_total`、`compensation_backlog`。
+  `recon_degraded_batches_total`、`recon_runs_failed_total`、`compensation_backlog`、
+  `audit_orphan_steps`（`apps/api/audit_integrity.py:89`）。
 
-#### 补偿 5 条指标 / 6 条规则现在能不能取消注释？——不能（`0f597b3`，2026-11-11）
+#### 12 条规则 → 写入点 → 是否 serve（2026-11-11，`fa5de4f` + 本分支）
+
+> 右列只回答「抓不抓得到」，不回答「有没有人评估」——12 条规则全部没有评估器（§6.1.2 第 6 条）。
+> `apps/agents/runtime.py` 的重复写入者不列，因为它没有端点；同一个 gauge 只需一个能抓的写入者。
+
+| 规则 | 依赖指标 | 写入点（文件:行） | 写入进程 | 该进程 serve `/metrics` |
+|---|---|---|---|---|
+| `SmartErpReconBatchFailureRateHigh` | `recon_batches_total` | `apps/api/service.py:1096` | api | 是（`apps/main.py:54`），但 `ERP_METRICS_ENABLED` 默认为空→实际未挂载 |
+| `SmartErpReconBatchP95Slow` | `recon_batch_duration_seconds` | `apps/api/service.py:1096` | api | 同上 |
+| `SmartErpReconRunFailureRateHigh`（建议） | `recon_runs_failed_total` | `apps/api/service.py:1104`、`:1107` | api | 同上 |
+| `SmartErpWriteFailureRateHigh` | `write_stage_total` / `_failures_total` | `apps/platform/policy/gateway.py:226` | api | 同上 |
+| `SmartErpUnresolvedTicketsGrowing` | `unresolved_tickets` | `apps/agents/compensation_worker.py:291` | compensation | 是（`:302`，`enabled=True`），但仅 `full` 档 |
+| `SmartErpCompensationOverdueP2` | `compensation_overdue` | `apps/agents/compensation_worker.py:289` | compensation | 同上 |
+| `SmartErpCompensationOverdueP1Volume` | 同上 | 同上 | compensation | 同上 |
+| `SmartErpCompensationOverdueP1Duration` | 同上 | 同上 | compensation | 同上 |
+| `SmartErpCompensationFutureRetry` | `compensation_future_retry` | `apps/agents/compensation_worker.py:290` | compensation | 同上 |
+| `SmartErpClockSkewP2` | `db_clock_skew_seconds` | `apps/agents/compensation_worker.py:183` | compensation | 同上 |
+| `SmartErpClockSkewP1` | 同上 | 同上 | compensation | 同上 |
+| `SmartErpAuditChainBroken` | `audit_chain_broken` | `apps/audit/monitor.py:123`、`:144` | scheduler | 是（`core/runtime/scheduler.py:319`，8014，`enabled=True`，无档位限制） |
+
+
+
+#### 补偿 5 条指标 / 6 条规则现在能不能取消注释？——不能（`fa5de4f`，2026-11-11）
 
 按 §6.1.2 第 5 条逐项核对：
 
@@ -489,7 +523,7 @@ smart_erp_audit_chain_broken 0
 | `SmartErpCompensationFutureRetry` | 已注释 | P1 | 1m | `future_retry > 0` | 唯一能抓到时钟回拨的信号：补偿被推到未来等于永久不执行 |
 | `SmartErpClockSkewP2` | 已注释 | P2 | 1m | `|skew| ≥ 5s` | 根因信号，先于「任务卡住」出现，留出止损窗口 |
 | `SmartErpClockSkewP1` | 已注释 | P1 | 1m | `|skew| ≥ 30s` | 回拨幅度已足以让补偿、超时与租约判断同时失真 |
-| `SmartErpAuditChainBroken` | 已注释（P0，等分支合入 + 端点） | **P0** | 1m | `max(smart_erp_audit_chain_broken) > 0` | 审计链断链后「谁改了什么」无法自证，每小时都产生新的不可信记录 |
+| `SmartErpAuditChainBroken` | 已注释（P0，待评估器） | **P0** | 1m | `max(smart_erp_audit_chain_broken) > 0` | 审计链断链后「谁改了什么」无法自证，每小时都产生新的不可信记录；scheduler 已自 serve `/metrics`，但仍无评估器 |
 | `SmartErpReconRunFailureRateHigh` | 建议·未启用（等基线） | P1 | 15m | 对账硬失败率 > 5% | 硬错误比业务分流严重，但阈值需真实基线，不凭猜启用 |
 
 每条规则都带 `annotations.why_paged` 与 `runbook`，解释「为什么叫醒」和「先看哪里」。
@@ -547,15 +581,16 @@ audit_chain_broken=1  max()=1  firing=True
 ## 9. 测试与验证
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/observability -q   # 81 条：约定 / 树 / 链路 / 成本 / 导出 / 指标 / 对账质量 / 告警 / 暴露面
+.\.venv\Scripts\python.exe -m pytest tests/observability -q   # 84 条：约定 / 树 / 链路 / 成本 / 导出 / 指标 / 对账质量 / 告警 / 暴露面 / scheduler 端点
 .\.venv\Scripts\python.exe -m pytest tests/e2e -q             # 11 条：健康检查 / 只读 / W3 / 越权 / 审批 / 路由门禁
 ```
 
-全量回归（本分支 rebase 到 `2dac800` 后实跑）：`tests=1219 failures=0 errors=0 skipped=78`（跳过均为未提供 `ERP_TEST_DATABASE_URL` 的 PG 用例：集成 52 / 权限 20 / 守卫 4 / 并发 2）。
+全量回归以 CI 的 `pytest tests -q` 为准（测试使用 PEP 695 语法，本地需 Python ≥3.12）；历史记录：`tests=1219 failures=0 errors=0 skipped=78`（跳过均为未提供 `ERP_TEST_DATABASE_URL` 的 PG 用例：集成 52 / 权限 20 / 守卫 4 / 并发 2）。
 
 `tests/observability/test_metrics.py` 覆盖：高基数标签拒绝、文本格式与累计桶、span→指标折算（成功 / F6 / rejected / unclassified）、业务指标、补偿到期/未来重试 gauge、时钟偏移的有符号值与进程内最大回拨、非法采样值拒绝、`/metrics` 的 200 与 OpenAPI 排除、非 GET 405、默认不挂载与 `ERP_METRICS_ENABLED` 开关。
 `tests/observability/test_recon_quality.py` 覆盖：词表封闭且无 accuracy 指标、观测层不 import `apps.recon`（AST 断言）、只统计供应商侧行、`unaccounted = supplier_lines − 各行之和 == 0` 的自检、`BatchStatus→result` 映射与未知状态报错、降级原因取缺失项而非自由文本、直方图桶边界（`le` 为小于等于）、四条标签红线。
-`tests/observability/test_alerts.py` 覆盖：YAML 解析、生效规则恰为 2 条且都引用有采集点指标、`why_paged`/`runbook` 完整；9 条被注释规则必须带「采集点待接线（归属流：…）」或「待真实基线」标记（不允许无理由静默停用）、补偿/时钟 6 条的 severity/`for`/表达式原样保留、P0 审计链以注释形态保留 `for: 1m`、已删除的 `SmartErpCompensationBacklogHigh` 不再被引用；以及 overdue（P2/P1 量级/P1 时长）、future_retry、clock_skew（P2/P1 分档）在真实 `/metrics` 文本上的触发演示。
+`tests/observability/test_alerts.py` 覆盖：YAML 解析、生效规则恰为 2 条且都引用有采集点指标、`why_paged`/`runbook` 完整；9 条被注释规则必须带「采集点待接线（归属流：…）」「待评估器（归属流：…）」或「待真实基线」标记（不允许无理由静默停用）、补偿/时钟 6 条的 severity/`for`/表达式原样保留、P0 审计链以注释形态保留 `for: 1m`、已删除的 `SmartErpCompensationBacklogHigh` 不再被引用；以及 overdue（P2/P1 量级/P1 时长）、future_retry、clock_skew（P2/P1 分档）在真实 `/metrics` 文本上的触发演示。
+`tests/observability/test_scheduler_metrics.py` 覆盖：scheduler 的 `/metrics` 返回本进程注册表、`AuditChainMonitor.sink` 与端点共用同一实例（换注册表会 200 但永远抓不到真值）、`ERP_METRICS_ENABLED=0` 时独立端口仍挂载。
 
 ### 9.1 发布前检查（全部通过才可上线）
 

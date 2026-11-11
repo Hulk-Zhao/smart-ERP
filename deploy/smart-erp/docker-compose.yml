@@ -210,6 +210,9 @@ services:
     networks:
       - smart-erp-net
       - erp-db-net
+    # 审计链指标由本进程写入，也必须由本进程 serve；只在内网可抓，不发布宿主。
+    expose:
+      - "8014"
     mem_limit: 96m
     cpus: 0.2
     healthcheck:

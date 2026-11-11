@@ -18,7 +18,9 @@
   可选跑全链审计巡检（``--audit-verify``，断链会被 ``AuditGuard`` 冻结写入）；
   默认还会每 60s 跑一个 ``audit_image`` 链校验时间片（``--no-audit-image-scan``
   可关），结论写入 ``smart_erp_audit_chain_broken``；
-- 退出：释放租约（``owner`` 置空、``expires_at`` 置 now），下一个副本立即接管。
+- 退出：释放租约（``owner`` 置空、``expires_at`` 置 now），下一个副本立即接管；
+- ``/metrics``：本进程自己 serve（默认 ``0.0.0.0:8014``，compose 只做内网 expose）。
+  审计链指标的写入方就是这里，端点必须挂在同一个进程，否则 scrape 抓到的永远是 absent。
 """
 
 from __future__ import annotations
@@ -29,8 +31,9 @@ import logging
 import os
 import signal
 import socket
+import threading
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Any, Sequence
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -41,7 +44,7 @@ from apps.audit.store import SqlAuditStore
 from apps.platform.config import get_settings
 from apps.platform.db.session import build_engine, build_session_factory
 from core.runtime.queue import DEFAULT_RECLAIM_GRACE_SECONDS, JobQueueStore
-from observability.metrics import MetricsRegistry
+from observability.metrics import MetricsRegistry, install_metrics
 
 logger = logging.getLogger("erp.scheduler")
 
@@ -57,6 +60,9 @@ DEFAULT_TICK_SECONDS = 5.0
 DEFAULT_AUDIT_IMAGE_INTERVAL = 60.0
 DEFAULT_AUDIT_IMAGE_ROWS = 2000
 DEFAULT_AUDIT_IMAGE_PAGE = 200
+# 独立内网端口，不并入 api（8010）/ connector-gw（8012）/ compensation（8013）/ doc（8020）。
+DEFAULT_METRICS_HOST = "0.0.0.0"
+DEFAULT_METRICS_PORT = 8014
 
 _ACQUIRE_SQL = text(
     """
@@ -293,6 +299,53 @@ class Scheduler:
         return self.stats
 
 
+def build_metrics_app(scheduler: Scheduler) -> Any:
+    """scheduler 的 ``/metrics``，与 api / compensation 共用 ``install_metrics``。
+
+    必须使用 ``scheduler.metrics`` 这个注册表：``AuditChainMonitor`` 的 ``sink`` 就是它。
+    换一个实例端点照样 200，但断链标志永远停在初始值——「能抓」与「抓得到真值」是两件事。
+
+    显式 ``enabled=True``：端口只在 compose 内网 ``expose``，不发布宿主，
+    因此不跟随 ``ERP_METRICS_ENABLED`` 的默认关闭（与 ``compensation_worker`` 一致）。
+    """
+
+    from fastapi import FastAPI
+
+    registry = scheduler.metrics
+    if registry is None:  # __post_init__ 已兜底，这里只为类型收窄
+        raise RuntimeError("Scheduler.metrics 未初始化")
+
+    app = FastAPI(title="smart-erp scheduler", docs_url=None, redoc_url=None)
+    install_metrics(app, registry, enabled=True)
+    return app
+
+
+class _MetricsServer:
+    """uvicorn 跑在独立线程。
+
+    非主线程时 uvicorn 的信号捕获是空操作，SIGTERM 仍由 ``Scheduler.run`` 的
+    处理器负责；否则 uvicorn 会接管信号、只置 ``should_exit``，容器停机要等满
+    ``stop_grace_period`` 再被强杀。
+    """
+
+    def __init__(self, app: Any, host: str, port: int) -> None:
+        import uvicorn
+
+        self._server = uvicorn.Server(
+            uvicorn.Config(app, host=host, port=port, log_level="info")
+        )
+        self._thread = threading.Thread(
+            target=self._server.run, name="scheduler-metrics", daemon=True
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._server.should_exit = True
+        self._thread.join(timeout=5.0)
+
+
 _TICK_ENV = "ERP_SCHEDULER_TICK_SECONDS"
 
 
@@ -357,6 +410,17 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--once", action="store_true", help="等价于 --ticks 1（冒烟/复验用）"
     )
+    parser.add_argument(
+        "--metrics-host",
+        default=DEFAULT_METRICS_HOST,
+        help="/metrics 监听地址（默认 %(default)s）",
+    )
+    parser.add_argument(
+        "--metrics-port",
+        type=int,
+        default=DEFAULT_METRICS_PORT,
+        help="/metrics 端口（默认 %(default)s，compose 仅内网 expose）",
+    )
     args = parser.parse_args(argv)
     if args.tick_seconds is None:
         args.tick_seconds, args.tick_source = _tick_seconds_from_env()
@@ -367,6 +431,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 async def _amain(args: argparse.Namespace) -> SchedulerStats:
     engine = build_engine(get_settings())
+    metrics_server: _MetricsServer | None = None
     try:
         scheduler = Scheduler(
             session_factory=build_session_factory(engine),
@@ -381,8 +446,22 @@ async def _amain(args: argparse.Namespace) -> SchedulerStats:
             audit_image_interval_seconds=args.audit_image_interval_seconds,
         )
         max_ticks = 1 if args.once else args.ticks
+        # 一次性模式（--once/--ticks）不起 HTTP：它是 CLI 冒烟，不是常驻服务，
+        # 起端点只会在并行复验时抢端口。
+        if max_ticks is None:
+            metrics_server = _MetricsServer(
+                build_metrics_app(scheduler), args.metrics_host, args.metrics_port
+            )
+            metrics_server.start()
+            logger.info(
+                "scheduler /metrics 监听 %s:%s（内网 expose，enabled=True）",
+                args.metrics_host,
+                args.metrics_port,
+            )
         return await scheduler.run(max_ticks=max_ticks, install_signals=True)
     finally:
+        if metrics_server is not None:
+            metrics_server.stop()
         await engine.dispose()
 
 
