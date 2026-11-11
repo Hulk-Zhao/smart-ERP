@@ -10,10 +10,25 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from functools import lru_cache
+from uuid import UUID
 
 ENV_PREFIX = "ERP_"
 
 _DEFAULT_DATABASE_URL = "postgresql+asyncpg://erp_app@127.0.0.1:5432/smart_erp"
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = _env(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in _TRUTHY
+
+
+def _list_env(name: str) -> tuple[str, ...]:
+    raw = _env(name) or ""
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
 class ConfigError(ValueError):
@@ -49,6 +64,15 @@ class Settings:
     statement_timeout_ms: int = 30_000
     lock_timeout_ms: int = 3_000
     idle_in_transaction_timeout_ms: int = 60_000
+    #: demo 档静态会话（部署期注入，默认关闭）；只读当前会话，不签发新令牌。
+    demo_session_enabled: bool = False
+    demo_session_token: str = ""
+    demo_session_user_id: str = ""
+    demo_session_tenant_id: str = ""
+    demo_session_roles: tuple[str, ...] = ()
+    demo_session_org_ids: tuple[str, ...] = ()
+    demo_session_periods: tuple[str, ...] = ()
+    demo_session_system_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.database_url.startswith("postgresql+asyncpg://"):
@@ -62,6 +86,45 @@ class Settings:
             raise ConfigError("连接池预算必须为正（api 4+4 / worker 4 / scheduler 1）")
         if self.statement_timeout_ms <= 0 or self.lock_timeout_ms <= 0:
             raise ConfigError("statement_timeout / lock_timeout 必须为正整数毫秒")
+        self._validate_demo_session()
+
+    def _validate_demo_session(self) -> None:
+        """demo 静态会话只能活在 demo 档；缺字段一律启动失败，不留半套身份。"""
+
+        if not self.demo_session_enabled:
+            return
+        if self.app_env != "demo":
+            raise ConfigError(
+                "ERP_DEMO_SESSION_ENABLED 只允许在 ERP_APP_ENV=demo 时开启，"
+                f"当前 ERP_APP_ENV={self.app_env!r}（full/生产档位不得继承该开关）"
+            )
+        missing = [
+            name
+            for name, value in (
+                ("ERP_DEMO_SESSION_TOKEN", self.demo_session_token),
+                ("ERP_DEMO_SESSION_USER_ID", self.demo_session_user_id),
+                ("ERP_DEMO_SESSION_TENANT_ID", self.demo_session_tenant_id),
+                ("ERP_DEMO_SESSION_ROLES", ",".join(self.demo_session_roles)),
+                ("ERP_DEMO_SESSION_ORGS", ",".join(self.demo_session_org_ids)),
+                ("ERP_DEMO_SESSION_PERIODS", ",".join(self.demo_session_periods)),
+                ("ERP_DEMO_SESSION_SYSTEMS", ",".join(self.demo_session_system_ids)),
+            )
+            if not value.strip()
+        ]
+        if missing:
+            raise ConfigError(
+                "ERP_DEMO_SESSION_ENABLED=true 时以下键不能为空：" + "、".join(missing)
+            )
+        if len(self.demo_session_token) < 16:
+            raise ConfigError("ERP_DEMO_SESSION_TOKEN 至少 16 个字符（避免误用短串当令牌）")
+        for name, raw in (
+            ("ERP_DEMO_SESSION_USER_ID", self.demo_session_user_id),
+            ("ERP_DEMO_SESSION_TENANT_ID", self.demo_session_tenant_id),
+        ):
+            try:
+                UUID(raw)
+            except ValueError as exc:
+                raise ConfigError(f"{name} 必须是 UUID，实际为 {raw!r}") from exc
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -77,6 +140,14 @@ class Settings:
             statement_timeout_ms=_int_env("DB_STATEMENT_TIMEOUT_MS", 30_000),
             lock_timeout_ms=_int_env("DB_LOCK_TIMEOUT_MS", 3_000),
             idle_in_transaction_timeout_ms=_int_env("DB_IDLE_TX_TIMEOUT_MS", 60_000),
+            demo_session_enabled=_bool_env("DEMO_SESSION_ENABLED"),
+            demo_session_token=(_env("DEMO_SESSION_TOKEN") or "").strip(),
+            demo_session_user_id=(_env("DEMO_SESSION_USER_ID") or "").strip(),
+            demo_session_tenant_id=(_env("DEMO_SESSION_TENANT_ID") or "").strip(),
+            demo_session_roles=_list_env("DEMO_SESSION_ROLES"),
+            demo_session_org_ids=_list_env("DEMO_SESSION_ORGS"),
+            demo_session_periods=_list_env("DEMO_SESSION_PERIODS"),
+            demo_session_system_ids=_list_env("DEMO_SESSION_SYSTEMS"),
         )
 
 
