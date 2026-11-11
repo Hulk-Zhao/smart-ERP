@@ -729,12 +729,20 @@ HTTP/1.1 500 Internal Server Error
 | --- | --- |
 | 镜像 | api/web/gw/scheduler/worker_agent/worker_io/u8-stub 均为 `f1bdbc9…d01f` |
 | 迁移 head | `0014_connector_idem_grants` |
-| 验链 | `seed_images=54 runtime_added=1 images=55 problems=0`（1 张是冒烟那单） |
-| 桩 | 当前 `receipts=1`（`PO-STUB-000001`，冒烟遗留）、`business_writes=1`；**开演前执行第 4 条 reset 归零** |
+| 验链 | `seed_images=54 runtime_added=0 images=54 problems=0` |
+| 桩 | `receipts=0`、`business_writes=0`（重灌后已 reset） |
 | 四身份 | 4×200，periods 含 `2026-07/08/09/10` |
-| `connector_idempotency` | 1（冒烟那单）；新种子重灌后回到 0 |
+| `connector_idempotency` | 0 |
+| `DEMO-W2-WRITE-9001` | 待审批；审批记录 1 条（reviewer）；影像 0；`approval_missing_roles=["approver"]`、`execution_missing_roles=["approver"]` |
+| 三租户计数 | 每租户 ticket 18 / approval_record 26 / audit_image 18（合计 54/78/54） |
+
+注：`demo/load.py` 不清理 `erp.connector_idempotency`（运行态表）。若重灌前跑过写路径，
+需手工删对应行再报基线：`delete from erp.connector_idempotency where idempotency_key='<key>'`。
 
 在 `deploy/smart-erp/` 下执行；`DSN_MIG` 从 `.env` 取，不在命令行写明文口令。
+
+**只读/写口径**：第 1、2、3、5、6、7 条全是只读（curl / psql / 验链）；
+只有第 4 条写桩（`POST /stub/reset`，不动库）；第 8 条是**开演时的现场动作**，开演前不做。
 
 ```bash
 cd deploy/smart-erp
@@ -817,7 +825,7 @@ curl -s -o /dev/null -w 'api=%{http_code}\n' http://127.0.0.1:8088/erp/api/healt
 
 若今天要演「对账上传」，再加一条：
 
-8）上传演示通路（`matched=3` / 1 条单价差异）
+8）上传演示通路（`matched=3` / 1 条单价差异）—— **开演时现场执行，非开演前预置**
 
 ```bash
 curl -s -X POST http://127.0.0.1:8010/v1/recon/statements -H "X-Session-Token: $TOKEN_D" \
