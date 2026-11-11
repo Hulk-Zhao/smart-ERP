@@ -611,6 +611,14 @@ curl -X POST http://127.0.0.1:8021/stub/fault -H 'Content-Type: application/json
 curl -X POST http://127.0.0.1:8021/stub/reset      # 清空请求/回执/注入状态
 ```
 
+> **重启桩是恢复「干净起点」的唯一手段**：`_seq` 是进程内计数器（`Mounts=[]`），
+> `/stub/reset` 只清 `requests` / `receipts` / 注入状态，**不清序号**。长跑后新建草稿编号会继续增长
+> （如 `PO-STUB-000003`）；要演示「从 `PO-STUB-000001` 开始」必须重启 `u8-stub` 容器，不是只调 reset。
+>
+> 桩会把每轮 healthcheck 的 `GET /stub/healthz` 也记进 `/stub/requests`，所以「请求为空」在长跑栈上
+> 永远不成立。判据要写成「方法为 `POST`/`DELETE` 且路径不以 `/stub/` 开头的条目为空」，
+> 能用一条命令机械判定，不依赖「人知道要忽略什么」。
+
 ### 9.5 演示时哪一步是预置的、哪一步是现场点的
 
 `DEMO-W2-WRITE-9001` 的四个环节来源不同，**不要以为两次审批都是当场做的**：
