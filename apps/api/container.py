@@ -209,9 +209,19 @@ def get_container() -> ApiContainer:
         # 保证 ``/metrics`` 能读到后台巡检写的值。
         from apps.api.approval_sql import SqlApprovalStore
         from apps.api.demo_session import bind_demo_session
+        from apps.audit.ledger import AuditLedger
+        from apps.audit.store import SqlAuditStore
         from apps.platform.config import get_settings
+        from apps.platform.db.session import build_engine, build_session_factory
 
-        _CONTAINER = ApiContainer(approval_records=SqlApprovalStore())
+        settings = get_settings()
+        # 审计读路径与巡检同源：影像来自 erp.audit_image（见 apps/audit/image_link.py），
+        # 生产不再使用进程内台账，否则重启后证据区为空、且与 B-AUDIT-ORPHAN 各数一套。
+        audit_store = SqlAuditStore(build_session_factory(build_engine(settings)))
+        _CONTAINER = ApiContainer(
+            approval_records=SqlApprovalStore(),
+            ledger=AuditLedger(store=audit_store),
+        )
         _CONTAINER.audit_integrity = AuditIntegrityScanner(metrics=_CONTAINER.metrics)
         # demo 档静态会话：部署期 env 注入，默认关闭；full/生产由 Settings 拒绝启动。
         bind_demo_session(_CONTAINER, get_settings())

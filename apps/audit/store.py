@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Protocol
@@ -19,6 +20,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from apps.audit.image_link import images_sql
 from apps.audit.models import AuditAnchorRow, AuditImageRow
 from apps.platform.contracts.audit import AuditImage
 
@@ -184,27 +186,40 @@ class SqlAuditStore:
             await session.commit()
 
     async def list_images(self, query: AuditQuery) -> list[AuditImage]:
-        stmt = select(AuditImageRow).where(AuditImageRow.tenant_id == query.tenant_id)
-        if query.ticket_id is not None:
-            stmt = stmt.where(AuditImageRow.ticket_id == query.ticket_id)
-        if query.step_id is not None:
-            stmt = stmt.where(AuditImageRow.step_id == query.step_id)
-        if query.system is not None:
-            stmt = stmt.where(AuditImageRow.system == query.system)
-        if query.object_id is not None:
-            stmt = stmt.where(AuditImageRow.object_id == query.object_id)
-        if query.since is not None:
-            stmt = stmt.where(AuditImageRow.created_at >= query.since)
-        if query.until is not None:
-            stmt = stmt.where(AuditImageRow.created_at <= query.until)
-        stmt = (
-            stmt.order_by(AuditImageRow.chain_seq)
-            .offset(query.offset)
-            .limit(query.limit)
+        """影像行来自 ``erp.audit_image``，并与巡检共用 ``STEP_IMAGE_PREDICATE``。
+
+        只列出被本工单步骤通过 ``audit_image_id`` 引用到的影像；没有任何步骤
+        指向的影像行（反向孤儿）不在此列，也不由 ``B-AUDIT-ORPHAN`` 统计。
+        """
+
+        stmt = images_sql(
+            by_ticket=query.ticket_id is not None,
+            by_step=query.step_id is not None,
+            by_system=query.system is not None,
+            by_object=query.object_id is not None,
+            by_since=query.since is not None,
+            by_until=query.until is not None,
         )
+        params: dict[str, Any] = {
+            "tenant_id": query.tenant_id,
+            "offset": query.offset,
+            "limit": query.limit,
+        }
+        if query.ticket_id is not None:
+            params["ticket_id"] = query.ticket_id
+        if query.step_id is not None:
+            params["step_id"] = query.step_id
+        if query.system is not None:
+            params["system"] = query.system
+        if query.object_id is not None:
+            params["object_id"] = query.object_id
+        if query.since is not None:
+            params["since"] = query.since
+        if query.until is not None:
+            params["until"] = query.until
         async with self._session_factory() as session:
-            rows = (await session.execute(stmt)).scalars().all()
-        return [_to_image(row) for row in rows]
+            rows = (await session.execute(stmt, params)).mappings().all()
+        return [_image_from_mapping(row) for row in rows]
 
     async def chain(self, tenant_id: UUID) -> list[AuditImage]:
         stmt = (
@@ -280,6 +295,27 @@ class SqlAuditStore:
             last_hash=row.last_hash,
             record_count=row.record_count,
         )
+
+
+def _image_from_mapping(row: Mapping[str, Any]) -> AuditImage:
+    return AuditImage.model_validate(
+        {
+            "id": row["id"],
+            "tenant_id": row["tenant_id"],
+            "ticket_id": row["ticket_id"],
+            "step_id": row["step_id"],
+            "system": row["system"],
+            "object_type": row["object_type"],
+            "object_id": row["object_id"],
+            "before_ref": row["before_ref"],
+            "after_ref": row["after_ref"],
+            "field_diff": list(row["field_diff"] or []),
+            "diff_missing": row["diff_missing"],
+            "prev_hash": row["prev_hash"],
+            "hash": row["hash"],
+            "created_at": row["created_at"],
+        }
+    )
 
 
 def _to_image(row: AuditImageRow) -> AuditImage:
