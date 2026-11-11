@@ -33,6 +33,8 @@ class ErrorCode(str, Enum):
     VERIFY_MISMATCH = "E-VERIFY-MISMATCH"
     CONFLICT_VERSION = "E-CONFLICT-VERSION"
     EXTERNAL_EFFECTIVE = "E-EXTERNAL-EFFECTIVE"
+    # 同步回滚入口被开关关闭：不是请求错误，也不是连接器故障，别让 UI 提示「重试」。
+    ROLLBACK_UNAVAILABLE = "E-ROLLBACK-UNAVAILABLE"
     # 合同价目取价失败：与 E-DATA-MISSING 分开，运维才能分清「没配价」和「输入缺数据」。
     PRICE_MISSING = "E-PRICE-MISSING"
     PRICE_CURRENCY = "E-PRICE-CURRENCY"
@@ -118,6 +120,16 @@ ERROR_SPECS: dict[ErrorCode, ErrorSpec] = {
     ),
     ErrorCode.EXTERNAL_EFFECTIVE: ErrorSpec(
         ErrorCode.EXTERNAL_EFFECTIVE, 409, "F8", False, "外部已生效", "生成处置任务（不可回滚）"
+    ),
+    # 同步回滚是被开关主动关掉的，不是「等服务起来就好」：
+    # retriable=false，避免 UI 把它当 F5 类瞬时故障做自动重试。
+    ErrorCode.ROLLBACK_UNAVAILABLE: ErrorSpec(
+        ErrorCode.ROLLBACK_UNAVAILABLE,
+        503,
+        None,
+        False,
+        "同步回滚入口已关闭",
+        "等补偿执行器路径上线；不要重复点击，也不要手工改库",
     ),
     # 取价失败是「服务侧配置缺失」，不是请求数据缺失：不限流、可重试（补价后）。
     # 两个码必须分开：无任何生效价 → 找商务/运维补价格表；有价但币种不符 → 核对配置币种。

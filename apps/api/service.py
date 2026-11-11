@@ -50,6 +50,7 @@ from apps.api.recon_snapshot import (
     snapshot_from_batch,
 )
 from apps.api.recon_store import ReconConflict, ReconStore, SqlReconStore
+from apps.api.rollback_gate import sync_rollback_enabled
 from apps.api.schemas import (
     ActionIn,
     ActionOut,
@@ -597,6 +598,15 @@ async def compensate_ticket(
     body: ActionIn,
 ) -> ActionOut:
     """触发补偿：先整单推导，再按系统分组经 WriteGateway 回写。"""
+
+    # 默认关闭：这条同步路径不写 ticket_event，也没有租约/重试，外部写与审计影像
+    # 之间还有无痕窗口。关闭态必须零副作用——放在任何取数、鉴权、连接器调用之前。
+    if not sync_rollback_enabled():
+        raise ProblemError(
+            ErrorCode.ROLLBACK_UNAVAILABLE,
+            "同步回滚入口已关闭（ERP_ROLLBACK_SYNC_ENABLED 未开启）："
+            "本期只读，未调用任何连接器，工单状态未改变。",
+        )
 
     scope = _require_scope(session, build_scope(body.scope))
     ticket = _require_ticket(container, session, ticket_id)
@@ -1557,6 +1567,7 @@ def _ticket_detail(container: ApiContainer, ticket: TicketRecord) -> TicketDetai
         required_roles=list(_required_roles(container, ticket)),
         missing_roles=list(_missing_roles(container, ticket)),
         audit_image_count=len(ticket.steps),
+        rollback_available=sync_rollback_enabled(),
     )
 
 

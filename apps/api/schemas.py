@@ -108,6 +108,9 @@ class TicketDetailOut(TicketOut):
     required_roles: list[str]
     missing_roles: list[str]
     audit_image_count: int
+    #: 同步回滚入口是否开放（``ERP_ROLLBACK_SYNC_ENABLED``）。
+    #: false 时前端必须禁用按钮并说明原因，不能靠「点了报错」提示。
+    rollback_available: bool
 
 
 class ActionIn(BaseModel):
