@@ -3,6 +3,8 @@ import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-q
 import { Link, useNavigate } from 'react-router-dom';
 import { api, type ReconRunPayload } from '../api/client';
 import type { ReconDatasetIn, ReconBatchSummaryOut } from '../api/generated/contract';
+import type { ReconBatchOut } from '../api/generated/contract';
+import ourDatasetJson from '../../../fixtures/recon/upload_demo/our_dataset.json';
 import { useApiConfig } from '../api/config';
 import { useSession } from '../api/session';
 import { EmptyState } from '../components/EmptyState';
@@ -12,6 +14,14 @@ import { dateTime, money, shortId } from '../lib/format';
 import { openSettingsPanel } from '../lib/settings';
 
 const BATCH_PAGE_SIZE = 10;
+
+/**
+ * 演示用我方数据，直接取自仓库 fixtures，前端不拼接、不改写：
+ * 上传只解析供应商 CSV，our_lines 必须由 dataset 显式提供，否则等于自己跟自己比。
+ */
+const OUR_DATASET = ourDatasetJson as unknown as ReconDatasetIn;
+const OUR_SUPPLIERS = [...new Set((OUR_DATASET.our_lines ?? []).map((line) => line.supplier_code))];
+const OUR_LINE_COUNT = OUR_DATASET.our_lines?.length ?? 0;
 
 /** 旧批次没有计数投影，服务端返回 null —— 必须渲染成「—」，不能折算成 0。 */
 function countValue(value: number | null | undefined): string {
@@ -84,6 +94,7 @@ export function ReconPage() {
   const [wms, setWms] = useState(false);
   const [statementFiles, setStatementFiles] = useState('');
   const [datasetText, setDatasetText] = useState('');
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
   const supplierList = useMemo(
@@ -102,8 +113,26 @@ export function ReconPage() {
   const batchItems = batches.data?.pages.flatMap((page) => page.items) ?? [];
 
   const mutation = useMutation({
-    mutationFn: (payload: ReconRunPayload) => api.createReconRun(payload),
+    mutationFn: async (input: { file: File | null; payload: ReconRunPayload }) => {
+      let payload = input.payload;
+      if (input.file) {
+        // 先登记供应商 CSV，再用返回的文件名发起对账；我方行来自 fixtures，不由文件反填。
+        const statement = await api.uploadReconStatement(input.file, OUR_DATASET);
+        payload = {
+          ...payload,
+          suppliers: payload.suppliers.length > 0 ? payload.suppliers : OUR_SUPPLIERS,
+          sources: {
+            ...payload.sources,
+            statement_files: [statement.statement_file, ...(payload.sources?.statement_files ?? [])],
+          },
+          dataset: null,
+        };
+      }
+      return api.createReconRun(payload);
+    },
     onSuccess: (batch) => {
+      // 用服务端刚返回的批次回填详情缓存：跳转后先显示本次真实 matched/diff_lines，再后台刷新。
+      queryClient.setQueryData(['recon', batch.batch_id], batch);
       void queryClient.invalidateQueries({ queryKey: ['recon', 'batches'] });
       navigate(`/recon/${batch.batch_id}`);
     },
@@ -111,12 +140,13 @@ export function ReconPage() {
 
   const submit = () => {
     setFormError(null);
-    if (supplierList.length === 0) {
+    const hasFile = uploadFile !== null;
+    if (!hasFile && supplierList.length === 0) {
       setFormError('至少填写一个供应商编码（suppliers 为必填，最多 200 个）。');
       return;
     }
     let dataset: ReconDatasetIn | null = null;
-    if (datasetText.trim()) {
+    if (!hasFile && datasetText.trim()) {
       try {
         dataset = JSON.parse(datasetText) as ReconDatasetIn;
       } catch (error) {
@@ -126,9 +156,12 @@ export function ReconPage() {
     }
     const files = statementFiles.split(/[,，\s]+/).map((item) => item.trim()).filter(Boolean);
     mutation.mutate({
-      suppliers: supplierList,
-      sources: { erp, mes, wms, statement_files: files },
-      dataset,
+      file: uploadFile,
+      payload: {
+        suppliers: supplierList,
+        sources: { erp, mes, wms, statement_files: files },
+        dataset,
+      },
     });
   };
 
@@ -148,6 +181,32 @@ export function ReconPage() {
             <span className="text-[11px] text-slate-400">供应商为必填</span>
           </div>
           <div className="card-body space-y-3">
+            <div className="min-w-0 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="btn btn-secondary btn-sm cursor-pointer">
+                  选择对账单 CSV
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="sr-only"
+                    data-testid="recon-upload-file"
+                    onChange={(event) => {
+                      setUploadFile(event.target.files?.[0] ?? null);
+                      setFormError(null);
+                      mutation.reset();
+                    }}
+                  />
+                </label>
+                <span className="min-w-0 break-all text-[11.5px] text-slate-600" data-testid="recon-upload-name">
+                  {uploadFile ? uploadFile.name : '未选择文件'}
+                </span>
+              </div>
+              <p className="mt-1.5 text-[10.5px] leading-4 text-slate-500">
+                我方数据取仓库 fixtures/recon/upload_demo/our_dataset.json（{OUR_LINE_COUNT} 行 / 供应商 {OUR_SUPPLIERS.join('、') || '—'}），前端不拼接；
+                上传只解析对方 CSV，坏文件按 422 原样返回文件行号，不会只登记一半。
+              </p>
+            </div>
+
             <label className="block min-w-0">
               <span className="label">供应商编码 suppliers（逗号/空格分隔，最多 200）</span>
               <input
@@ -211,11 +270,11 @@ export function ReconPage() {
             ) : null}
 
             <div className="flex flex-wrap justify-end gap-2">
-              <button type="button" className="btn btn-secondary" onClick={() => { setSuppliers(''); setDatasetText(''); setFormError(null); mutation.reset(); }}>
+              <button type="button" className="btn btn-secondary" onClick={() => { setSuppliers(''); setDatasetText(''); setStatementFiles(''); setUploadFile(null); setFormError(null); mutation.reset(); }}>
                 清空
               </button>
               <button type="button" className="btn btn-primary" disabled={mutation.isPending} onClick={submit}>
-                {mutation.isPending ? '提交中…' : '发起对账'}
+                {mutation.isPending ? '对账中…' : uploadFile ? '开始对账' : '发起对账'}
               </button>
             </div>
           </div>

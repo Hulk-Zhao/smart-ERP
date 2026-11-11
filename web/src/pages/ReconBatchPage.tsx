@@ -177,6 +177,11 @@ export function ReconBatchPage() {
                 <Metric label="未匹配" value={metrics?.unmatched ?? '—'} />
                 <Metric label="自动处置" value={metrics?.auto_disposal_allowed ? '允许' : '禁止'} tone={metrics?.auto_disposal_allowed ? 'text-emerald-700' : 'text-amber-700'} />
               </div>
+              {metrics ? (
+                <p className="border-t border-slate-100 px-3 py-2 text-[11px] leading-5 text-slate-600" data-testid="matched-caliber">
+                  {metrics.matched} 行匹配（行级），其中 {metrics.diff_lines} 行存在差异；差异行仍计入匹配，不会从匹配行里扣除。
+                </p>
+              ) : null}
             </section>
 
             <section className="card min-w-0 overflow-hidden">
