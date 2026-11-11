@@ -1,50 +1,89 @@
 import { useMemo, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, type ReconRunPayload } from '../api/client';
-import type { ReconDatasetIn } from '../api/generated/contract';
+import type { ReconDatasetIn, ReconBatchSummaryOut } from '../api/generated/contract';
 import { useApiConfig } from '../api/config';
+import { useSession } from '../api/session';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel } from '../components/ErrorPanel';
-import { dateTime, shortId } from '../lib/format';
+import { SessionNotice } from '../components/SessionNotice';
+import { dateTime, money, shortId } from '../lib/format';
 import { openSettingsPanel } from '../lib/settings';
 
-const RECENT_KEY = 'smart-erp.web.recon-batches.v1';
+const BATCH_PAGE_SIZE = 10;
 
-interface RecentBatch {
-  batch_id: string;
-  suppliers: string[];
-  created_at: string;
+/** 旧批次没有计数投影，服务端返回 null —— 必须渲染成「—」，不能折算成 0。 */
+function countValue(value: number | null | undefined): string {
+  return value === null || value === undefined ? '—' : String(value);
 }
 
-function readRecent(): RecentBatch[] {
-  try {
-    const raw = localStorage.getItem(RECENT_KEY);
-    return raw ? (JSON.parse(raw) as RecentBatch[]) : [];
-  } catch {
-    return [];
-  }
+function missingMetric(value: unknown): boolean {
+  return value === null || value === undefined;
 }
 
-function writeRecent(next: RecentBatch[]): void {
-  try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(next.slice(0, 8)));
-  } catch {
-    // 忽略隐私模式下的存储失败
-  }
+function BatchStatusCell({ status }: { status: string }) {
+  const tone =
+    status === 'reconciled' || status === 'completed'
+      ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+      : status === 'running' || status === 'pending'
+        ? 'bg-sky-50 text-sky-700 ring-sky-200'
+        : status === 'failed'
+          ? 'bg-rose-50 text-rose-700 ring-rose-200'
+          : 'bg-slate-100 text-slate-600 ring-slate-200';
+  return <span className={`badge ${tone}`}>{status}</span>;
+}
+
+function BatchMetrics({ batch }: { batch: ReconBatchSummaryOut }) {
+  const missing = missingMetric(batch.line_count) || missingMetric(batch.diff_count) || missingMetric(batch.diff_amount);
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+      <span className="text-slate-500">
+        行数{' '}
+        <span
+          className="font-mono text-slate-700"
+          data-testid={missingMetric(batch.line_count) ? 'batch-metric-missing' : undefined}
+          title={missingMetric(batch.line_count) ? '旧批次没有计数投影，服务端返回 null' : undefined}
+        >
+          {countValue(batch.line_count)}
+        </span>
+      </span>
+      <span className="text-slate-500">
+        差异{' '}
+        <span
+          className="font-mono text-slate-700"
+          data-testid={missingMetric(batch.diff_count) ? 'batch-metric-missing' : undefined}
+          title={missingMetric(batch.diff_count) ? '旧批次没有计数投影，服务端返回 null' : undefined}
+        >
+          {countValue(batch.diff_count)}
+        </span>
+      </span>
+      <span className="text-slate-500">
+        差异金额{' '}
+        <span
+          className="font-mono text-slate-700"
+          data-testid={missingMetric(batch.diff_amount) ? 'batch-metric-missing' : undefined}
+          title={missingMetric(batch.diff_amount) ? '旧批次没有计数投影，服务端返回 null' : undefined}
+        >
+          {missingMetric(batch.diff_amount) ? '—' : money(batch.diff_amount)}
+        </span>
+      </span>
+      {missing ? <span className="text-[10px] text-amber-600">未投影（非 0）</span> : null}
+    </div>
+  );
 }
 
 export function ReconPage() {
   const config = useApiConfig();
+  const session = useSession();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [suppliers, setSuppliers] = useState('');
   const [erp, setErp] = useState(true);
   const [mes, setMes] = useState(false);
   const [wms, setWms] = useState(false);
   const [statementFiles, setStatementFiles] = useState('');
   const [datasetText, setDatasetText] = useState('');
-  const [batchId, setBatchId] = useState('');
-  const [recent, setRecent] = useState<RecentBatch[]>(() => readRecent());
   const [formError, setFormError] = useState<string | null>(null);
 
   const supplierList = useMemo(
@@ -52,13 +91,20 @@ export function ReconPage() {
     [suppliers],
   );
 
+  // 批次列表同样是身份相关读接口：会话未就绪时不发，避免 401 被误读成「没有批次」。
+  const batches = useInfiniteQuery({
+    queryKey: ['recon', 'batches'],
+    queryFn: ({ pageParam }) => api.listReconBatches({ limit: BATCH_PAGE_SIZE, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+    enabled: session.canQuery,
+  });
+  const batchItems = batches.data?.pages.flatMap((page) => page.items) ?? [];
+
   const mutation = useMutation({
     mutationFn: (payload: ReconRunPayload) => api.createReconRun(payload),
     onSuccess: (batch) => {
-      const entry: RecentBatch = { batch_id: batch.batch_id, suppliers: batch.suppliers, created_at: batch.created_at };
-      const next = [entry, ...readRecent().filter((item) => item.batch_id !== batch.batch_id)];
-      writeRecent(next);
-      setRecent(next);
+      void queryClient.invalidateQueries({ queryKey: ['recon', 'batches'] });
       navigate(`/recon/${batch.batch_id}`);
     },
   });
@@ -91,7 +137,7 @@ export function ReconPage() {
       <div className="min-w-0">
         <h1 className="text-[18px] font-semibold text-slate-900">对账</h1>
         <p className="mt-1 break-words text-[12px] text-slate-500">
-          发起真实 /v1/recon/runs，或打开已有批次查看状态与差异。scope：{config.scope.org_id} · {config.scope.period} · {config.scope.system_ids.join(',')}
+          发起真实 /v1/recon/runs；最近批次来自 /v1/recon/batches（键集分页）。scope：{config.scope.org_id} · {config.scope.period} · {config.scope.system_ids.join(',')}
         </p>
       </div>
 
@@ -178,50 +224,100 @@ export function ReconPage() {
         <div className="min-w-0 space-y-4">
           <section className="card min-w-0">
             <div className="card-head">
-              <h2 className="section-title">打开已有批次</h2>
-            </div>
-            <div className="card-body space-y-2">
-              <label className="block min-w-0">
-                <span className="label">batch_id</span>
-                <input className="input mt-1" value={batchId} onChange={(event) => setBatchId(event.target.value)} placeholder="UUID" />
-              </label>
+              <h2 className="section-title">最近批次</h2>
+              <span className="text-[11px] text-slate-400">
+                {session.canQuery ? `${batchItems.length} 条` : '—'}
+              </span>
               <button
                 type="button"
-                className="btn btn-secondary w-full"
-                disabled={!batchId.trim()}
-                onClick={() => navigate(`/recon/${batchId.trim()}`)}
+                className="btn btn-ghost btn-sm ml-auto"
+                disabled={!session.canQuery || batches.isFetching}
+                onClick={() => void batches.refetch()}
               >
-                查看批次状态
+                {batches.isFetching ? '刷新中…' : '刷新'}
               </button>
-              <p className="text-[11px] leading-5 text-slate-500">
-                C16 没有「列出全部批次」接口，因此这里只记录本浏览器最近发起的批次；跨设备请粘贴 batch_id。
-              </p>
             </div>
-          </section>
 
-          <section className="card min-w-0">
-            <div className="card-head">
-              <h2 className="section-title">本机最近批次</h2>
-              <span className="text-[11px] text-slate-400">{recent.length} 条</span>
-            </div>
-            {recent.length === 0 ? (
+            {session.status === 'loading' ? (
+              <div className="space-y-2 p-3">
+                {[0, 1, 2].map((key) => (
+                  <div key={key} className="skeleton h-[62px] w-full" />
+                ))}
+              </div>
+            ) : session.unavailable ? (
               <div className="p-3">
-                <EmptyState variant="not-run" compact />
+                <SessionNotice
+                  error={session.error}
+                  onRetry={session.refresh}
+                  onOpenSettings={openSettingsPanel}
+                  compact
+                />
+              </div>
+            ) : batches.isLoading ? (
+              <div className="space-y-2 p-3">
+                {[0, 1, 2].map((key) => (
+                  <div key={key} className="skeleton h-[62px] w-full" />
+                ))}
+              </div>
+            ) : batches.error ? (
+              <div className="p-3">
+                <ErrorPanel
+                  error={batches.error}
+                  onRetry={() => void batches.refetch()}
+                  onOpenSettings={openSettingsPanel}
+                  compact
+                />
+              </div>
+            ) : batchItems.length === 0 ? (
+              <div className="p-3">
+                <EmptyState
+                  variant="not-run"
+                  compact
+                  description="服务端还没有本租户的对账批次；发起一次对账后这里会出现真实批次。"
+                />
               </div>
             ) : (
-              <ul className="divide-y divide-slate-100">
-                {recent.map((item) => (
-                  <li key={item.batch_id} className="min-w-0 px-3 py-2">
-                    <Link to={`/recon/${item.batch_id}`} className="block min-w-0 rounded-lg px-1 py-1 hover:bg-slate-50">
-                      <div className="break-all font-mono text-[11px] text-slate-600">{shortId(item.batch_id)}</div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                        <span className="min-w-0 truncate">{item.suppliers.join('、') || '—'}</span>
-                        <span className="ml-auto shrink-0">{dateTime(item.created_at)}</span>
-                      </div>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="divide-y divide-slate-100">
+                  {batchItems.map((batch) => (
+                    <li key={batch.batch_id} className="min-w-0 px-3 py-2" data-testid="batch-row">
+                      <Link
+                        to={`/recon/${batch.batch_id}`}
+                        className="block min-w-0 rounded-lg px-1 py-1 hover:bg-slate-50"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className="break-all font-mono text-[11px] text-slate-700"
+                            title={batch.batch_id}
+                          >
+                            {shortId(batch.batch_id)}
+                          </span>
+                          <BatchStatusCell status={batch.status} />
+                          <span className="ml-auto shrink-0 text-[10.5px] text-slate-400">
+                            {dateTime(batch.created_at)}
+                          </span>
+                        </div>
+                        <BatchMetrics batch={batch} />
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+                <p className="border-t border-slate-100 px-3 py-2 text-[10.5px] leading-5 text-slate-400">
+                  键集分页，按创建时间倒序。「—」表示该批次没有计数投影（旧批次），不是 0。
+                </p>
+                {batches.hasNextPage ? (
+                  <div className="px-3 pb-3">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm w-full"
+                      disabled={batches.isFetchingNextPage}
+                      onClick={() => void batches.fetchNextPage()}
+                    >
+                      {batches.isFetchingNextPage ? '加载中…' : '加载更多'}
+                    </button>
+                  </div>
+                ) : null}
+              </>
             )}
           </section>
 

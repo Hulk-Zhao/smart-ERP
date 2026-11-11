@@ -2,10 +2,12 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useApiConfig } from '../api/config';
+import { useSession } from '../api/session';
 import { ROLE_LABELS, TICKET_STATES } from '../api/types';
 import { LevelBadge, StateBadge } from '../components/Badges';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel } from '../components/ErrorPanel';
+import { SessionNotice } from '../components/SessionNotice';
 import { IconAlert, IconArrowRight, IconCheck, IconScale } from '../components/icons';
 import { amount, dateTime, shortId } from '../lib/format';
 import { openSettingsPanel } from '../lib/settings';
@@ -34,7 +36,7 @@ function Kpi({
   accent?: string;
 }) {
   return (
-    <div className="min-w-0 px-4 py-3">
+    <div className="min-w-0 px-4 py-3" data-kpi={label}>
       <div className="flex items-center gap-1.5">
         <span className={`status-dot ${accent ?? 'bg-slate-300'}`} />
         <span className="label">{label}</span>
@@ -49,14 +51,18 @@ function Kpi({
 
 export function OverviewPage() {
   const config = useApiConfig();
+  const session = useSession();
   const tickets = useQuery({
     queryKey: ['tickets', 'overview'],
     // 真实接口上限 100（apps/api/deps.py PageLimit le=100）；取满以覆盖 KPI 与风险雷达。
     queryFn: () => api.listTickets({ limit: 100 }),
+    // 待办与工单都按会话身份过滤：身份没拿到之前不发，避免把 401/空列表当成「没有待办」。
+    enabled: session.canQuery,
   });
   const approvals = useQuery({
     queryKey: ['approvals', 'pending', 'overview'],
     queryFn: () => api.listPendingApprovals({ limit: 20 }),
+    enabled: session.canQuery,
   });
 
   const items = tickets.data?.items ?? [];
@@ -99,7 +105,19 @@ export function OverviewPage() {
               <span className="text-slate-300">·</span>
               <span>{config.scope.system_ids.join(' / ')}</span>
               <span className="text-slate-300">·</span>
-              <span>{config.viewerName}</span>
+              <span
+                title={
+                  session.session
+                    ? `user ${session.session.user_id} · tenant ${session.session.tenant_id}`
+                    : '会话身份未取到'
+                }
+              >
+                {session.session
+                  ? `${shortId(session.session.user_id)} · ${session.session.roles.join(' / ')}`
+                  : session.status === 'unavailable'
+                    ? '未启用演示会话'
+                    : config.viewerName}
+              </span>
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -125,32 +143,46 @@ export function OverviewPage() {
         <div className="grid grid-cols-2 divide-x divide-y divide-slate-100 border-t border-slate-100 sm:grid-cols-4 sm:divide-y-0">
           <Kpi
             label="待你决策"
-            value={tasks.length || (approvals.isLoading ? '—' : 0)}
-            hint={missingRole.length > 0 ? `${missingRole.length} 张仍缺角色` : '角色已满足'}
+            value={!session.canQuery ? '—' : tasks.length || (approvals.isLoading ? '—' : 0)}
+            hint={
+              !session.canQuery
+                ? '未启用演示会话，身份未知'
+                : missingRole.length > 0
+                  ? `${missingRole.length} 张仍缺角色`
+                  : '角色已满足'
+            }
             accent="bg-amber-500"
-            tone={tasks.length > 0 ? 'text-amber-700' : 'text-slate-900'}
+            tone={!session.canQuery ? 'text-amber-700' : tasks.length > 0 ? 'text-amber-700' : 'text-slate-900'}
           />
           <Kpi
             label="涉及资金"
-            value={amount(fundAmount)}
-            hint={`${tasks.filter((item) => item.touches_fund).length} 张待审批含资金写入`}
+            value={!session.canQuery ? '—' : amount(fundAmount)}
+            hint={
+              !session.canQuery
+                ? '未启用演示会话，审批待办未取'
+                : `${tasks.filter((item) => item.touches_fund).length} 张待审批含资金写入`
+            }
             accent="bg-indigo-500"
           />
           <Kpi
             label="W3 禁止自动执行"
-            value={w3.length}
-            hint="网关整单拒绝，零写入"
-            accent={w3.length > 0 ? 'bg-rose-500' : 'bg-slate-300'}
-            tone={w3.length > 0 ? 'text-rose-700' : 'text-slate-900'}
+            value={!session.canQuery ? '—' : w3.length}
+            hint={!session.canQuery ? '未启用演示会话，工单未取' : '网关整单拒绝，零写入'}
+            accent={!session.canQuery ? 'bg-slate-300' : w3.length > 0 ? 'bg-rose-500' : 'bg-slate-300'}
+            tone={!session.canQuery ? 'text-slate-900' : w3.length > 0 ? 'text-rose-700' : 'text-slate-900'}
           />
           <Kpi
             label="执行中 / 校验中"
-            value={executing.length}
-            hint={`当前页 ${items.length} 条工单样本`}
+            value={!session.canQuery ? '—' : executing.length}
+            hint={!session.canQuery ? '未启用演示会话，工单未取' : `当前页 ${items.length} 条工单样本`}
             accent="bg-sky-500"
           />
         </div>
       </section>
+
+      {session.unavailable ? (
+        <SessionNotice error={session.error} onRetry={session.refresh} onOpenSettings={openSettingsPanel} />
+      ) : null}
 
       {tickets.error ? (
         <ErrorPanel error={tickets.error} onRetry={() => void tickets.refetch()} onOpenSettings={openSettingsPanel} />
@@ -173,7 +205,22 @@ export function OverviewPage() {
             </Link>
           </div>
 
-          {approvals.isLoading ? (
+          {session.status === 'loading' ? (
+            <div className="space-y-2 p-3">
+              {[0, 1, 2].map((key) => (
+                <div key={key} className="skeleton h-[54px] w-full" />
+              ))}
+            </div>
+          ) : session.unavailable ? (
+            <div className="p-3">
+              <SessionNotice
+                error={session.error}
+                onRetry={session.refresh}
+                onOpenSettings={openSettingsPanel}
+                compact
+              />
+            </div>
+          ) : approvals.isLoading ? (
             <div className="space-y-2 p-3">
               {[0, 1, 2, 3].map((key) => (
                 <div key={key} className="skeleton h-[58px] w-full" />
@@ -322,11 +369,15 @@ export function OverviewPage() {
               <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
                 <div className="rounded-lg border border-slate-200 px-2.5 py-2">
                   <div className="label">待审批</div>
-                  <div className="mt-0.5 font-mono text-[15px] font-medium num">{tasks.length}</div>
+                  <div className="mt-0.5 font-mono text-[15px] font-medium num">
+                    {session.canQuery ? tasks.length : '—'}
+                  </div>
                 </div>
                 <div className="rounded-lg border border-slate-200 px-2.5 py-2">
                   <div className="label">当前页工单</div>
-                  <div className="mt-0.5 font-mono text-[15px] font-medium num">{items.length}</div>
+                  <div className="mt-0.5 font-mono text-[15px] font-medium num">
+                    {session.canQuery ? items.length : '—'}
+                  </div>
                 </div>
               </div>
             </div>

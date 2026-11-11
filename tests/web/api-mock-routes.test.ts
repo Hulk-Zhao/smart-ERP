@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { ApiConfig } from '../../web/src/api/config';
-import { auditPath, batchPath, meteringPath, ticketPath } from '../../web/src/api/client';
+import {
+  auditPath,
+  batchPath,
+  meteringPath,
+  PENDING_APPROVALS_PATH,
+  RECON_BATCHES_PATH,
+  SESSION_PATH,
+  TICKETS_PATH,
+  ticketPath,
+} from '../../web/src/api/client';
 import { mockSend } from '../../web/src/api/mock';
 
 /**
@@ -22,8 +31,11 @@ const ticketId = 'd0000000-0000-4000-8000-000000000002';
 const batchId = 'e0000000-0000-4000-8000-000000000001';
 
 const routes: Array<{ name: string; path: string; query?: Record<string, unknown> }> = [
+  { name: '会话身份', path: SESSION_PATH },
+  { name: '工单列表', path: TICKETS_PATH, query: { limit: 5 } },
   { name: '工单详情', path: ticketPath(ticketId) },
-  { name: '审批待办', path: '/v1/approvals/pending' },
+  { name: '审批待办', path: PENDING_APPROVALS_PATH },
+  { name: '批次列表', path: RECON_BATCHES_PATH, query: { limit: 10 } },
   { name: '批次详情', path: batchPath(batchId) },
   { name: '批次差异列表', path: batchPath(batchId, '/diffs') },
   { name: '差异详情', path: batchPath(batchId, '/diffs/d0') },
@@ -37,5 +49,20 @@ describe('mock 路由与 client 路径同源', () => {
   it.each(routes)('$name $path 命中 mock 而非 404', async ({ path, query }) => {
     const response = await mockSend('GET', path, query ?? {}, undefined, config);
     expect(response.status).toBe(200);
+  });
+});
+
+describe('mock 批次列表与真实契约的边界一致', () => {
+  it('无投影旧批次返回 null，不是 0', async () => {
+    const response = await mockSend('GET', RECON_BATCHES_PATH, { limit: 10 }, undefined, config);
+    const body = response.body as { items: Array<Record<string, unknown>> };
+    const legacy = body.items.find((item) => item.status === 'completed');
+    expect(legacy).toBeTruthy();
+    expect(legacy?.line_count).toBeNull();
+    expect(legacy?.diff_count).toBeNull();
+    expect(legacy?.diff_amount).toBeNull();
+
+    const projected = body.items.find((item) => item.status === 'reconciled');
+    expect(typeof projected?.line_count).toBe('number');
   });
 });
