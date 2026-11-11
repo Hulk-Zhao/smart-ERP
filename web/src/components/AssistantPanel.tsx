@@ -2,27 +2,88 @@ import { useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
+import {
+  isApiError,
+  isNetworkFailure,
+  isRateLimited,
+  isTimeoutFailure,
+} from '../api/errors';
 import { useSession } from '../api/session';
-import { IconAlert, IconArrowRight, IconClose, IconSparkles } from './icons';
+import { dateTime } from '../lib/format';
+import { IconAlert, IconClose, IconSparkles } from './icons';
 
 interface AssistantPanelProps {
   onClose: () => void;
 }
 
-interface Suggestion {
+/** 后端 LLM 硬超时 8s；前端留出网络余量，超时要与「规则降级」分开报。 */
+const ASSISTANT_TIMEOUT_MS = 12_000;
+
+const FALLBACK_REASONS: Record<string, string> = {
+  llm_not_configured: '未配置模型（缺少 base_url / api_key / model）',
+  llm_timeout: '模型调用超时（后端已降级）',
+  llm_connect_failed: '无法连接模型服务',
+  llm_error: '模型调用异常',
+  llm_output_invalid: '模型输出不可解析',
+};
+
+function fallbackReasonLabel(reason: string | null | undefined): string {
+  if (!reason) return '未说明原因';
+  const http = /^llm_http_(\d{3})$/.exec(reason);
+  if (http) return `模型服务返回 HTTP ${http[1]}`;
+  return FALLBACK_REASONS[reason] ?? reason;
+}
+
+interface SuggestionErrorCopy {
+  kind: string;
   title: string;
   detail: string;
-  to: string;
-  cta: string;
+}
+
+function suggestionErrorCopy(error: unknown): SuggestionErrorCopy {
+  if (isRateLimited(error)) {
+    return {
+      kind: 'rate-limit',
+      title: '助手请求过于频繁',
+      detail: '每租户每分钟有调用上限。请稍后重试；这不影响页面其它数据。',
+    };
+  }
+  if (isTimeoutFailure(error)) {
+    return {
+      kind: 'timeout',
+      title: '等待助手响应超时',
+      detail: `前端等待超过 ${ASSISTANT_TIMEOUT_MS / 1000} 秒。后端模型超时会降级为规则建议并正常返回；这里是请求没有回来。`,
+    };
+  }
+  if (isNetworkFailure(error)) {
+    return {
+      kind: 'network',
+      title: '无法连接助手服务',
+      detail: '请检查网络、baseUrl 与后端进程。未拿到建议，不展示推测内容。',
+    };
+  }
+  if (isApiError(error)) {
+    return {
+      kind: 'api',
+      title: `${error.status} · ${error.code}`,
+      detail: error.detail,
+    };
+  }
+  return {
+    kind: 'unknown',
+    title: '助手建议读取失败',
+    detail: '请重试；仍失败时查看浏览器控制台。',
+  };
 }
 
 /**
- * 右侧助手栏（交互壳）。
+ * 右侧助手栏。
  *
- * 数据来源只有两处：
- * 1) `GET /v1/approvals/pending` 的真实返回（与审批页同一接口）；
- * 2) 契约里已写死的口径说明（如计费行/有效对账行的关系）。
- * 没有生成式模型调用，也不伪造「AI 结论」；问答入口会明确说明 C16 缺口。
+ * 待审批计数来自 `GET /v1/approvals/pending`（真实接口）；
+ * 工单详情页的「下一步」来自 `POST /v1/assistant/suggest`，只展示接口返回的内容：
+ * - `source="llm"`：显示模型名与生成时间；
+ * - `source="rule"`：明确标注「规则建议（模型未参与）」并给出 fallback_reason，不显示模型名。
+ * 降级时接口仍是 200，因此这里只按 `source` 判断，绝不按状态码猜测。
  */
 export function AssistantPanel({ onClose }: AssistantPanelProps) {
   const location = useLocation();
@@ -30,12 +91,24 @@ export function AssistantPanel({ onClose }: AssistantPanelProps) {
   const [question, setQuestion] = useState('');
   const [asked, setAsked] = useState<string | null>(null);
 
+  const ticketMatch = /^\/tickets\/([^/]+)\/?$/.exec(location.pathname);
+  const ticketId = ticketMatch ? decodeURIComponent(ticketMatch[1]) : '';
+
   const approvals = useQuery({
     queryKey: ['assistant', 'pending-approvals'],
     queryFn: () => api.listPendingApprovals({ limit: 50 }),
     // 与其它页面同一条规矩：身份/范围没就绪前不发请求，避免把占位 org 打到后端。
     enabled: session.canQuery,
     staleTime: 10_000,
+  });
+
+  const suggestion = useQuery({
+    queryKey: ['assistant', 'suggest', ticketId],
+    queryFn: () => api.suggestNextAction(ticketId, { timeoutMs: ASSISTANT_TIMEOUT_MS }),
+    enabled: session.canQuery && Boolean(ticketId),
+    // 限流时自动重试会继续消耗配额，交给用户手动重试。
+    retry: false,
+    staleTime: 30_000,
   });
 
   const stats = useMemo(() => {
@@ -48,67 +121,7 @@ export function AssistantPanel({ onClose }: AssistantPanelProps) {
     };
   }, [approvals.data]);
 
-  const page = location.pathname;
-  const suggestions = useMemo<Suggestion[]>(() => {
-    const list: Suggestion[] = [];
-    if (stats.w3 > 0) {
-      list.push({
-        title: `${stats.w3} 张 W3 工单不可自动执行`,
-        detail: 'W3 只能人工处置或终止。先到审批队列确认等级与缺失角色，再决定动作。',
-        to: '/approvals',
-        cta: '查看队列',
-      });
-    }
-    if (stats.missingRole > 0) {
-      list.push({
-        title: `${stats.missingRole} 张审批仍缺角色`,
-        detail: '缺角色时通过不会推进到执行；队列已按 required_roles 标出缺口。',
-        to: '/approvals',
-        cta: '核对角色',
-      });
-    }
-    if (stats.touchesFund > 0) {
-      list.push({
-        title: `${stats.touchesFund} 张涉及资金`,
-        detail: '金额与 W 等级已并列显示，建议逐张核对后再做决定。',
-        to: '/approvals',
-        cta: '逐张核对',
-      });
-    }
-    if (page.includes('/metering')) {
-      list.push({
-        title: '有效对账行 59 与计费行 59 相等',
-        detail: '本期没有已确认错放与客户原因扣减，所以两者相等；发生扣减后计费行会小于有效对账行。',
-        to: location.pathname,
-        cta: '回看口径',
-      });
-    }
-    if (page.includes('/recon')) {
-      list.push({
-        title: '差异先看证据链，再看建议',
-        detail: '字段 diff 与证据（单据号 / 字段 / 页码 / bbox）在同一页，建议只是待确认草稿。',
-        to: page.includes('/diffs/') ? page : '/recon',
-        cta: '打开差异',
-      });
-    }
-    if (page.includes('/tickets')) {
-      list.push({
-        title: '工单详情右侧看审批进度',
-        detail: '缺哪个角色、审计链是否完整、动作是否可用，都在右侧决策栏，不用回列表。',
-        to: page,
-        cta: '停留在本页',
-      });
-    }
-    if (list.length === 0) {
-      list.push({
-        title: '从待决策开始，而不是从菜单开始',
-        detail: '工作台按 W3 > W2 > 涉及资金 > 等待时长排序，先处理最贵的阻塞。',
-        to: '/',
-        cta: '去工作台',
-      });
-    }
-    return list.slice(0, 3);
-  }, [location.pathname, page, stats]);
+  const errorCopy = suggestion.isError ? suggestionErrorCopy(suggestion.error) : null;
 
   const content = (
     <div className="flex h-full min-h-0 flex-col bg-white">
@@ -122,7 +135,7 @@ export function AssistantPanel({ onClose }: AssistantPanelProps) {
             <span className="badge bg-slate-100 text-slate-500 ring-slate-200">建议</span>
           </div>
           <p className="mt-1 text-[11px] leading-4 text-slate-500">
-            来源：审批队列接口 + 契约口径；不调用生成式模型。
+            来源：/v1/assistant/suggest；规则降级会明确标注，不冒充模型。
           </p>
         </div>
         <button type="button" className="btn btn-ghost btn-sm shrink-0" onClick={onClose} aria-label="收起助手">
@@ -159,20 +172,92 @@ export function AssistantPanel({ onClose }: AssistantPanelProps) {
         <div className="mt-3">
           <div className="flex items-center justify-between px-1">
             <span className="eyebrow">下一步</span>
-            <span className="text-[10px] text-slate-400">按风险排序</span>
+            <span className="text-[10px] text-slate-400">后端建议接口</span>
           </div>
-          <div className="mt-1.5 space-y-1.5">
-            {suggestions.map((item) => (
-              <div key={item.title} className="rounded-xl border border-slate-200 bg-white p-2.5 transition-colors hover:border-indigo-200">
-                <div className="text-[12px] font-medium leading-5 text-slate-900">{item.title}</div>
-                <p className="mt-0.5 text-[11px] leading-[17px] text-slate-500">{item.detail}</p>
-                <Link to={item.to} className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-700">
-                  {item.cta}
-                  <IconArrowRight width={12} height={12} />
-                </Link>
+
+          {!ticketId ? (
+            <div
+              className="mt-1.5 rounded-xl border border-slate-200 bg-white p-2.5 text-[11px] leading-[17px] text-slate-500"
+              data-testid="assistant-no-ticket"
+            >
+              打开一张工单详情，助手会调用 <span className="font-mono">/v1/assistant/suggest</span> 生成下一步建议。
+              本页不再用规则拼建议。
+            </div>
+          ) : suggestion.isPending ? (
+            <div
+              className="mt-1.5 rounded-xl border border-slate-200 bg-white p-2.5 text-[11px] text-slate-500"
+              data-testid="assistant-loading"
+            >
+              正在生成建议…
+            </div>
+          ) : errorCopy ? (
+            <div
+              className="mt-1.5 rounded-xl border border-amber-200 bg-amber-50/70 p-2.5 text-[11px] leading-[17px] text-amber-900"
+              data-testid="assistant-error"
+              data-kind={errorCopy.kind}
+            >
+              <div className="font-medium">{errorCopy.title}</div>
+              <p className="mt-0.5">{errorCopy.detail}</p>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm mt-1.5"
+                onClick={() => suggestion.refetch()}
+                data-testid="assistant-retry"
+              >
+                重试
+              </button>
+            </div>
+          ) : suggestion.data ? (
+            <div
+              className="mt-1.5 rounded-xl border border-slate-200 bg-white p-2.5"
+              data-testid="assistant-suggest"
+              data-source={suggestion.data.source}
+            >
+              <div className="flex flex-wrap items-center gap-1.5">
+                {suggestion.data.source === 'llm' ? (
+                  <span
+                    className="badge bg-indigo-50 text-indigo-700 ring-indigo-200"
+                    data-testid="assistant-source"
+                    data-source="llm"
+                  >
+                    模型建议
+                  </span>
+                ) : (
+                  <span
+                    className="badge bg-amber-50 text-amber-800 ring-amber-200"
+                    data-testid="assistant-source"
+                    data-source="rule"
+                  >
+                    规则建议（模型未参与）
+                  </span>
+                )}
+                <span className="text-[10px] text-slate-400">
+                  生成于 <span data-testid="assistant-generated-at">{dateTime(suggestion.data.generated_at)}</span>
+                </span>
               </div>
-            ))}
-          </div>
+
+              {suggestion.data.source === 'rule' ? (
+                <p className="mt-1.5 text-[11px] leading-[17px] text-amber-800" data-testid="assistant-fallback-reason">
+                  降级原因：{fallbackReasonLabel(suggestion.data.fallback_reason)}
+                </p>
+              ) : (
+                <p className="mt-1.5 text-[11px] text-slate-500">
+                  模型 <span className="font-mono" data-testid="assistant-model">{suggestion.data.model || '—'}</span>
+                </p>
+              )}
+
+              <p className="mt-1.5 text-[12px] font-medium leading-5 text-slate-900" data-testid="assistant-suggestion">
+                {suggestion.data.suggestion}
+              </p>
+              {suggestion.data.reasons.length > 0 ? (
+                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] leading-[17px] text-slate-500">
+                  {suggestion.data.reasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-3">
@@ -219,7 +304,9 @@ export function AssistantPanel({ onClose }: AssistantPanelProps) {
       </div>
 
       <div className="border-t border-slate-200 px-4 py-2 text-[10px] leading-4 text-slate-400">
-        演示模式：建议由页面数据与契约口径生成，不含模型输出。
+        {ticketId
+          ? '建议由后端接口生成；source=rule 时会标注降级原因，不显示模型名。'
+          : '助手只在工单详情页生成下一步建议，其它页面不展示推测。'}
       </div>
     </div>
   );
