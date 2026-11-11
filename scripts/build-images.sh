@@ -127,7 +127,9 @@ fi
 # ---- 3. 构建 --------------------------------------------------------------
 build_one() {
   local name="$1" dockerfile="$2"; shift 2
-  local -a cmd=(docker build --file "${DOCKER_DIR}/${dockerfile}"
+  # Git Bash（MSYS）会把 `--build-arg ERP_WEB_BASE=/` 的 `/` 改写成 Git 安装根目录，
+  # 产物 index.html 里就会出现 /Program Files/Git/assets/...；只对 build 进程关闭转换。
+  local -a cmd=(env MSYS_NO_PATHCONV=1 docker build --file "${DOCKER_DIR}/${dockerfile}"
                 --tag "smart-erp/${name}:${TAG}")
   [[ -n "$PLATFORM" ]] && cmd+=(--platform "${PLATFORM}")
   (( NO_CACHE )) && cmd+=(--no-cache)
