@@ -42,7 +42,7 @@ CODE_ROOTS = (
 CODE_SUFFIXES = {".py", ".sh", ".conf", ".ini"}
 
 # 只许下调：每修复一条就把这个数减一；新增例外必须显式上调并写清理由。
-MAX_COMPOSE_ENV_EXCEPTIONS = 16
+MAX_COMPOSE_ENV_EXCEPTIONS = 15
 
 REQUIRED_EXCEPTION_FIELDS = ("owner", "reason", "card")
 
