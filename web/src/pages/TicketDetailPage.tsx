@@ -7,6 +7,7 @@ import { useSession } from '../api/session';
 import { LevelBadge, StateBadge, StepStateBadge } from '../components/Badges';
 import { ApprovalOpinions } from '../components/ApprovalOpinions';
 import { ErrorPanel } from '../components/ErrorPanel';
+import { AuditFieldDiff } from '../components/FieldDiffTable';
 import { StateRail } from '../components/StateRail';
 import { StepTimeline } from '../components/StepTimeline';
 import { IconAlert, IconArrowRight, IconCheck } from '../components/icons';
@@ -30,6 +31,10 @@ const ACTION_CONFIRM: Record<TicketAction, string> = {
 // 关闭同步回滚时给用户的解释：不能只把按钮灰掉，否则「为什么点不了」会变成新的误导。
 const ROLLBACK_DISABLED_REASON =
   '同步回滚入口已关闭（本期只读）：待补偿执行器路径上线后开放；点击不会产生任何外部写入。';
+
+// W3 是系统级硬禁止，不是「暂时失败」：既然服务端一定整单拒绝，界面就不给可执行按钮。
+const W3_DISABLED_REASON =
+  'W3 系统级硬禁止：审批通过并执行会被服务端整单拒绝（403 E-POLICY-W3FORBIDDEN），连接器零写入；请在外部系统完成操作后走人工留痕。驳回 / 终止不触发外部写入，仍可使用。';
 
 type ActionFailCode = NonNullable<TicketActionPayload['fail_code']>;
 
@@ -56,6 +61,7 @@ export function TicketDetailPage() {
   }, [config.roles.join(',')]);
   const [failCode, setFailCode] = useState<ActionFailCode>('F2');
   const [confirmedManual, setConfirmedManual] = useState(false);
+  const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const [exportState, setExportState] = useState<{ status: 'idle' | 'loading' | 'ok' | 'error'; message?: string; error?: unknown }>({ status: 'idle' });
 
   const ticket = useQuery({
@@ -218,8 +224,8 @@ export function TicketDetailPage() {
         <div className="flex items-start gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2.5 text-[12px] leading-5 text-rose-800">
           <IconAlert className="mt-0.5 shrink-0" />
           <span>
-            <strong className="font-semibold">W3 工单</strong>：网关禁止自动执行，任何审批/执行请求都会被整单拒绝，连接器零写入。
-            请在外部系统完成操作后走人工留痕。
+            <strong className="font-semibold">W3 工单</strong>：网关禁止自动执行，「审批通过并执行」会被整单拒绝（403），连接器零写入。
+            驳回 / 终止不触发外部写入，仍可操作；外部操作请在目标系统完成后走人工留痕。
           </span>
         </div>
       ) : null}
@@ -303,7 +309,7 @@ export function TicketDetailPage() {
             </div>
           </section>
 
-          <section className="card min-w-0">
+          <section className="card min-w-0" id="audit-evidence">
             <div className="card-head">
               <h2 className="section-title">审计证据</h2>
               <button
@@ -332,29 +338,59 @@ export function TicketDetailPage() {
 
               <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px]">
                 <span className={`status-dot ${auditChain?.ok ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                <span className="text-slate-600">
-                  影像 {imagesList.length} 张 · {dirtyDiffMissing ? '有字段差异缺失' : 'field_diff 齐全'}
+                <span className="text-slate-600" data-testid="audit-image-summary">
+                  影像 {imagesList.length} 张 ·{' '}
+                  {imagesList.length === 0
+                    ? '本单没有外部写入，因此没有字段差异影像'
+                    : dirtyDiffMissing
+                      ? '有字段差异缺失'
+                      : 'field_diff 齐全'}
                 </span>
                 <span className="ml-auto break-all font-mono text-[10px] text-slate-400">
-                  head {shortHash(auditChain?.head_hash, 8)}
+                  head {imagesList.length === 0 ? '—（无影像，链头为空）' : shortHash(auditChain?.head_hash, 8)}
                 </span>
               </div>
 
               {imagesList.length > 0 ? (
                 <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
                   {imagesList.map((image) => (
-                    <li key={image.image_id} className="min-w-0 px-3 py-2 text-[11px]">
+                    <li key={image.image_id} className="min-w-0 px-3 py-2 text-[11px]" data-testid="audit-image-row">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-mono text-slate-600">
                           {image.system} · {image.object_type}:{image.object_id}
                         </span>
                         <span className="text-slate-400">{dateTime(image.created_at)}</span>
                         <span className="ml-auto break-all font-mono text-slate-500">hash {shortHash(image.hash, 8)}</span>
+                        <button
+                          type="button"
+                          className="link text-[11px]"
+                          aria-expanded={expandedImage === image.image_id}
+                          onClick={() => setExpandedImage((current) => (current === image.image_id ? null : image.image_id))}
+                        >
+                          {expandedImage === image.image_id ? '收起' : '查看'}
+                        </button>
                       </div>
                       <div className="mt-1 grid grid-cols-1 gap-1 text-slate-500 sm:grid-cols-2">
                         <span className="break-all">前像：{image.before_ref ?? '缺失'}</span>
                         <span className="break-all">后像：{image.after_ref ?? '缺失'}</span>
                       </div>
+                      {expandedImage === image.image_id ? (
+                        <div className="mt-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-2" data-testid="audit-image-detail">
+                          <div className="grid grid-cols-1 gap-1 break-all font-mono text-[10px] sm:grid-cols-2">
+                            <span>image_id：{image.image_id}</span>
+                            <span>step_id：{image.step_id}</span>
+                            <span className="sm:col-span-2">hash：{image.hash}</span>
+                            <span className="sm:col-span-2">prev_hash：{image.prev_hash}</span>
+                          </div>
+                          {(image.field_diff ?? []).length > 0 ? (
+                            <AuditFieldDiff entries={image.field_diff ?? []} />
+                          ) : (
+                            <p className="text-[10.5px] text-amber-700">
+                              该影像没有 field_diff（契约返回空）；不猜测填充。
+                            </p>
+                          )}
+                        </div>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
@@ -375,6 +411,11 @@ export function TicketDetailPage() {
               <div className="space-y-1.5">
                 {detail.approval_required_roles.length === 0 ? (
                   <span className="text-[12px] text-slate-500">无需审批角色</span>
+                ) : null}
+                {detail.write_level === 'W3' ? (
+                  <p className="rounded-lg bg-amber-50 px-2.5 py-2 text-[10.5px] leading-4 text-amber-800">
+                    W3 不适用审批角色，所以不会进入审批待办；本单只能转人工或终止，审批通过不会发生。
+                  </p>
                 ) : null}
                 {detail.approval_required_roles.map((item) => {
                   const missing = detail.approval_missing_roles.includes(item);
@@ -422,8 +463,11 @@ export function TicketDetailPage() {
               ) : (
                 <div className="grid gap-1.5">
                   {actions.map((action) => {
-                    const disabled = action === 'compensate' && !detail.rollback_available;
-                    const primary = action === 'approve';
+                    // 执行类动作（approve → WriteGateway）在 W3 上必定被整单拒绝：
+                    // 这里禁用并给原因，而不是让用户点了才看到 403。
+                    const w3Blocked = action === 'approve' && detail.write_level === 'W3';
+                    const disabled = w3Blocked || (action === 'compensate' && !detail.rollback_available);
+                    const primary = action === 'approve' && !w3Blocked;
                     return (
                       <button
                         key={action}
@@ -432,7 +476,8 @@ export function TicketDetailPage() {
                           primary ? 'btn-primary' : action === 'compensate' ? 'btn-danger' : 'btn-secondary'
                         }`}
                         disabled={disabled}
-                        title={disabled ? ROLLBACK_DISABLED_REASON : undefined}
+                        title={w3Blocked ? W3_DISABLED_REASON : disabled ? ROLLBACK_DISABLED_REASON : undefined}
+                        data-testid={w3Blocked ? 'w3-approve-blocked' : undefined}
                         onClick={() => {
                           setActiveAction(action);
                           setComment('');
@@ -448,6 +493,12 @@ export function TicketDetailPage() {
                 </div>
               )}
 
+              {detail.write_level === 'W3' && actions.includes('approve') ? (
+                <p className="text-[10.5px] leading-4 text-rose-700" data-testid="w3-action-reason">
+                  {W3_DISABLED_REASON}
+                </p>
+              ) : null}
+
               {actions.includes('compensate') && !detail.rollback_available ? (
                 <p className="text-[10.5px] leading-4 text-amber-700">{ROLLBACK_DISABLED_REASON}</p>
               ) : null}
@@ -455,9 +506,6 @@ export function TicketDetailPage() {
               {activeAction ? (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
                   <h3 className="text-[12.5px] font-semibold text-slate-900">{ACTION_LABELS[activeAction]}</h3>
-                  {activeAction === 'approve' && detail.write_level === 'W3' ? (
-                    <p className="mt-1 text-[10.5px] text-rose-700">该工单为 W3：提交后会收到 403，连接器不会产生任何写入。</p>
-                  ) : null}
 
                   <div className="mt-2 grid grid-cols-1 gap-2">
                     {activeAction === 'reject' || activeAction === 'approve' ? (
@@ -574,6 +622,25 @@ export function TicketDetailPage() {
                 <span>链头</span>
                 <span className="break-all font-mono text-[10px] text-slate-700">{shortHash(auditChain?.head_hash, 8)}</span>
               </div>
+              {auditChain && auditChain.image_count === 0 ? (
+                <p className="text-[10.5px] leading-4 text-slate-500">
+                  本单没有执行影像，链头为空是正确语义，不是校验失败。
+                </p>
+              ) : null}
+              <a
+                href="#audit-evidence"
+                className="link inline-flex items-center gap-1 pt-1 text-[11px]"
+                data-testid="audit-chain-detail-link"
+                onClick={(event) => {
+                  const target = document.getElementById('audit-evidence');
+                  if (target) {
+                    event.preventDefault();
+                    target.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+                  }
+                }}
+              >
+                查看影像明细（{imagesList.length} 条）→
+              </a>
             </div>
           </section>
         </aside>

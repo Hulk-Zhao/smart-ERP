@@ -9,7 +9,7 @@ import { DiffTypeBadge } from '../components/Badges';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel } from '../components/ErrorPanel';
 import { IconArrowRight } from '../components/icons';
-import { amount, dateTime, money, rate } from '../lib/format';
+import { dateTime, money, rate, shortId } from '../lib/format';
 import { openSettingsPanel } from '../lib/settings';
 
 function Metric({
@@ -17,16 +17,24 @@ function Metric({
   value,
   hint,
   tone = '',
+  testId,
 }: {
   label: string;
   value: string | number;
   hint?: string;
   tone?: string;
+  testId?: string;
 }) {
   return (
     <div className="min-w-0 px-3 py-2">
       <div className="label">{label}</div>
-      <div className={`mt-0.5 truncate font-mono text-[15px] font-medium num ${tone || 'text-slate-800'}`}>{value}</div>
+      {/* 金额不能 truncate：7,108,301.10 CNY 被裁成 7,108,301. 比数字错还难解释。 */}
+      <div
+        className={`mt-0.5 break-words font-mono text-[15px] font-medium leading-5 num ${tone || 'text-slate-800'}`}
+        data-testid={testId}
+      >
+        {value}
+      </div>
       {hint ? <div className="mt-0.5 truncate text-[10px] text-slate-400" title={hint}>{hint}</div> : null}
     </div>
   );
@@ -88,14 +96,20 @@ export function ReconBatchPage() {
             <Link to="/recon" className="link text-[11.5px]">
               ← 返回对账
             </Link>
-            <h1 className="mt-1 break-all text-[17px] font-semibold tracking-tight text-slate-900">
-              {batch.data ? batch.data.suppliers.join('、') || '批次' : '批次'}
-              <span className="ml-2 font-mono text-[11px] font-normal text-slate-400">{batchId}</span>
+            {/* 标题必须是「批次」本身：供应商串不能当标题，更不能和批次 ID 粘成一行。 */}
+            <h1
+              className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[17px] font-semibold tracking-tight text-slate-900"
+              data-testid="batch-title"
+            >
+              <span>对账批次</span>
+              <span className="font-mono text-[11.5px] font-normal text-slate-500" title={batchId}>
+                {shortId(batchId)}
+              </span>
             </h1>
             {batch.data ? (
               <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-slate-500">
                 <span className="badge bg-slate-100 text-slate-600 ring-slate-200">{batch.data.status}</span>
-                <span>供应商 {batch.data.suppliers.join('、') || '—'}</span>
+                <span className="break-all">供应商 {batch.data.suppliers.join('、') || '—'}</span>
                 <span className="text-slate-300">·</span>
                 <span>创建 {dateTime(batch.data.created_at)}</span>
               </p>
@@ -171,16 +185,27 @@ export function ReconBatchPage() {
                 <Metric label="供应商行" value={metrics?.supplier_lines ?? '—'} />
                 <Metric label="匹配行" value={metrics?.matched ?? '—'} hint={`匹配率 ${rate(metrics?.matched_rate)}`} tone="text-emerald-700" />
                 <Metric label="差异行" value={metrics?.diff_lines ?? '—'} hint={`差异率 ${rate(metrics?.diff_rate)}`} tone="text-amber-700" />
-                <Metric label="差异金额" value={amount(metrics?.diff_amount)} tone="text-rose-700" />
+                <Metric
+                  label="差异金额"
+                  value={money(metrics?.diff_amount)}
+                  tone="text-rose-700"
+                  testId="metric-diff-amount"
+                />
                 <Metric label="模糊/多候选" value={metrics?.ambiguous ?? '—'} />
                 <Metric label="仅候选" value={metrics?.candidate_only ?? '—'} />
                 <Metric label="未匹配" value={metrics?.unmatched ?? '—'} />
                 <Metric label="自动处置" value={metrics?.auto_disposal_allowed ? '允许' : '禁止'} tone={metrics?.auto_disposal_allowed ? 'text-emerald-700' : 'text-amber-700'} />
               </div>
               {metrics ? (
-                <p className="border-t border-slate-100 px-3 py-2 text-[11px] leading-5 text-slate-600" data-testid="matched-caliber">
-                  {metrics.matched} 行匹配（行级），其中 {metrics.diff_lines} 行存在差异；差异行仍计入匹配，不会从匹配行里扣除。
-                </p>
+                <>
+                  <p className="border-t border-slate-100 px-3 py-2 text-[11px] leading-5 text-slate-600" data-testid="matched-caliber">
+                    {metrics.matched} 行匹配（行级），其中 {metrics.diff_lines} 行存在差异；差异行仍计入匹配，不会从匹配行里扣除。
+                  </p>
+                  <p className="px-3 pb-2 text-[10.5px] leading-4 text-slate-400" data-testid="metric-caliber">
+                    模糊/多候选（ambiguous）、仅候选（candidate_only）、未匹配（unmatched，我方 + 供应商）是三个互斥的行级口径；
+                    数值相同只是巧合，不代表同一批行被重复统计。
+                  </p>
+                </>
               ) : null}
             </section>
 
@@ -190,7 +215,9 @@ export function ReconBatchPage() {
                   <h2 className="section-title">差异列表</h2>
                   <span className="badge bg-slate-100 text-slate-600 ring-slate-200">{batch.data.diff_count ?? diffItems.length}</span>
                 </div>
-                <span className="text-[10.5px] text-slate-400">点击行查看字段级 diff 与证据坐标</span>
+                <span className="text-[10.5px] text-slate-400">
+                  点击行查看字段级 diff 与证据坐标；置信度来自规则引擎打分，不是模型输出
+                </span>
               </div>
 
               <div className="space-y-2 border-b border-slate-100 px-3 py-2.5">
@@ -290,7 +317,12 @@ export function ReconBatchPage() {
                           <th className="w-[112px]">供应商</th>
                           <th className="w-[112px] text-right">金额</th>
                           <th className="w-[84px]">责任方</th>
-                          <th className="w-[80px] text-right">置信度</th>
+                          <th
+                            className="w-[92px] text-right"
+                            title="规则引擎打分（置信度），不是模型输出；来源见列说明"
+                          >
+                            置信度（规则）
+                          </th>
                           <th className="w-[72px]">人工</th>
                           <th className="w-[72px] text-right">证据</th>
                           <th>建议摘要</th>

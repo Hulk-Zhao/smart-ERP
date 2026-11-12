@@ -57,7 +57,28 @@ describe('工单详情：真实链路 + W3 403', () => {
     expect((await screen.findAllByText(/sha256:t/)).length).toBeGreaterThan(0);
   });
 
-  it('W3 审批被拒：界面显示 403 / E-POLICY-W3FORBIDDEN / 连接器零写入', async () => {
+  it('W3 不给可执行的审批按钮：禁用 + 明确原因，且不会发出 approve 请求', async () => {
+    renderPage(<TicketDetailPage />, { route: `/tickets/${W3_TICKET_ID}`, path: '/tickets/:ticketId' });
+
+    await screen.findByText('T-W3');
+    const approve = screen.getByRole('button', { name: '审批通过并执行' });
+    // 安全语义：服务端一定整单拒绝，界面就不该给可点的执行按钮。
+    expect(approve).toBeDisabled();
+    expect(approve.getAttribute('data-testid')).toBe('w3-approve-blocked');
+    expect(screen.getByTestId('w3-action-reason').textContent).toContain('W3 系统级硬禁止');
+
+    // 驳回 / 终止不触发外部写入，仍可操作。
+    expect(screen.getByRole('button', { name: '驳回' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '终止工单' })).toBeEnabled();
+
+    fireEvent.click(approve);
+    // 点击禁用按钮既不能展开确认面板，也不能产生请求。
+    expect(screen.queryByRole('button', { name: '确认审批通过' })).toBeNull();
+    expect(server.requests.some((item) => item.path.endsWith('/actions/approve'))).toBe(false);
+  });
+
+  it('非 W3 审批被服务端拒绝时：界面显示 403 与连接器零写入', async () => {
+    detail = ticketDetail({ write_level: 'W2', approval_required_roles: ['approver'] });
     renderPage(<TicketDetailPage />, { route: `/tickets/${W3_TICKET_ID}`, path: '/tickets/:ticketId' });
 
     await screen.findByText('T-W3');

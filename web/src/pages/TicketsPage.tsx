@@ -31,6 +31,8 @@ export function TicketsPage() {
   });
 
   const items = query.data?.items ?? [];
+  const nextCursor = query.data?.next_cursor ?? null;
+  const hasNextPage = Boolean(nextCursor);
   const w3 = items.filter((item) => item.write_level === 'W3');
   const fund = items.filter((item) => item.touches_fund);
   const waiting = items.filter((item) => item.state === '待审批' || item.state === '待确认');
@@ -54,7 +56,12 @@ export function TicketsPage() {
           <span className="badge bg-slate-100 text-slate-600 ring-slate-200">本页 {items.length} 条</span>
           <span className="badge bg-rose-50 text-rose-700 ring-rose-200">W3 {w3.length}</span>
           <span className="badge bg-amber-50 text-amber-700 ring-amber-200">涉资金 {fund.length}</span>
-          <span className="badge bg-indigo-50 text-indigo-700 ring-indigo-200">待决策 {waiting.length}</span>
+          <span
+            className="badge bg-indigo-50 text-indigo-700 ring-indigo-200"
+            title="口径：本页待审批 + 待确认；工作台「待你决策」只统计审批待办，两者不同"
+          >
+            待决策 {waiting.length}
+          </span>
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => void query.refetch()}>
             刷新
           </button>
@@ -234,9 +241,9 @@ export function TicketsPage() {
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[11px] text-slate-400">
+        <span className="text-[11px] text-slate-400" data-testid="tickets-page-footer">
           {items.length > 0 ? `本页 ${items.length} 条` : ''}
-          {query.data?.next_cursor ? ' · 还有下一页' : ''}
+          {items.length > 0 ? (hasNextPage ? ' · 还有下一页' : ' · 已到末页') : ''}
         </span>
         <div className="flex gap-2">
           <button type="button" className="btn btn-secondary btn-sm" disabled={!cursor} onClick={() => setCursor(undefined)}>
@@ -245,8 +252,14 @@ export function TicketsPage() {
           <button
             type="button"
             className="btn btn-primary btn-sm"
-            disabled={!query.data?.next_cursor}
-            onClick={() => setCursor(query.data?.next_cursor ?? undefined)}
+            disabled={!hasNextPage}
+            title={hasNextPage ? undefined : '已到末页：服务端没有返回 next_cursor'}
+            data-testid="tickets-next-page"
+            onClick={() => {
+              // 没有 next_cursor 时不能把 cursor 设成 undefined——那样 queryKey 不变，点了不会有任何请求。
+              if (!nextCursor) return;
+              setCursor(nextCursor);
+            }}
           >
             下一页
           </button>

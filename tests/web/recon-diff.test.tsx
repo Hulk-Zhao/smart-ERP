@@ -44,7 +44,9 @@ describe('差异明细：字段级 diff + 证据下钻（含 rounding_tolerance�
     expect(screen.getAllByText('rounding_tolerance').length).toBeGreaterThan(0);
     expect(screen.getAllByText('我方值').length).toBeGreaterThan(0);
     expect(screen.getAllByText('对方值').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('原因码').length).toBeGreaterThan(0);
+    // 这一列实际是 diff type code，标题按语义改为「差异类型」，不再叫原因码。
+    expect(screen.getAllByText('差异类型').length).toBeGreaterThan(0);
+    expect(screen.queryByText('原因码')).toBeNull();
     expect(screen.getByText('数量（A-001）')).toBeInTheDocument();
     expect(screen.getByText('单据引用（A-001）')).toBeInTheDocument();
     expect(screen.getByText('u8:PO-202610-001#1')).toBeInTheDocument();
