@@ -41,6 +41,8 @@ export type {
   ReconRunIn,
   ReconStatementOut,
   ScopeIn,
+  DemoIdentitiesOut,
+  DemoIdentityOut,
   SessionOut,
   SuggestIn,
   SuggestOut,

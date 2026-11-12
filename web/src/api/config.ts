@@ -76,8 +76,9 @@ function load(): ApiConfig {
     return {
       ...base,
       ...saved,
-      // 环境变量显式开启 mock 时不允许被本地存储覆盖为关闭
-      mock: base.mock || saved.mock === true,
+      // mock 只认构建期 VITE_USE_MOCK：本地存储里哪怕残留 mock:true（旧版本/手工改）也不生效，
+      // 否则演示环境会悄悄加载 mock.ts 里的假数据。
+      mock: base.mock,
       scope: manual ? { ...base.scope, ...saved.scope } : base.scope,
       scopeSource: manual ? 'manual' : 'pending',
       // 身份只认会话端点：旧版本存过的 roles / viewerId 一律不恢复，避免用过期身份猜权限。

@@ -23,6 +23,8 @@ import type {
   PageReconDiffOut,
   PageTicketOut,
   MeteringStatementOut,
+  DemoIdentitiesOut,
+  DemoIdentityOut,
   ReconBatchOut,
   ReconDatasetIn,
   ReconDiffDetailOut,
@@ -273,6 +275,7 @@ export function ticketPath(ticketId: string, suffix = ''): string {
  * 保证「client 改路径而 mock 不认」时测试立刻变红。
  */
 export const SESSION_PATH = '/v1/auth/session';
+export const DEMO_IDENTITIES_PATH = '/v1/auth/demo-identities';
 export const ASSISTANT_SUGGEST_PATH = '/v1/assistant/suggest';
 export const RECON_BATCHES_PATH = '/v1/recon/batches';
 export const RECON_STATEMENTS_PATH = '/v1/recon/statements';
@@ -315,6 +318,11 @@ export const api = {
   /** 当前会话身份：前端唯一的身份来源，替代 VITE_SESSION_ROLES / VITE_VIEWER_ID。 */
   getSession(): Promise<SessionOut> {
     return request<'GET /v1/auth/session'>('GET', SESSION_PATH, { omitScope: true });
+  },
+
+  /** 演示身份清单；非 demo 环境后端返回 404，由调用方决定是否展示切换器。 */
+  getDemoIdentities(): Promise<DemoIdentitiesOut> {
+    return request<'GET /v1/auth/demo-identities'>('GET', DEMO_IDENTITIES_PATH, { omitScope: true });
   },
 
   /**

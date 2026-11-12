@@ -580,6 +580,55 @@
         "title": "Body_upload_statement_v1_recon_statements_post",
         "type": "object"
       },
+      "DemoIdentitiesOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DemoIdentityOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "DemoIdentitiesOut",
+        "type": "object"
+      },
+      "DemoIdentityOut": {
+        "description": "演示身份；``token`` 是该身份的静态会话令牌，等同演示登录凭据。",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "roles",
+          "label",
+          "token"
+        ],
+        "title": "DemoIdentityOut",
+        "type": "object"
+      },
       "DiffTypeCode": {
         "enum": [
           "unit_price",
@@ -3598,6 +3647,28 @@
         "summary": "按工单读取审计影像",
         "tags": [
           "审计"
+        ]
+      }
+    },
+    "/v1/auth/demo-identities": {
+      "get": {
+        "description": "演示身份清单：仅 demo 档且显式开启时存在，其他环境一律 404。\n\n返回的 token 是部署期注入的静态会话令牌，等于把「登录」做成一键演示，\n所以必须过双闸：``ERP_APP_ENV=demo``（Settings 强制）与\n``ERP_DEMO_SESSION_ENABLED=true``。不写日志、禁止缓存。",
+        "operationId": "list_demo_identities_v1_auth_demo_identities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoIdentitiesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Demo Identities",
+        "tags": [
+          "会话"
         ]
       }
     },

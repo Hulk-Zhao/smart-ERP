@@ -84,6 +84,19 @@ class SessionOut(BaseModel):
     default_scope: SessionScopeOut | None = None
 
 
+class DemoIdentityOut(BaseModel):
+    """演示身份；``token`` 是该身份的静态会话令牌，等同演示登录凭据。"""
+
+    user_id: UUID
+    roles: list[str]
+    label: str
+    token: str
+
+
+class DemoIdentitiesOut(BaseModel):
+    items: list[DemoIdentityOut]
+
+
 # --------------------------------------------------------------------------- 工单
 
 

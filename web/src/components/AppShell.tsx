@@ -11,6 +11,7 @@ import { OPEN_SETTINGS_EVENT } from '../lib/settings';
 import { shortId } from '../lib/format';
 import { AssistantPanel } from './AssistantPanel';
 import { CommandPalette } from './CommandPalette';
+import { DemoIdentitySwitcher } from './DemoIdentitySwitcher';
 import { SessionNotice } from './SessionNotice';
 import {
   IconBell,
@@ -745,6 +746,7 @@ export function AppShell() {
           <button type="button" className="btn btn-ghost btn-sm" aria-label="通知" title="通知">
             <IconBell />
           </button>
+          <DemoIdentitySwitcher />
           <button
             type="button"
             className="btn btn-ghost btn-sm"

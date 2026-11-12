@@ -92,7 +92,6 @@ export function ReconPage() {
   const queryClient = useQueryClient();
   const [suppliers, setSuppliers] = useState('');
   const [erp, setErp] = useState(true);
-  const [mes, setMes] = useState(false);
   const [wms, setWms] = useState(false);
   const [statementFiles, setStatementFiles] = useState('');
   const [datasetText, setDatasetText] = useState('');
@@ -161,7 +160,7 @@ export function ReconPage() {
       file: uploadFile,
       payload: {
         suppliers: supplierList,
-        sources: { erp, mes, wms, statement_files: files },
+        sources: { erp, mes: false, wms, statement_files: files },
         dataset,
       },
     });
@@ -231,15 +230,15 @@ export function ReconPage() {
                   <input type="checkbox" className="sr-only" checked={erp} onChange={(event) => setErp(event.target.checked)} />
                   ERP（u8）
                 </label>
-                <label className={`chip cursor-pointer ${mes ? 'chip-active' : ''}`}>
-                  <input type="checkbox" className="sr-only" checked={mes} onChange={(event) => setMes(event.target.checked)} />
-                  MES
-                </label>
+                <span className="chip text-slate-400" data-testid="mes-not-available" title="MES 接入属实施项，本期对账只读 dataset 与 statement_files">
+                  MES（本期不含）
+                </span>
                 <label className={`chip cursor-pointer ${wms ? 'chip-active' : ''}`}>
                   <input type="checkbox" className="sr-only" checked={wms} onChange={(event) => setWms(event.target.checked)} />
                   WMS
                 </label>
               </div>
+              <p className="mt-1 text-[10.5px] leading-4 text-slate-400">MES 接入属实施项，本期不含；对账只读选中的对账单与 dataset，勾选 MES 不会有任何效果。</p>
             </fieldset>
 
             <label className="block min-w-0">
