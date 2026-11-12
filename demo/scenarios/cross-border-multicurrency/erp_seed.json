@@ -25704,7 +25704,7 @@
       "event_type": "transition",
       "from_state": "待审批",
       "to_state": "已驳回",
-      "actor_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "actor_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       "payload": {
         "reason": "单价差异证据不足，复核驳回；关联结算单 ST-202609-1002#51，差异 4529.9700 元。"
       },
@@ -25825,7 +25825,7 @@
       "event_type": "transition",
       "from_state": "执行中",
       "to_state": "校验中",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "红冲重开完成，等待一致性校验；关联结算单 ST-202609-1004#1，差异 4969.5800 元。"
       },
@@ -25877,7 +25877,7 @@
       "event_type": "transition",
       "from_state": "待审批",
       "to_state": "执行中",
-      "actor_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "actor_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       "payload": {
         "reason": "数量差异按实收入账，已完成；关联结算单 ST-202609-1005#2，差异 180.9892 元。"
       },
@@ -25894,7 +25894,7 @@
       "event_type": "transition",
       "from_state": "执行中",
       "to_state": "校验中",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "数量差异按实收入账，已完成；关联结算单 ST-202609-1005#2，差异 180.9892 元。"
       },
@@ -25911,7 +25911,7 @@
       "event_type": "transition",
       "from_state": "校验中",
       "to_state": "已完成",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "数量差异按实收入账，已完成；关联结算单 ST-202609-1005#2，差异 180.9892 元。"
       },
@@ -25980,7 +25980,7 @@
       "event_type": "transition",
       "from_state": "执行中",
       "to_state": "校验中",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "税率口径修正并重开发票，已完成；关联结算单 ST-202609-1006#2，差异 57.6294 元。"
       },
@@ -25997,7 +25997,7 @@
       "event_type": "transition",
       "from_state": "校验中",
       "to_state": "已完成",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "税率口径修正并重开发票，已完成；关联结算单 ST-202609-1006#2，差异 57.6294 元。"
       },
@@ -26066,7 +26066,7 @@
       "event_type": "transition",
       "from_state": "执行中",
       "to_state": "校验中",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "报废扣减补录，已完成；关联结算单 ST-202609-0204#1，差异 0.00 元。"
       },
@@ -26083,7 +26083,7 @@
       "event_type": "transition",
       "from_state": "校验中",
       "to_state": "已完成",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "报废扣减补录，已完成；关联结算单 ST-202609-0204#1，差异 0.00 元。"
       },
@@ -26152,7 +26152,7 @@
       "event_type": "transition",
       "from_state": "执行中",
       "to_state": "校验中",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "下游凭证已生成，正在执行补偿；关联结算单 ST-202609-0205#1，差异 0.00 元。"
       },
@@ -26169,7 +26169,7 @@
       "event_type": "transition",
       "from_state": "校验中",
       "to_state": "补偿中",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "下游凭证已生成，正在执行补偿；关联结算单 ST-202609-0205#1，差异 0.00 元。"
       },
@@ -26221,7 +26221,7 @@
       "event_type": "transition",
       "from_state": "待审批",
       "to_state": "执行中",
-      "actor_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "actor_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       "payload": {
         "reason": "调账后总账不平，完整补偿回滚；关联结算单 ST-202609-0206#1，差异 0.00 元。"
       },
@@ -26238,7 +26238,7 @@
       "event_type": "transition",
       "from_state": "执行中",
       "to_state": "校验中",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "调账后总账不平，完整补偿回滚；关联结算单 ST-202609-0206#1，差异 0.00 元。"
       },
@@ -26255,7 +26255,7 @@
       "event_type": "transition",
       "from_state": "校验中",
       "to_state": "补偿中",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "调账后总账不平，完整补偿回滚；关联结算单 ST-202609-0206#1，差异 0.00 元。"
       },
@@ -26272,7 +26272,7 @@
       "event_type": "transition",
       "from_state": "补偿中",
       "to_state": "已回滚",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "调账后总账不平，完整补偿回滚；关联结算单 ST-202609-0206#1，差异 0.00 元。"
       },
@@ -26324,7 +26324,7 @@
       "event_type": "transition",
       "from_state": "待审批",
       "to_state": "执行中",
-      "actor_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "actor_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       "payload": {
         "reason": "主数据合并误并供应商，已回滚；关联结算单 ST-202609-0301#1，差异 28.6300 元。"
       },
@@ -26341,7 +26341,7 @@
       "event_type": "transition",
       "from_state": "执行中",
       "to_state": "校验中",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "主数据合并误并供应商，已回滚；关联结算单 ST-202609-0301#1，差异 28.6300 元。"
       },
@@ -26358,7 +26358,7 @@
       "event_type": "transition",
       "from_state": "校验中",
       "to_state": "补偿中",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "主数据合并误并供应商，已回滚；关联结算单 ST-202609-0301#1，差异 28.6300 元。"
       },
@@ -26375,7 +26375,7 @@
       "event_type": "transition",
       "from_state": "补偿中",
       "to_state": "已回滚",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "主数据合并误并供应商，已回滚；关联结算单 ST-202609-0301#1，差异 28.6300 元。"
       },
@@ -26427,7 +26427,7 @@
       "event_type": "transition",
       "from_state": "待审批",
       "to_state": "执行中",
-      "actor_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "actor_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       "payload": {
         "reason": "补偿在新系统失败，转人工处置；关联结算单 PO-202512-00154#4，差异 -26148.7500 元。"
       },
@@ -26444,7 +26444,7 @@
       "event_type": "transition",
       "from_state": "执行中",
       "to_state": "补偿中",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "补偿在新系统失败，转人工处置；关联结算单 PO-202512-00154#4，差异 -26148.7500 元。"
       },
@@ -26461,7 +26461,7 @@
       "event_type": "transition",
       "from_state": "补偿中",
       "to_state": "需人工处置",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "补偿在新系统失败，转人工处置；关联结算单 PO-202512-00154#4，差异 -26148.7500 元。"
       },
@@ -26513,7 +26513,7 @@
       "event_type": "transition",
       "from_state": "待审批",
       "to_state": "执行中",
-      "actor_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "actor_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       "payload": {
         "reason": "不可逆付款指令，锁定待人工解锁；关联结算单 ST-202609-0303#1，差异 184631.8300 元。"
       },
@@ -26530,7 +26530,7 @@
       "event_type": "transition",
       "from_state": "执行中",
       "to_state": "已锁定",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "不可逆付款指令，锁定待人工解锁；关联结算单 ST-202609-0303#1，差异 184631.8300 元。"
       },
@@ -26565,7 +26565,7 @@
       "event_type": "transition",
       "from_state": "计划中",
       "to_state": "已终止",
-      "actor_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "actor_id": "00000000-0000-0000-0000-000000000000",
       "payload": {
         "reason": "业务取消，工单终止；关联结算单 ST-202609-0304#2，差异 6839.0640 元。"
       },

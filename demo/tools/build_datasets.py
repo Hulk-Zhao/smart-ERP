@@ -71,6 +71,24 @@ USER_NAMES = {
     "approver": "陆明远（业务负责人）",
     "cfo": "宋知微（财务负责人）",
 }
+#: 执行器 / 补偿 worker / 定时巡检 / 恢复等无人类操作人的事件统一记为系统主体。
+SYSTEM_ACTOR = UUID("00000000-0000-0000-0000-000000000000")
+
+
+def approval_roles(level: int, amount_value: Decimal, touches_fund: bool, state: str) -> list[str]:
+    """审批角色链；事件 actor 与审批记录共用，避免两处口径漂移。"""
+
+    roles: list[str] = ["reviewer"] if level == 1 else ["approver"]
+    if amount_value > Decimal("100000") or touches_fund:
+        if "approver" not in roles:
+            roles.append("approver")
+        if len(roles) < 2:
+            roles.insert(0, "reviewer")
+    if amount_value > Decimal("500000"):
+        roles.append("cfo")
+    if state == "待审批":
+        roles = roles[:-1]
+    return roles
 
 DIFF_OWNER = {
     "unit_price": "supplier",
@@ -1914,6 +1932,9 @@ def build_erp_seed(cfg: Scenario, data: dict[str, list[dict]], rng: random.Rando
         level = int(case["write_level"][1])
         state = case["ticket_state"]
         timeline = TIMELINES[state]
+        ticket_roles = approval_roles(
+            level, Decimal(case["amount"]), case["touches_fund"] == "true", state
+        )
         ticket_events: list[dict] = []
         prev_hash = "0" * 64
         seq = 1
@@ -1945,6 +1966,14 @@ def build_erp_seed(cfg: Scenario, data: dict[str, list[dict]], rng: random.Rando
             event_time = event_time + timedelta(hours=rng.randint(3, 30))
             trace = hashlib.sha256(f"{cfg.code}:{case['ticket_no']}:{seq}".encode()).hexdigest()[:32]
             h = _event_hash(prev_hash, seq, "transition", current, target, {"reason": case["story"]}, trace)
+            if target in ("执行中", "已驳回"):
+                actor_id = USERS[ticket_roles[-1]] if ticket_roles else USERS["approver"]
+            elif target in ("待审批", "待确认", "计划中"):
+                actor_id = USERS["initiator"]
+            else:
+                # 校验/完成/补偿/回滚/人工处置/锁定/终止：执行器、补偿 worker、
+                # 定时巡检或恢复链路，种子没有人类操作人，记系统主体。
+                actor_id = SYSTEM_ACTOR
             ticket_events.append(
                 {
                     "id": uid("event", cfg.code, case["ticket_no"], str(seq)),
@@ -1954,7 +1983,7 @@ def build_erp_seed(cfg: Scenario, data: dict[str, list[dict]], rng: random.Rando
                     "event_type": "transition",
                     "from_state": current,
                     "to_state": target,
-                    "actor_id": USERS["approver"] if target in ("执行中", "已驳回") else USERS["initiator"],
+                    "actor_id": actor_id,
                     "payload": {"reason": case["story"]},
                     "trace_id": trace,
                     "prev_hash": prev_hash,
@@ -2119,17 +2148,8 @@ def build_erp_seed(cfg: Scenario, data: dict[str, list[dict]], rng: random.Rando
         # 审批记录
         if "待审批" in timeline:
             amount_value = Decimal(case["amount"])
-            roles: list[str] = ["reviewer"] if level == 1 else ["approver"]
-            if amount_value > Decimal("100000") or case["touches_fund"] == "true":
-                if "approver" not in roles:
-                    roles.append("approver")
-                if len(roles) < 2:
-                    roles.insert(0, "reviewer")
-            if amount_value > Decimal("500000"):
-                roles.append("cfo")
+            roles = approval_roles(level, amount_value, case["touches_fund"] == "true", state)
             decided = created + timedelta(hours=6)
-            if state == "待审批":
-                roles = roles[:-1]
             for role in roles:
                 decided = decided + timedelta(hours=3)
                 seed["approval_records"].append(
