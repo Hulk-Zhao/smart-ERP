@@ -152,6 +152,21 @@ class TicketRepository:
         row.steps.append(step)
         row.updated_at = datetime.now(UTC)
 
+    async def record_compensation(
+        self,
+        *,
+        tenant_id: UUID,
+        ticket_id: UUID,
+        compensate_seq: int,
+        state: str,
+        trace_id: str | None = None,
+    ) -> None:
+        """内存实现没有事件表：只校验归属，不产生事件（SQL 模式才落 ``ticket_event``）。"""
+
+        row = self._rows.get(ticket_id)
+        if row is None or row.tenant_id != tenant_id:
+            raise LookupError(f"工单不存在: {ticket_id}")
+
     async def get(self, *, tenant_id: UUID, ticket_id: UUID) -> TicketRecord | None:
         row = self._rows.get(ticket_id)
         if row is None or row.tenant_id != tenant_id:

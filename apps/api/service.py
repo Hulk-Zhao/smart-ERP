@@ -887,75 +887,92 @@ async def compensate_ticket(
         container.connector_meta(system)  # 缺连接器时在改状态之前就报错
 
     if ticket.state is TicketState.EXECUTING:
-        resolve_transition(
-            ticket.state,
-            TicketState.COMPENSATING,
-            "step_failed",
-            TransitionContext(fail_code=body.fail_code),
+        # 进入补偿必须走事件化 transition：``ticket_event`` 是唯一真源，直写投影在
+        # SQL 模式会 fail-closed。这条事件同时就是「进入补偿」的审计证据。
+        ticket.version = await container.tickets.transition(
+            tenant_id=session.tenant_id,
+            ticket_id=ticket.ticket_id,
+            target=TicketState.COMPENSATING,
+            trigger="step_failed",
+            context=TransitionContext(fail_code=body.fail_code),
+            actor_id=session.user_id,
         )
         ticket.state = TicketState.COMPENSATING
-        ticket.version += 1
-        await container.tickets.save(ticket)
 
     executed: list[TicketStepOut] = []
     manual_tasks: list[str] = []
     # 同一份白名单交给写闸：补偿入参也必须在租约范围内，不能只靠 _authorize 走过场。
     narrowed_fields = _lease_narrowed_fields(grant)
-    for system, items in grouped:
-        gateway = container.gateway_for(
-            system,
-            str(ticket.ticket_id),
-            _ticket_facts(ticket),
-            narrowed_fields=narrowed_fields,
-        )
-        scene = container.scene_for(ticket.scene_code, max_level)
-        service = RollbackService(gateway=gateway, ledger=container.ledger, scene=scene)
-        result = await service.execute(
-            RollbackPlan(ticket_id=plan.ticket_id, items=tuple(items)),
-            confirmed_manual=body.confirmed_manual,
-            # C1：回滚他人工单时理由/操作者/角色随回滚影像一起留痕；自己发起的工单不多写。
-            reason=(body.reason or "") if rollback_other else "",
-            actor_id=session.user_id if rollback_other else None,
-            actor_roles=tuple(sorted(session.roles)) if rollback_other else (),
-        )
-        for done in result.executed:
-            executed.append(
-                TicketStepOut(
-                    step_no=done.item.step.step_no,
-                    step_id=done.item.step.step_id,
-                    action_key=done.item.action_key,
-                    system=done.item.step.audit_image.system,
-                    object_type=done.item.step.audit_image.object_type,
-                    object_id=done.item.step.audit_image.object_id,
-                    state="rolled_back",
-                    level=done.level.name,
-                    idem_key=done.item.step.idem_key,
-                    executed_at=done.audit_image.created_at,
-                )
+    try:
+        for system, items in grouped:
+            gateway = container.gateway_for(
+                system,
+                str(ticket.ticket_id),
+                _ticket_facts(ticket),
+                narrowed_fields=narrowed_fields,
             )
-        manual_tasks.extend(
-            f"step#{task.step_id}:{task.action_key}:{task.reason}"
-            for task in result.manual_tasks
+            scene = container.scene_for(ticket.scene_code, max_level)
+            service = RollbackService(
+                gateway=gateway, ledger=container.ledger, scene=scene
+            )
+            result = await service.execute(
+                RollbackPlan(ticket_id=plan.ticket_id, items=tuple(items)),
+                confirmed_manual=body.confirmed_manual,
+                # C1：回滚他人工单时理由/操作者/角色随回滚影像一起留痕；自己发起的工单不多写。
+                reason=(body.reason or "") if rollback_other else "",
+                actor_id=session.user_id if rollback_other else None,
+                actor_roles=tuple(sorted(session.roles)) if rollback_other else (),
+            )
+            for done in result.executed:
+                executed.append(
+                    TicketStepOut(
+                        step_no=done.item.step.step_no,
+                        step_id=done.item.step.step_id,
+                        action_key=done.item.action_key,
+                        system=done.item.step.audit_image.system,
+                        object_type=done.item.step.audit_image.object_type,
+                        object_id=done.item.step.audit_image.object_id,
+                        state="rolled_back",
+                        level=done.level.name,
+                        idem_key=done.item.step.idem_key,
+                        executed_at=done.audit_image.created_at,
+                    )
+                )
+            manual_tasks.extend(
+                f"step#{task.step_id}:{task.action_key}:{task.reason}"
+                for task in result.manual_tasks
+            )
+    except Exception:
+        # 外部回写中途失败不能静默：留一条 failed 补偿事件（不改工单状态，允许重试）。
+        await container.tickets.record_compensation(
+            tenant_id=session.tenant_id,
+            ticket_id=ticket.ticket_id,
+            compensate_seq=ticket.version,
+            state="failed",
         )
+        raise
 
     if manual_tasks:
-        resolve_transition(
-            TicketState.COMPENSATING,
-            TicketState.MANUAL_REQUIRED,
-            "compensation_failed",
-            TransitionContext(compensation_failed=len(manual_tasks)),
+        # 补偿失败也是状态事实：用事件化 transition 落「需人工处置」，不直写投影。
+        ticket.version = await container.tickets.transition(
+            tenant_id=session.tenant_id,
+            ticket_id=ticket.ticket_id,
+            target=TicketState.MANUAL_REQUIRED,
+            trigger="compensation_failed",
+            context=TransitionContext(compensation_failed=len(manual_tasks)),
+            actor_id=session.user_id,
         )
         ticket.state = TicketState.MANUAL_REQUIRED
     else:
-        resolve_transition(
-            TicketState.COMPENSATING,
-            TicketState.ROLLED_BACK,
-            "all_compensated",
-            TransitionContext(compensation_failed=0),
+        ticket.version = await container.tickets.transition(
+            tenant_id=session.tenant_id,
+            ticket_id=ticket.ticket_id,
+            target=TicketState.ROLLED_BACK,
+            trigger="all_compensated",
+            context=TransitionContext(compensation_failed=0),
+            actor_id=session.user_id,
         )
         ticket.state = TicketState.ROLLED_BACK
-    ticket.version += 1
-    await container.tickets.save(ticket)
 
     return ActionOut(
         ticket_id=ticket.ticket_id,
