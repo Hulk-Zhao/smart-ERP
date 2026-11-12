@@ -946,4 +946,39 @@ reset 后也没有它们的冲销回执。**不要说「桩上能查到冲销」
   （§9.5 已改，`dddddddd` 留作类目闸反例）。
 - 对账跑一次会在 `erp.recon_batch` 留下新批次（本次 `bb2839fb…`），复位重灌后清掉。
 
+## 11. 机器重启后怎么恢复
+
+2026-11-12 早晨实测两件事：引擎重启后业务容器自动回来了，但 **PG 没回来**；
+照抄一条 `up -d` 又会**静默什么都不做**。按下面顺序恢复：
+
+```bash
+# 1) 起引擎（Docker Desktop / systemctl start docker）
+docker info >/dev/null && echo engine-ok
+
+# 2) 起 PG —— 它不在本 compose 工程(§24 说明复用外部 PG)，没有 restart 策略
+docker start s8-demo-pg            # 若已在跑会报 already running，忽略即可
+docker exec s8-demo-pg pg_isready -U erp_migrator -d smart_erp   # 期望 accepting
+
+# 3) 带 profile 起业务栈
+docker compose --profile demo up -d --no-build
+
+# 4) 健康检查两条
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8010/healthz   # 期望 200
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8088/          # 期望 200
+
+# 5) 桩 reset（必须）
+curl -s -X POST http://127.0.0.1:8021/stub/reset                          # 期望 {"ok": true}
+```
+
+- **`up -d` 返回 `no service selected` 不是没有服务**，是没带 `--profile demo`
+  （`api`/`web`/`connector-gw`/`u8-stub` 在 `demo` 与 `full` 两档，`worker` 只在 `demo`）。
+- **不需要重灌种子**：业务数据在 PG 卷里，重启不丢。重灌是「换 sha / 改数据」才做的事。
+- **桩必须 reset**：`u8-stub` 是内存态，重启后回执/请求日志/单号计数全清空，
+  reset 让起点确定（写单从 `PO-STUB-000001` 开始）。
+- 若 PG 也挂了且不可恢复：先按 §10.2 第 1～3 条确认，再`demo/load.py --all` 重灌。
+- **部署拓扑冲突（不改）**：PG 不在 `deploy/smart-erp/docker-compose.yml` 内
+  （复用 hulkai 的 PG），所以拿不到 compose 的 `restart: unless-stopped`。
+  要让它随引擎自启，只有两条路：给它单独 `docker update --restart unless-stopped`，
+  或把 PG 并进本工程——后者改拓扑，需集成决策，本 RUNBOOK 不自行改。
+
 
