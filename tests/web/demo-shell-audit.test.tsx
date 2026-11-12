@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { configureApi, resetApiConfig } from '../../web/src/api/config';
 import { TicketDetailPage } from '../../web/src/pages/TicketDetailPage';
@@ -69,7 +69,8 @@ describe('审计链与审计影像可下钻', () => {
     renderPage(<TicketDetailPage />, { route: `/tickets/${W3_TICKET_ID}`, path: '/tickets/:ticketId' });
 
     const link = await screen.findByTestId('audit-chain-detail-link');
-    expect(link.textContent).toContain('查看影像明细（1 条）');
+    // 影像列表是异步加载：等计数从 0 变为 1，避免时序抖动导致假红。
+    await waitFor(() => expect(link.textContent).toContain('查看影像明细（1 条）'));
 
     const row = await screen.findByTestId('audit-image-row');
     expect(screen.queryByTestId('audit-image-detail')).toBeNull();
