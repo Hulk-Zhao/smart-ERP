@@ -81,6 +81,16 @@ class TicketStorePort(Protocol):
         trace_id: str | None = None,
     ) -> None: ...
 
+    async def record_compensation(
+        self,
+        *,
+        tenant_id: UUID,
+        ticket_id: UUID,
+        compensate_seq: int,
+        state: str,
+        trace_id: str | None = None,
+    ) -> None: ...
+
     async def list(
         self,
         *,
@@ -236,6 +246,31 @@ class SqlTicketRepository:
             object_id=step.object_id or None,
             audit_image_id=step.audit_image_id,
             executed_at=step.executed_at,
+            trace_id=trace_id,
+        )
+
+    async def record_compensation(
+        self,
+        *,
+        tenant_id: UUID,
+        ticket_id: UUID,
+        compensate_seq: int,
+        state: str,
+        trace_id: str | None = None,
+    ) -> None:
+        # tenant 是查询条件：补偿事件也只能写进本租户的链。
+        async with self._factory()() as session:
+            owned = await session.scalar(
+                sa.select(Ticket.id).where(
+                    Ticket.id == ticket_id, Ticket.tenant_id == tenant_id
+                )
+            )
+        if owned is None:
+            raise TicketNotFound(f"工单不存在: {ticket_id}")
+        await self._events().record_compensation(
+            ticket_id=ticket_id,
+            compensate_seq=compensate_seq,
+            state=state,
             trace_id=trace_id,
         )
 

@@ -107,6 +107,11 @@ services:
       ERP_LLM_MODEL: ${ERP_LLM_MODEL:-}
       ERP_LLM_TIMEOUT_SECONDS: ${ERP_LLM_TIMEOUT_SECONDS:-60}
       ERP_ASSISTANT_RATE_LIMIT_PER_MINUTE: ${ERP_ASSISTANT_RATE_LIMIT_PER_MINUTE:-10}
+      # 同步回滚入口（apps/api/rollback_gate.py）：两个档位都显式下发，默认关闭。
+      # 补偿会在外部系统留下冲销记录，未经演练/未确认事件留痕前不得默认打开。
+      # 演示现场要点通时：在 .env 设 ERP_ROLLBACK_SYNC_ENABLED=true 后
+      # `--force-recreate api`（restart 不重读 env）；关闭时仍返回 503 且零副作用。
+      ERP_ROLLBACK_SYNC_ENABLED: "${ERP_ROLLBACK_SYNC_ENABLED:-false}"
       # full 档的 Prometheus 抓这里；默认开启（内网端点，nginx 对 /erp/api/metrics 直接 404）
       ERP_METRICS_ENABLED: "${ERP_METRICS_ENABLED:-true}"
       ERP_METRICS_PATH: "${ERP_METRICS_PATH:-/metrics}"
