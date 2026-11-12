@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
+from apps.agents.events import EventRecord
 from apps.agents.state_machine import TransitionContext, resolve_transition
 from apps.api.pagination import decode_cursor, encode_cursor
 from apps.platform.contracts.ticket import TicketState
@@ -144,8 +145,10 @@ class TicketRepository:
         ticket_id: UUID,
         step: TicketStepRecord,
         request_hash: str,
+        actor_id: UUID | None = None,
         trace_id: str | None = None,
     ) -> None:
+        # 内存实现没有事件表，actor_id 只为与 SQL 适配器同签名而存在。
         row = self._rows.get(ticket_id)
         if row is None or row.tenant_id != tenant_id:
             raise LookupError(f"工单不存在: {ticket_id}")
@@ -166,6 +169,16 @@ class TicketRepository:
         row = self._rows.get(ticket_id)
         if row is None or row.tenant_id != tenant_id:
             raise LookupError(f"工单不存在: {ticket_id}")
+
+    async def list_events(
+        self, *, tenant_id: UUID, ticket_id: UUID
+    ) -> list[EventRecord]:
+        """内存实现没有事件表：只校验归属，返回空链（SQL 模式才读 ``ticket_event``）。"""
+
+        row = self._rows.get(ticket_id)
+        if row is None or row.tenant_id != tenant_id:
+            raise LookupError(f"工单不存在: {ticket_id}")
+        return []
 
     async def get(self, *, tenant_id: UUID, ticket_id: UUID) -> TicketRecord | None:
         row = self._rows.get(ticket_id)

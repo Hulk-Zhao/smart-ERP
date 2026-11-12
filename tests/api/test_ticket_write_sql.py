@@ -28,6 +28,7 @@ from alembic.config import Config
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from apps.agents.events import SYSTEM_ACTOR_ID
 from apps.agents.state_machine import TransitionContext
 from apps.agents.store import TicketStore
 from apps.api.store import PendingWrite, TicketRecord
@@ -203,6 +204,12 @@ def test_approve_writes_event_chain_not_projection_directly(env, session_factory
         "step",
         "transition",
     ]
+    # actor 补齐口径：created 取发起人；执行器/内部路径取系统主体；
+    # HTTP 审批触发的 step 与迁移取会话用户。
+    assert events[0].actor_id == str(INITIATOR)
+    assert events[1].actor_id == str(SYSTEM_ACTOR_ID)
+    assert events[2].actor_id == str(INITIATOR)
+    assert events[3].actor_id == str(INITIATOR)
 
     projection = asyncio.run(store.rebuild_projection(created.ticket_id))
     assert projection.state == TicketState.EXECUTING

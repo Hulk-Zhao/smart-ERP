@@ -18,7 +18,14 @@ from apps.api.deps import (
     SessionDep,
 )
 from apps.api.errors import translated
-from apps.api.schemas import ActionIn, ActionOut, Page, TicketDetailOut, TicketOut
+from apps.api.schemas import (
+    ActionIn,
+    ActionOut,
+    Page,
+    TicketDetailOut,
+    TicketEventsOut,
+    TicketOut,
+)
 
 router = APIRouter(prefix="/tickets", tags=["工单"])
 
@@ -97,6 +104,27 @@ async def get_ticket(
 ):
     with translated():
         return await service.get_ticket(
+            container, session, scope_in=scope.payload, ticket_id=ticket_id
+        )
+
+
+@router.get(
+    "/{ticket_id}/events",
+    response_model=TicketEventsOut,
+    summary="工单事件链（只读）",
+    description=(
+        "按 chain_seq 升序返回 ticket_event，并复用 replay 给出链校验结论"
+        "（ok / 首个断点 broken_at / head_hash）。权限与租户口径同工单详情。"
+    ),
+)
+async def list_ticket_events(
+    ticket_id: UUID,
+    container: ContainerDep,
+    session: SessionDep,
+    scope: ScopeDep,
+):
+    with translated():
+        return await service.list_ticket_events(
             container, session, scope_in=scope.payload, ticket_id=ticket_id
         )
 
