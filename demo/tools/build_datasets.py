@@ -30,7 +30,7 @@ import json
 import random
 import sys
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
@@ -43,10 +43,15 @@ if str(REPO_ROOT) not in sys.path:
 
 # 生产哈希口径唯一来源（与 apps/audit/ledger.py 追加时同一套函数）。
 from apps.audit.ledger import compute_field_diff  # noqa: E402
+from apps.api.recon_snapshot import UnitPriceSource, snapshot_from_batch  # noqa: E402
+from apps.api.service import _batch_view, _metrics_out, _missing_out  # noqa: E402
+from apps.api.store import ReconBatchRecord  # noqa: E402
 from apps.platform.contracts.audit import (  # noqa: E402
     AuditImage,
     compute_image_hash,
 )
+from apps.recon.engine import reconcile  # noqa: E402
+from apps.recon.loader import build_request  # noqa: E402
 
 SCEN_DIR = ROOT / "scenarios"
 TODAY = date(2026, 11, 11)
@@ -67,20 +72,6 @@ USER_NAMES = {
     "cfo": "宋知微（财务负责人）",
 }
 
-DIFF_TYPES = ("unit_price", "qty", "scrap", "uom", "tax", "missing_doc", "duplicate", "rounding_tolerance")
-DIFF_TYPE_CN = {
-    "unit_price": "单价不一致",
-    "qty": "数量不符",
-    "scrap": "报废未扣",
-    "uom": "单位换算",
-    "tax": "税率口径",
-    "missing_doc": "缺单",
-    "duplicate": "重复计费",
-    "rounding_tolerance": "金额舍入容差",
-    # candidate / unparseable 是「状态」而非契约新增差异类型：归入最接近的既有类型。
-    "candidate": "数量不符",
-    "unparseable": "单位换算",
-}
 DIFF_OWNER = {
     "unit_price": "supplier",
     "qty": "supplier",
@@ -132,12 +123,6 @@ def stable_seed(code: str) -> int:
 
 def uid(*parts: str) -> UUID:
     return uuid5(NAMESPACE_URL, "smart-erp-demo/" + "/".join(parts))
-
-
-def pct_text(numerator: int, denominator: int) -> str:
-    if denominator == 0:
-        return "0"
-    return format(Decimal(numerator) / Decimal(denominator), ".6f").rstrip("0").rstrip(".") or "0"
 
 
 # --------------------------------------------------------------------------- 配置
@@ -1211,89 +1196,125 @@ STATEMENT_STATUS = {
     "our_missing": ("我方未匹配", False, "unmatched"),
 }
 
-TYPE_PLAN = (
-    "matched", "matched", "unit_price", "qty", "scrap", "uom", "tax",
-    "missing_doc", "duplicate", "rounding_tolerance", "matched", "candidate", "unparseable",
+#: 默认 scope 只看「最新期间」，因此最新期间铺 12 条（前端 10 条/页，可翻两页）；
+#: 另外两条放在前两个期间，用于演示切换期间后列表仍有内容。
+RECON_BATCH_PROFILES = (
+    # 最新期间 12 条：前端每页 10 条，必须能翻到第二页。
+    ("clean", 0),
+    ("clean", 0),
+    ("showcase", 0),
+    ("showcase", 0),
+    ("clean", 0),
+    ("no_conclusion", 0),
+    ("clean", 0),
+    ("showcase", 0),
+    ("clean", 0),
+    ("showcase", 0),
+    ("clean", 0),
+    ("no_conclusion", 0),
+    # 前两个期间各 1 条，用于演示期间切换后列表仍有内容。
+    ("showcase", -2),
+    ("clean", -1),
 )
+RECON_SUPPLIERS_PER_BATCH = 6
+RECON_TAX_RATES = {"VAT13": "0.13", "VAT9": "0.09", "IMPORT13": "0.13", "GST9": "0.09", "EXPORT0": "0"}
 
 
 def build_recon_cases(cfg: Scenario, data: dict[str, list[dict]], rng: random.Random) -> None:
-    receipts_by_supplier: dict[str, list[tuple[dict, dict]]] = defaultdict(list)
+    """铺批次输入：最新期间 6 条 + 前两个期间各 1 条。
+
+    这里只造「我方单据 / 供应商对账单」两侧的原始行；批次的 status、metrics、
+    差异与证据全部由 ``apps.recon.engine.reconcile`` 跑出来，见
+    :func:`build_engine_batches`。禁止在这里手写批次结论。
+    """
+
+    latest_period = cfg.periods[-1]
+    cutoff = f"{latest_period}-28"
     po_by_no = {row["po_no"]: row for row in data["purchase_order"]}
+    po_lines_by_no: dict[str, list[dict]] = defaultdict(list)
+    for line in data["purchase_order_line"]:
+        po_lines_by_no[line["po_no"]].append(line)
+    for lines in po_lines_by_no.values():
+        lines.sort(key=lambda row: int(row["line_no"]))
+    receipts_by_supplier: dict[str, list[tuple[dict, dict]]] = defaultdict(list)
     for receipt in data["goods_receipt"]:
         po = po_by_no[receipt["po_no"]]
-        if po["order_date"] <= f"{cfg.periods[-1]}-28":
-            receipts_by_supplier[receipt["supplier_code"]].append((receipt, po))
-    suppliers = [row for row in data["supplier"] if len(receipts_by_supplier[row["supplier_code"]]) >= 2]
-    if len(suppliers) < 8:
-        suppliers = data["supplier"][:10]
-    for batch_idx in range(cfg.recon_batches):
-        period = cfg.periods[-cfg.recon_batches + batch_idx]
-        batch_code = f"RB-{period.replace('-', '')}-{cfg.code.split('-')[0].upper()}-{batch_idx + 1:02d}"
-        chosen = rng.sample(suppliers, k=min(8, len(suppliers)))
-        for s_idx, supplier in enumerate(chosen):
-            pairs = receipts_by_supplier[supplier["supplier_code"]]
-            receipt, po = pairs[(batch_idx + s_idx) % len(pairs)]
-            po_lines = [row for row in data["purchase_order_line"] if row["po_no"] == po["po_no"]]
-            statement_no = f"ST-{period.replace('-', '')}-{s_idx + 1:03d}"
-            for line_idx in range(13):
-                kind = TYPE_PLAN[line_idx]
-                po_line = po_lines[line_idx % len(po_lines)]
-                our_qty = Decimal(po_line["qty"])
-                base_amount = money(our_qty * Decimal(po_line["unit_price"]))
-                if kind == "matched":
-                    our_amount, sup_amount = base_amount, base_amount
-                elif kind == "unit_price":
-                    our_amount, sup_amount = base_amount, money(base_amount * Decimal("1.035"))
-                elif kind == "qty":
-                    our_amount, sup_amount = base_amount, money(base_amount * Decimal("1.062"))
-                elif kind == "scrap":
-                    our_amount, sup_amount = base_amount, money(base_amount * Decimal("1.025"))
-                elif kind == "uom":
-                    our_amount, sup_amount = base_amount, money(base_amount * Decimal("12"))
-                elif kind == "tax":
-                    our_amount, sup_amount = base_amount, money(base_amount * Decimal("1.030"))
-                elif kind == "missing_doc":
-                    our_amount, sup_amount = Decimal("0"), base_amount
-                elif kind == "duplicate":
-                    our_amount, sup_amount = base_amount, money(base_amount * Decimal("2"))
-                elif kind == "rounding_tolerance":
-                    our_amount, sup_amount = base_amount, money(base_amount + Decimal("0.03"))
-                elif kind == "candidate":
-                    our_amount, sup_amount = base_amount, money(base_amount * Decimal("1.018"))
-                elif kind == "unparseable":
-                    our_amount, sup_amount = base_amount, money(base_amount * Decimal("1.5"))
-                else:  # our_missing
-                    our_amount, sup_amount = base_amount, Decimal("0")
+        if po["order_date"] <= cutoff:
+            receipts_by_supplier[receipt["supplier_code"]].append((po, receipt))
+    for entries in receipts_by_supplier.values():
+        entries.sort(key=lambda pair: (pair[0]["order_date"], pair[0]["po_no"]))
+
+    supplier_rows = {row["supplier_code"]: row for row in data["supplier"]}
+    pool = sorted(code for code, entries in receipts_by_supplier.items() if len(entries) >= 2)
+    if len(pool) < RECON_SUPPLIERS_PER_BATCH:
+        pool = sorted(supplier_rows)
+
+    for batch_idx, (profile, period_offset) in enumerate(RECON_BATCH_PROFILES):
+        period = cfg.periods[-1 + period_offset]
+        batch_code = (
+            f"RB-{period.replace('-', '')}-"
+            f"{cfg.code.split('-')[0].upper()}-{batch_idx + 1:02d}"
+        )
+        chosen = [
+            pool[(batch_idx * RECON_SUPPLIERS_PER_BATCH + offset) % len(pool)]
+            for offset in range(RECON_SUPPLIERS_PER_BATCH)
+        ]
+        for s_idx, supplier_code in enumerate(chosen):
+            supplier = supplier_rows[supplier_code]
+            entries = receipts_by_supplier.get(supplier_code) or []
+            if not entries:
+                continue
+            statement_no = f"ST-{period.replace('-', '')}-{batch_idx + 1:02d}{s_idx + 1:02d}"
+            # 每条供应商行都要换一个物料，否则同单号同物料会被引擎判成重复计费。
+            available: list[tuple[dict, dict, dict]] = []
+            seen_items: set[str] = set()
+            for po, receipt in entries:
+                for po_line in po_lines_by_no.get(po["po_no"], []):
+                    item = po_line["item_code"]
+                    if item in seen_items:
+                        continue
+                    seen_items.add(item)
+                    available.append((po, receipt, po_line))
+            if not available:
+                continue
+            cursor = 0
+
+            def take() -> tuple[dict, dict, dict] | None:
+                nonlocal cursor
+                if cursor >= len(available):
+                    return None
+                picked = available[cursor]
+                cursor += 1
+                return picked
+
+            def add_case(
+                index: int,
+                kind: str,
+                picked: tuple[dict, dict, dict],
+                *,
+                our_qty: Decimal | None,
+                sup_qty: Decimal | None,
+                our_amount: Decimal,
+                sup_amount: Decimal,
+                sup_line_no: int,
+                our_ref: str,
+                supplier_ref: str,
+            ) -> None:
                 status, needs_manual, match_type = STATEMENT_STATUS[kind]
-                qty_mine: str | None = str(money4(our_qty))
-                qty_supplier: str | None = str(money4(our_qty))
-                if kind == "qty":
-                    qty_supplier = str(money4(our_qty + Decimal(rng.randint(2, 18))))
-                if kind == "missing_doc":
-                    qty_mine = ""
-                if kind == "our_missing":
-                    qty_supplier = ""
-                our_ref = (
-                    f"u8:{po['po_no']}#{po_line['line_no']}"
-                    if kind == "missing_doc"
-                    else f"u8:{receipt['receipt_no']}#{po_line['line_no']}"
-                )
-                case_id = f"{batch_code}-{supplier['supplier_code']}-{line_idx + 1:02d}"
                 data["recon_case"].append(
                     {
                         "scenario": cfg.code,
-                        "case_id": case_id,
+                        "case_id": f"{batch_code}-{supplier_code}-{index:03d}",
                         "batch_code": batch_code,
                         "period": period,
-                        "supplier_code": supplier["supplier_code"],
+                        "supplier_code": supplier_code,
                         "supplier_name": supplier["supplier_name"],
-                        "line_no": line_idx + 1,
+                        "line_no": index,
                         "our_ref": our_ref,
-                        "supplier_ref": f"statement:{statement_no}#{line_idx + 1}",
-                        "item_code": po_line["item_code"],
-                        "qty_mine": qty_mine,
-                        "qty_supplier": qty_supplier,
+                        "supplier_ref": supplier_ref,
+                        "item_code": picked[2]["item_code"],
+                        "qty_mine": "" if our_qty is None else str(money4(our_qty)),
+                        "qty_supplier": "" if sup_qty is None else str(money4(sup_qty)),
                         "our_amount": str(money(our_amount)),
                         "supplier_amount": str(money(sup_amount)),
                         "diff_amount": str(money(sup_amount - our_amount)),
@@ -1303,28 +1324,339 @@ def build_recon_cases(cfg: Scenario, data: dict[str, list[dict]], rng: random.Ra
                         "line_status": status,
                         "needs_manual": "true" if needs_manual else "false",
                         "confidence": {
-                            "matched": "0.9990", "rounding_tolerance": "0.9980", "duplicate": "0.9940",
-                            "missing_doc": "0.9910", "our_missing": "0.9910",
-                        }.get(kind, format(Decimal(rng.randint(60, 95)) / Decimal(100), ".4f")),
+                            "matched": "0.9990",
+                            "duplicate": "0.9940",
+                            "missing_doc": "0.9910",
+                            "our_missing": "0.9910",
+                        }.get(kind, "0.8200"),
                         "note": {
                             "matched": "单据号直配，金额一致",
                             "unit_price": "供应商调价未同步价目表，按合同价复核",
                             "qty": "到货短装，供应商按订单数量开票",
-                            "scrap": "报废扣减未在结算单体现",
-                            "uom": "供应商按箱计价，我方按只入库（1 箱 = 12 只）",
-                            "tax": "供应商按 9% 计税，合同约定 13%",
-                            "missing_doc": "结算单有行，无对应收货单",
-                            "duplicate": "同一收货单被重复开票",
-                            "rounding_tolerance": "分摊尾差在 0.05 元容差内",
-                            "candidate": "品名规格相近，候选待人工确认",
-                            "unparseable": "结算单行格式异常，无法解析数量",
+                            "missing_doc": "结算单有行，我方无对应采购/收货单",
+                            "duplicate": "同一单据同物料被重复列示",
                             "our_missing": "我方已收货，供应商结算单漏列",
                         }[kind],
                         "_match_type": match_type,
-                        "_receipt_no": receipt["receipt_no"],
-                        "_po_no": po["po_no"],
+                        "_profile": profile,
+                        "_po_no": picked[0]["po_no"],
+                        "_receipt_no": picked[1]["receipt_no"],
                     }
                 )
+
+            def add_pair(kind: str, picked: tuple[dict, dict, dict], index: int) -> None:
+                po, _receipt, po_line = picked
+                qty = Decimal(po_line["qty"])
+                price = Decimal(po_line["unit_price"])
+                tax_rate = RECON_TAX_RATES.get(po_line["tax_code"], "0.13")
+                our_ref = f"u8:{po['po_no']}#{po_line['line_no']}"
+                supplier_ref = f"statement:{statement_no}#{po_line['line_no']}"
+                if kind == "matched":
+                    add_case(
+                        index, kind, picked,
+                        our_qty=qty, sup_qty=qty,
+                        our_amount=money(qty * price),
+                        sup_amount=money(qty * price),
+                        sup_line_no=int(po_line["line_no"]),
+                        our_ref=our_ref, supplier_ref=supplier_ref,
+                    )
+                elif kind == "unit_price":
+                    sup_price = money4(price * Decimal("1.035"))
+                    add_case(
+                        index, kind, picked,
+                        our_qty=qty, sup_qty=qty,
+                        our_amount=money(qty * price),
+                        sup_amount=money(qty * sup_price),
+                        sup_line_no=int(po_line["line_no"]),
+                        our_ref=our_ref, supplier_ref=supplier_ref,
+                    )
+                elif kind == "qty":
+                    sup_qty = qty + Decimal(rng.randint(2, 18))
+                    add_case(
+                        index, kind, picked,
+                        our_qty=qty, sup_qty=sup_qty,
+                        our_amount=money(qty * price),
+                        sup_amount=money(sup_qty * price),
+                        sup_line_no=int(po_line["line_no"]),
+                        our_ref=our_ref, supplier_ref=supplier_ref,
+                    )
+                elif kind == "duplicate":
+                    # 我方一行；供应商同单同物料列两行，第二行由引擎判重复计费。
+                    amount = money(qty * price)
+                    add_case(
+                        index, kind, picked,
+                        our_qty=qty, sup_qty=qty,
+                        our_amount=amount, sup_amount=amount,
+                        sup_line_no=int(po_line["line_no"]),
+                        our_ref=our_ref, supplier_ref=supplier_ref,
+                    )
+                    add_case(
+                        index + 1, "duplicate", picked,
+                        our_qty=None, sup_qty=qty,
+                        our_amount=Decimal("0"), sup_amount=amount,
+                        sup_line_no=int(po_line["line_no"]) + 50,
+                        our_ref="",
+                        supplier_ref=f"statement:{statement_no}#{int(po_line['line_no']) + 50}",
+                    )
+                elif kind == "missing_doc":
+                    amount = money(qty * price)
+                    add_case(
+                        index, kind, picked,
+                        our_qty=None, sup_qty=qty,
+                        our_amount=Decimal("0"), sup_amount=amount,
+                        sup_line_no=1,
+                        our_ref=our_ref,
+                        supplier_ref=f"statement:{statement_no}#1",
+                    )
+                elif kind == "our_missing":
+                    amount = money(qty * price)
+                    add_case(
+                        index, kind, picked,
+                        our_qty=qty, sup_qty=None,
+                        our_amount=amount, sup_amount=Decimal("0"),
+                        sup_line_no=1,
+                        our_ref=our_ref,
+                        supplier_ref="",
+                    )
+                _ = tax_rate
+
+            index = 1
+            if profile == "clean":
+                for _ in range(4):
+                    picked = take()
+                    if picked is None:
+                        break
+                    add_pair("matched", picked, index)
+                    index += 1
+            elif profile == "no_conclusion":
+                for _ in range(2):
+                    picked = take()
+                    if picked is None:
+                        break
+                    add_pair("matched", picked, index)
+                    index += 1
+            else:  # showcase：五类必需差异 + 匹配行
+                for kind in ("matched", "unit_price", "qty", "duplicate", "missing_doc", "our_missing"):
+                    picked = take()
+                    if picked is None:
+                        break
+                    add_pair(kind, picked, index)
+                    index += 2 if kind == "duplicate" else 1
+
+
+def _engine_master_data(
+    data: dict[str, list[dict]],
+    cases: list[dict],
+    *,
+    omit_supplier: str | None = None,
+) -> dict:
+    supplier_rows = {row["supplier_code"]: row for row in data["supplier"]}
+    item_rows = {row["item_code"]: row for row in data["item"]}
+    supplier_codes = sorted({case["supplier_code"] for case in cases})
+    item_codes = sorted({case["item_code"] for case in cases})
+    return {
+        "suppliers": [
+            {
+                "code": code,
+                "name": supplier_rows[code]["supplier_name"],
+                "tax_no": f"91310000{code.replace('-', '')}X",
+            }
+            for code in supplier_codes
+            if code != omit_supplier
+        ],
+        "items": [
+            {
+                "code": code,
+                "name": item_rows[code]["item_name"],
+                "base_unit": item_rows[code]["uom"],
+                "spec": item_rows[code]["spec"],
+            }
+            for code in item_codes
+        ],
+        "unit_conversions": [],
+    }
+
+
+def _engine_line(
+    *,
+    system: str,
+    ref: str,
+    supplier_code: str,
+    item_code: str,
+    qty: str,
+    unit: str,
+    unit_price: str,
+    amount: str,
+    tax_rate: str,
+    period: str,
+) -> dict:
+    doc, _, raw_line = ref.partition("#")
+    _, _, doc = doc.partition(":")
+    return {
+        "system": system,
+        "doc_no": doc,
+        "line_no": int(raw_line or 1),
+        "supplier_code": supplier_code,
+        "item_code": item_code,
+        "qty": qty,
+        "unit": unit,
+        "unit_price": unit_price,
+        "amount": amount,
+        "tax_rate": tax_rate,
+        "period": period,
+    }
+
+
+def build_engine_batches(cfg: Scenario, data: dict[str, list[dict]], rng: random.Random) -> None:
+    """把 ``recon_case`` 转成引擎输入并真实执行 ``reconcile``。
+
+    批次的 status / metrics / result_view / 差异行全部来自引擎返回值；
+    这里只决定「喂哪些原始行」，不写任何看起来对的结论。
+    """
+
+    item_rows = {row["item_code"]: row for row in data["item"]}
+    cases_by_batch: dict[str, list[dict]] = defaultdict(list)
+    for case in data["recon_case"]:
+        cases_by_batch[case["batch_code"]].append(case)
+
+    engine_batches: dict[str, dict] = {}
+    for batch_idx, (batch_code, cases) in enumerate(sorted(cases_by_batch.items())):
+        period = cases[0]["period"]
+        profile = cases[0].get("_profile", "showcase")
+        omit = cases[0]["supplier_code"] if profile == "no_conclusion" else None
+        our_lines: list[dict] = []
+        supplier_lines: list[dict] = []
+        for case in sorted(cases, key=lambda row: row["line_no"]):
+            item = item_rows[case["item_code"]]
+            kind = case["diff_type"]
+            tax_rate = RECON_TAX_RATES.get(item["tax_code"], "0.13")
+            our_qty = Decimal(case["qty_mine"]) if case["qty_mine"] else None
+            sup_qty = Decimal(case["qty_supplier"]) if case["qty_supplier"] else None
+            our_amount = Decimal(case["our_amount"])
+            sup_amount = Decimal(case["supplier_amount"])
+            if our_qty is not None:
+                our_price = money4(our_amount / our_qty) if our_qty else "0"
+                our_lines.append(
+                    _engine_line(
+                        system="u8",
+                        ref=case["our_ref"],
+                        supplier_code=case["supplier_code"],
+                        item_code=case["item_code"],
+                        qty=str(our_qty),
+                        unit=item["uom"],
+                        unit_price=str(our_price),
+                        amount=str(our_amount),
+                        tax_rate=tax_rate,
+                        period=period,
+                    )
+                )
+            if sup_qty is not None:
+                sup_price = money4(sup_amount / sup_qty) if sup_qty else "0"
+                supplier_lines.append(
+                    _engine_line(
+                        system="statement",
+                        ref=case["supplier_ref"],
+                        supplier_code=case["supplier_code"],
+                        item_code=case["item_code"],
+                        qty=str(sup_qty),
+                        unit=item["uom"],
+                        unit_price=str(sup_price),
+                        amount=str(sup_amount),
+                        tax_rate=tax_rate,
+                        period=period,
+                    )
+                )
+            _ = kind
+
+        raw = {
+            "scope": {
+                "org_id": cfg.orgs[0]["org_code"],
+                "period": period,
+                "system_ids": ["u8", "statement"],
+            },
+            "suppliers": sorted({case["supplier_code"] for case in cases}),
+            "options": {"tolerance": {}},
+            "master_data": _engine_master_data(data, cases, omit_supplier=omit),
+            "our_lines": our_lines,
+            "supplier_lines": supplier_lines,
+        }
+        result = reconcile(build_request(raw))
+        batch_id = uid("batch", cfg.code, batch_code)
+        period_end = date.fromisoformat(period + "-01") + timedelta(days=27)
+        created = datetime.combine(period_end + timedelta(days=12), datetime.min.time(), TZ).replace(hour=10)
+        if created.date() > TODAY - timedelta(days=2):
+            created = datetime.combine(TODAY - timedelta(days=2), datetime.min.time(), TZ).replace(hour=10)
+        metrics = _metrics_out(result.metrics)
+        record = ReconBatchRecord(
+            batch_id=batch_id,
+            tenant_id=uid("tenant", cfg.code),
+            org_id=cfg.orgs[0]["org_code"],
+            period=period,
+            system_ids=("u8", "statement"),
+            suppliers=tuple(sorted({case["supplier_code"] for case in cases})),
+            status=result.batch_status.value,
+            conclusive=result.conclusive,
+            status_reason=result.status_reason,
+            metrics=None if metrics is None else metrics.model_dump(mode="json"),
+            missing_items=tuple(
+                _missing_out(item).model_dump(mode="json") for item in result.missing_items
+            ),
+            result=result,
+            created_by=USERS["initiator"],
+            created_at=created,
+        )
+        fingerprint = hashlib.sha256(
+            json.dumps(raw, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+        ).hexdigest()
+        view = _batch_view(record)
+        snapshot = snapshot_from_batch(record, input_fingerprint=fingerprint, view=view)
+        if batch_idx % 2 == 0:
+            snapshot = replace(
+                snapshot,
+                unit_price=Decimal("0.8000"),
+                currency="CNY",
+                unit_price_source=UnitPriceSource.CONTRACT_PRICE,
+                price_book_id=uid("price", cfg.code, "CNY"),
+            )
+        else:
+            snapshot = replace(
+                snapshot,
+                unit_price=Decimal("0.6500"),
+                currency="CNY",
+                unit_price_source=UnitPriceSource.ENV_FALLBACK,
+                price_book_id=None,
+            )
+
+        diffs_by_ref = {diff.ref: diff for diff in result.diffs}
+        lines_by_ref: dict[str, object] = {}
+        for line in result.lines:
+            if line.our_ref:
+                lines_by_ref[line.our_ref] = line
+            if line.supplier_ref:
+                lines_by_ref[line.supplier_ref] = line
+        for case in cases:
+            ref = case["supplier_ref"] or case["our_ref"]
+            diff = diffs_by_ref.get(ref)
+            if diff is not None:
+                case["_engine_diff_type"] = diff.type.name.lower()
+                case["_engine_diff_amount"] = str(diff.amount.amount)
+                case["_engine_owner"] = diff.owner.value
+                case["_engine_needs_manual"] = bool(diff.needs_manual)
+            line = lines_by_ref.get(ref)
+            if line is not None:
+                case["_engine_line_status"] = line.status.value
+                case["_engine_line_id"] = None  # 落库时按 ref 关联，见 build_erp_seed
+
+        engine_batches[batch_code] = {
+            "snapshot": snapshot,
+            "record": record,
+            "view": view,
+            "period": period,
+            "profile": profile,
+            "batch_code": batch_code,
+        }
+        _ = rng
+    data["_recon_engine"] = engine_batches
 
 
 # --------------------------------------------------------------------------- 工单案例
@@ -1347,6 +1679,7 @@ TICKET_PLAN = (
     ("需人工处置", "W2", "640000.00", "ag1_reconcile", "补偿在新系统失败，转人工处置"),
     ("已锁定", "W3", "1200000.00", "ag1_reconcile", "不可逆付款指令，锁定待人工解锁"),
     ("已终止", "W1", "39000.00", "ag3_inventory_adjust", "业务取消，工单终止"),
+    ("计划中", "W1", "26000.00", "ag1_reconcile", "新识别差异，等待排期处理"),
 )
 
 TIMELINES = {
@@ -1387,8 +1720,13 @@ def build_ticket_cases(cfg: Scenario, data: dict[str, list[dict]], rng: random.R
     for idx, (state, level, amount, theme, subject) in enumerate(TICKET_PLAN):
         supplier_code = suppliers[idx % len(suppliers)]
         supplier = next(row for row in data["supplier"] if row["supplier_code"] == supplier_code)
+        engine_cases = [row for row in cases_by_supplier[supplier_code] if row.get("_engine_diff_type")]
         open_cases = [row for row in cases_by_supplier[supplier_code] if row["needs_manual"] == "true"]
-        case = open_cases[idx % len(open_cases)] if open_cases else cases_by_supplier[supplier_code][0]
+        case = (
+            engine_cases[idx % len(engine_cases)]
+            if engine_cases
+            else (open_cases[idx % len(open_cases)] if open_cases else cases_by_supplier[supplier_code][0])
+        )
         # 工单必须晚于对账批次：批次在期末 +12 天生成，工单再顺延 2-8 天。
         period_start = date.fromisoformat(case["period"] + "-01")
         created = period_start + timedelta(days=41 + idx % 7)
@@ -1419,7 +1757,11 @@ def build_ticket_cases(cfg: Scenario, data: dict[str, list[dict]], rng: random.R
                 "approver_name": USER_NAMES[approver_key],
                 "business_key": f"{cfg.code}:{case['batch_code']}:{supplier_code}:{ticket_no}",
                 "subject": f"{SCENE_TITLES[theme]} · {supplier['supplier_name']}",
-                "story": f"{subject}；关联结算单 {case['supplier_ref'].split(':')[1]}，差异 {case['diff_amount']} 元。",
+                "story": (
+                    f"{subject}；关联结算单 "
+                    f"{(case['supplier_ref'] or case['our_ref']).split(':')[1]}，"
+                    f"差异 {case.get('_engine_diff_amount', case['diff_amount'])} 元。"
+                ),
                 "created_date": iso(created),
                 "_supplier_code": supplier_code,
                 "_case_id": case["case_id"],
@@ -1459,29 +1801,6 @@ def _money_json(value: object) -> dict:
     return {"amount": str(money(value)), "currency": "CNY", "tax_included": True}
 
 
-def _evidence(case: dict, field: str) -> list[dict]:
-    items: list[dict] = []
-    if case["diff_type"] != "missing_doc":
-        items.append(
-            {
-                "system": "u8",
-                "doc_no": case["our_ref"].split(":")[1].split("#")[0],
-                "field": field,
-                "coord": {"page": 1, "bbox": [0.12, 0.28, 0.58, 0.34]},
-            }
-        )
-    if case["supplier_ref"]:
-        items.append(
-            {
-                "system": "statement",
-                "doc_no": case["supplier_ref"].split(":")[1].split("#")[0],
-                "field": field,
-                "coord": {"page": 2, "bbox": [0.1, 0.44, 0.62, 0.5]},
-            }
-        )
-    return items
-
-
 def build_erp_seed(cfg: Scenario, data: dict[str, list[dict]], rng: random.Random) -> dict:
     tenant = uid("tenant", cfg.code)
     created_by = USERS["initiator"]
@@ -1519,204 +1838,73 @@ def build_erp_seed(cfg: Scenario, data: dict[str, list[dict]], rng: random.Rando
         cases_by_batch[case["batch_code"]].append(case)
 
     line_ids: dict[str, UUID] = {}
-    for batch_code, cases in cases_by_batch.items():
-        batch_id = uid("batch", cfg.code, batch_code)
-        period = cases[0]["period"]
-        period_end = date.fromisoformat(period + "-01") + timedelta(days=27)
-        batch_created = datetime.combine(period_end + timedelta(days=12), datetime.min.time(), TZ).replace(hour=10)
-        if batch_created.date() > TODAY - timedelta(days=2):
-            batch_created = datetime.combine(TODAY - timedelta(days=2), datetime.min.time(), TZ).replace(hour=10)
-        supplier_codes = sorted({case["supplier_code"] for case in cases})
-        supplier_meta = {row["supplier_code"]: row for row in data["supplier"]}
-
-        diffs: list[dict] = []
-        details: dict[str, dict] = {}
-        line_rows: list[dict] = []
-        side_counter = {"supplier": 0, "our": 0}
-        diff_index = 0
-        needs_manual_count = 0
-        matched_count = 0
-        ambiguous = 0
-        candidate = 0
-        unmatched = 0
-        for case in sorted(cases, key=lambda row: (row["supplier_code"], row["line_no"])):
-            side = "our" if case["line_status"] == "我方未匹配" else "supplier"
-            side_counter[side] += 1
-            line_id = uid("line", cfg.code, case["case_id"])
-            line_ids[case["case_id"]] = line_id
-            status = case["line_status"]
-            needs_manual = case["needs_manual"] == "true"
-            if status == "已匹配":
-                matched_count += 1
-            if status == "匹配歧义":
-                ambiguous += 1
-            if status == "候选待人工":
-                candidate += 1
-            if status in ("我方未匹配", "供应商未匹配"):
-                unmatched += 1
-            if needs_manual:
-                needs_manual_count += 1
-            diff_type = case["diff_type"]
-            is_diff = diff_type != "matched"
-            diff_json = []
-            if is_diff:
-                diff_json.append(
-                    {
-                        "type": DIFF_TYPE_CN[diff_type],
-                        "amount": _money_json(case["diff_amount"]),
-                        "owner": case["owner"],
-                        "suggestion": case["note"],
-                        "confidence": case["confidence"],
-                        "needs_manual": needs_manual,
-                        "ref": case["our_ref"] if side == "our" else case["supplier_ref"],
-                        "supplier_code": case["supplier_code"],
-                        "evidence": _evidence(case, "qty" if diff_type in ("qty", "uom", "scrap") else "amount"),
-                    }
-                )
-            line_rows.append(
+    ref_to_line_id: dict[str, UUID] = {}
+    for batch_code, batch in sorted(data["_recon_engine"].items()):
+        snapshot = batch["snapshot"]
+        record = batch["record"]
+        period = batch["period"]
+        batch_id = record.batch_id
+        for line in snapshot.lines:
+            line_id = uid(
+                "line",
+                cfg.code,
+                batch_code,
+                line.side,
+                line.supplier_ref or line.our_ref or "",
+                str(line.line_no),
+            )
+            if line.supplier_ref:
+                ref_to_line_id[line.supplier_ref] = line_id
+            if line.our_ref:
+                ref_to_line_id[line.our_ref] = line_id
+            seed["recon_lines"].append(
                 {
                     "id": line_id,
                     "batch_id": batch_id,
                     "tenant_id": tenant,
-                    "side": side,
-                    "line_no": side_counter[side],
-                    "supplier_code": case["supplier_code"],
-                    "supplier_ref": case["supplier_ref"] or None,
-                    "our_ref": case["our_ref"] or None,
-                    "status": status,
-                    "match_type": case["_match_type"],
-                    "confidence": case["confidence"],
-                    "needs_manual": needs_manual,
-                    "diffs": diff_json,
-                    "evidence": _evidence(case, "qty"),
-                    "created_at": batch_created.isoformat(),
+                    "side": line.side,
+                    "line_no": line.line_no,
+                    "supplier_code": line.supplier_code,
+                    "supplier_ref": line.supplier_ref,
+                    "our_ref": line.our_ref,
+                    "status": line.status,
+                    "match_type": line.match_type,
+                    "confidence": line.confidence,
+                    "needs_manual": line.needs_manual,
+                    "diffs": list(line.diff_facts),
+                    "evidence": list(line.evidence),
+                    "created_at": record.created_at.isoformat(),
                 }
             )
-            if is_diff:
-                bucket = "billable" if status == "已匹配" else ("dispute_hold" if needs_manual else "other_unbillable")
-                diff_out = {
-                    "diff_id": f"d{diff_index}",
-                    "type": diff_type,
-                    "amount": _money_json(case["diff_amount"]),
-                    "owner": case["owner"],
-                    "suggestion": case["note"],
-                    "confidence": case["confidence"],
-                    "needs_manual": needs_manual,
-                    "billing_bucket": bucket,
-                    "ref": case["our_ref"] if side == "our" else case["supplier_ref"],
-                    "supplier_code": case["supplier_code"],
-                    "evidence": _evidence(case, "qty" if diff_type in ("qty", "uom", "scrap") else "amount"),
-                }
-                diffs.append(diff_out)
-                details[f"d{diff_index}"] = {
-                    **diff_out,
-                    "batch_id": str(batch_id),
-                    "related_lines": [
-                        {
-                            "item": case["item_code"],
-                            "qty_mine": case["qty_mine"] or None,
-                            "qty_supplier": case["qty_supplier"] or None,
-                            "amount": _money_json(case["supplier_amount"]),
-                            "match_type": case["_match_type"],
-                            "confidence": case["confidence"],
-                            "status": status,
-                            "our_ref": case["our_ref"] or None,
-                            "supplier_ref": case["supplier_ref"] or None,
-                            "needs_manual": needs_manual,
-                            "note": case["note"],
-                        }
-                    ],
-                    "draft": (
-                        {
-                            "draft_no": f"DD-{period.replace('-', '')}-{diff_index + 1:03d}",
-                            "supplier_code": case["supplier_code"],
-                            "period": period,
-                            "diff_type": DIFF_TYPE_CN[diff_type],
-                            "amount": _money_json(case["diff_amount"]),
-                            "owner": case["owner"],
-                            "suggestion": case["note"],
-                            "confidence": case["confidence"],
-                            "needs_manual": needs_manual,
-                            "refs": [case["our_ref"], case["supplier_ref"]],
-                            "status": "待确认",
-                        }
-                        if needs_manual
-                        else None
-                    ),
-                    "unattributed": (
-                        {
-                            "ref": case["supplier_ref"] or case["our_ref"],
-                            "amount_diff": _money_json(case["diff_amount"]),
-                            "reason": "无对应收货单，无法归因到具体批次",
-                            "evidence": _evidence(case, "qty"),
-                        }
-                        if diff_type == "missing_doc"
-                        else None
-                    ),
-                }
-                diff_index += 1
-
-        supplier_lines = side_counter["supplier"]
-        metrics = {
-            "supplier_lines": supplier_lines,
-            "matched": matched_count,
-            "matched_rate": pct_text(matched_count, supplier_lines),
-            "ambiguous": ambiguous,
-            "candidate_only": candidate,
-            "unmatched": unmatched,
-            "diff_lines": len(diffs),
-            "diff_rate": pct_text(len(diffs), supplier_lines),
-            "diff_amount": str(money(sum(Decimal(d["amount"]["amount"]) for d in diffs))),
-            "suspected_anomaly": ambiguous > 0 or candidate > 0,
-            "auto_disposal_allowed": matched_count / max(1, supplier_lines) >= 0.9 and ambiguous == 0 and candidate == 0,
-        }
-        status = "已对账" if needs_manual_count == 0 and ambiguous == 0 and candidate == 0 else "待人工复核"
-        conclusive = status == "已对账"
-        status_reason = (
-            "全部行自动匹配，差异均在容差内，批次可结论"
-            if conclusive
-            else f"存在 {needs_manual_count} 行需人工确认（歧义 {ambiguous} 行、候选 {candidate} 行），批次暂不可结论"
-        )
-        batch_out = {
-            "batch_id": str(batch_id),
-            "status": status,
-            "conclusive": conclusive,
-            "status_reason": status_reason,
-            "org_id": cfg.orgs[0]["org_code"],
-            "period": period,
-            "system_ids": ["u8", "wms"],
-            "suppliers": supplier_codes,
-            "metrics": metrics,
-            "missing_items": [],
-            "diff_count": len(diffs),
-            "created_by": str(created_by),
-            "created_at": batch_created.isoformat(),
-        }
+        for case in cases_by_batch.get(batch_code, []):
+            for ref in (case["supplier_ref"], case["our_ref"]):
+                if ref and ref in ref_to_line_id:
+                    line_ids[case["case_id"]] = ref_to_line_id[ref]
+                    break
         seed["recon_batches"].append(
             {
                 "id": batch_id,
                 "tenant_id": tenant,
-                "org_id": cfg.orgs[0]["org_code"],
+                "org_id": record.org_id,
                 "period": period,
-                "status": status,
-                "conclusive": conclusive,
-                "status_reason": status_reason,
-                "suppliers": supplier_codes,
-                "system_ids": ["u8", "wms"],
-                "metrics": metrics,
-                "input_fingerprint": hashlib.sha256(f"{cfg.code}:{batch_code}:{period}".encode()).hexdigest(),
-                "rerun_of": None,
-                "rerun_reason": None,
-                "created_by": created_by,
-                "created_at": batch_created.isoformat(),
-                "result_view": {"view_version": 1, "batch": batch_out, "diffs": diffs, "details": details},
-                "unit_price": "0.8000",
-                "currency": "CNY",
-                "unit_price_source": "env_fallback",
-                "price_book_id": None,
+                "status": record.status,
+                "conclusive": record.conclusive,
+                "status_reason": record.status_reason,
+                "suppliers": list(record.suppliers),
+                "system_ids": list(record.system_ids),
+                "metrics": record.metrics,
+                "input_fingerprint": snapshot.input_fingerprint,
+                "rerun_of": snapshot.rerun_of,
+                "rerun_reason": snapshot.rerun_reason,
+                "created_by": record.created_by,
+                "created_at": record.created_at.isoformat(),
+                "result_view": batch["view"],
+                "unit_price": str(snapshot.unit_price),
+                "currency": snapshot.currency,
+                "unit_price_source": snapshot.unit_price_source.value,
+                "price_book_id": snapshot.price_book_id,
             }
         )
-        seed["recon_lines"].extend(line_rows)
 
     # 工单
     chain_seq = 0
@@ -1855,14 +2043,48 @@ def build_erp_seed(cfg: Scenario, data: dict[str, list[dict]], rng: random.Rando
                 image_created = (executed + timedelta(seconds=rng.randint(20, 240))).astimezone(
                     timezone.utc
                 )
-                before = {
-                    "amount": str(money(Decimal(case["amount"]) * Decimal("1.035"))),
-                    "tax_amount": str(money(Decimal(case["amount"]) * Decimal("0.09"))),
-                }
-                after = {
-                    "amount": case["amount"],
-                    "tax_amount": str(money(Decimal(case["amount"]) * Decimal("0.13"))),
-                }
+                base_amount = Decimal(case["amount"])
+                if object_type == "收货单":
+                    before = {
+                        "qty": str(money4(base_amount / Decimal("12.5"))),
+                        "amount": str(money(base_amount * Decimal("1.02"))),
+                    }
+                    after = {
+                        "qty": str(money4(base_amount / Decimal("12.5") + Decimal("3"))),
+                        "amount": case["amount"],
+                    }
+                elif object_type == "会计凭证":
+                    before = {
+                        "account_code": "6602.01",
+                        "debit_amount": str(money(base_amount)),
+                        "credit_amount": "0.00",
+                    }
+                    after = {
+                        "account_code": "2202.03",
+                        "debit_amount": "0.00",
+                        "credit_amount": case["amount"],
+                    }
+                elif object_type == "付款申请":
+                    before = {
+                        "amount": str(money(base_amount * Decimal("1.035"))),
+                        "payee_account": "OLD-6222-****-3108",
+                    }
+                    after = {
+                        "amount": case["amount"],
+                        "payee_account": "NEW-6228-****-7742",
+                        "payment_date": executed.date().isoformat(),
+                    }
+                else:  # 采购发票
+                    before = {
+                        "amount": str(money(base_amount * Decimal("1.035"))),
+                        "tax_amount": str(money(base_amount * Decimal("0.09"))),
+                        "tax_rate": "0.09",
+                    }
+                    after = {
+                        "amount": case["amount"],
+                        "tax_amount": str(money(base_amount * Decimal("0.13"))),
+                        "tax_rate": "0.13",
+                    }
                 prev = seed["audit_images"][-1]["hash"] if seed["audit_images"] else ""
                 payload = {
                     "id": image_id,
@@ -2046,15 +2268,53 @@ def validate(cfg: Scenario, data: dict[str, list[dict]], erp: dict) -> dict:
         if value == 0:
             problems.append(f"凭证 {voucher} 金额为零")
 
-    # 差异类型 / 工单状态覆盖
-    types = {row["diff_type"] for row in data["recon_case"] if row["diff_type"] != "matched"}
-    if not set(DIFF_TYPES) <= types:
-        problems.append(f"差异类型缺失 {set(DIFF_TYPES) - types}")
+    # 差异类型 / 批次状态 / 计量来源 / 工单状态覆盖（以引擎实际产物为准）
+    types = {
+        diff["type"]
+        for batch in erp["recon_batches"]
+        for diff in (batch.get("result_view") or {}).get("diffs", [])
+    }
+    required = {"unit_price", "qty", "missing_doc", "duplicate"}
+    if not required <= types:
+        problems.append(f"差异类型缺失 {required - types}")
+    line_status = {row["status"] for row in erp["recon_lines"]}
+    if "我方未匹配" not in line_status or "供应商未匹配" not in line_status:
+        problems.append(f"缺单方向不全：{sorted(line_status)}")
+    batch_states = {row["status"] for row in erp["recon_batches"]}
+    if len(erp["recon_batches"]) < 6:
+        problems.append(f"对账批次不足 6 条：{len(erp['recon_batches'])}")
+    in_default_scope = [
+        row
+        for row in erp["recon_batches"]
+        if row["period"] == cfg.periods[-1] and row["org_id"] == cfg.orgs[0]["org_code"]
+    ]
+    if len(in_default_scope) <= 10:
+        problems.append(f"默认 scope 批次不足以翻页（前端每页 10）：{len(in_default_scope)}")
+    for state in ("已对账", "待人工复核", "无法对账"):
+        if state not in batch_states:
+            problems.append(f"批次状态缺失 {state}：{sorted(batch_states)}")
+    price_sources = {row["unit_price_source"] for row in erp["recon_batches"]}
+    if price_sources != {"contract_price", "env_fallback"}:
+        problems.append(f"单价来源未覆盖封顶/非封顶配置两例：{sorted(price_sources)}")
+
     states = {row["ticket_state"] for row in data["ticket_case"]}
-    if len(states) < 10:
+    if len(states) < 12:
         problems.append(f"工单状态覆盖不足：{sorted(states)}")
     if not any(row["ticket_state"] == "已回滚" for row in data["ticket_case"]):
         problems.append("缺少完整补偿回滚链路")
+
+    # 审计影像：至少两张工单各有多张影像，且前后像字段集合不同
+    images_by_ticket: dict[str, list[dict]] = defaultdict(list)
+    for image in erp["audit_images"]:
+        images_by_ticket[str(image["ticket_id"])].append(image)
+    varied = [
+        ticket_id
+        for ticket_id, images in images_by_ticket.items()
+        if len(images) >= 2
+        and len({tuple(sorted(entry["field"] for entry in image["field_diff"])) for image in images}) >= 2
+    ]
+    if len(varied) < 2:
+        problems.append(f"多影像且字段差异不同的工单不足 2 张：{len(varied)}")
 
     # 未来时间戳
     for table in ("sales_order", "sales_delivery", "sales_invoice", "purchase_order", "goods_receipt", "purchase_invoice", "production_order", "ticket_case", "recon_case"):
@@ -2064,6 +2324,8 @@ def validate(cfg: Scenario, data: dict[str, list[dict]], erp: dict) -> dict:
                     problems.append(f"{table}.{key} 出现未来日期 {value}")
 
     for table, rows in data.items():
+        if table.startswith("_"):
+            continue
         for row in rows:
             for value in row.values():
                 text = str(value)
@@ -2117,6 +2379,7 @@ def write_scenario(cfg: Scenario) -> dict:
         build_fx_rate(cfg, data, rng)
         build_xb_extra(cfg, data, rng)
     build_recon_cases(cfg, data, rng)
+    build_engine_batches(cfg, data, rng)
     build_ticket_cases(cfg, data, rng)
     erp = build_erp_seed(cfg, data, rng)
 
@@ -2161,7 +2424,7 @@ def write_scenario(cfg: Scenario) -> dict:
         "seed": stable_seed(cfg.code),
         "window": {"start": iso(WINDOW_START), "end": iso(TODAY)},
         "tenant_id": str(uid("tenant", cfg.code)),
-        "demo_scope": {"org_id": cfg.orgs[0]["org_code"], "period": cfg.periods[-1], "system_ids": ["u8", "wms"]},
+        "demo_scope": {"org_id": cfg.orgs[0]["org_code"], "period": cfg.periods[-1], "system_ids": ["u8", "statement"]},
         "demo_users": {key: {"id": str(value), "display": USER_NAMES[key]} for key, value in USERS.items()},
         "row_counts": row_counts,
         "erp_counts": erp_counts,

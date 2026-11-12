@@ -30,8 +30,8 @@
         "production_order": 220,
         "production_material_issue": 850,
         "gl_entry": 2040,
-        "recon_case": 312,
-        "ticket_case": 16,
+        "recon_case": 399,
+        "ticket_case": 17,
         "promotion": 0,
         "rebate_accrual": 0,
         "fx_rate": 0,
@@ -39,14 +39,14 @@
         "intercompany_settlement": 0
       },
       "erp_counts": {
-        "recon_batches": 3,
-        "recon_lines": 312,
-        "tickets": 16,
+        "recon_batches": 14,
+        "recon_lines": 375,
+        "tickets": 17,
         "ticket_steps": 20,
-        "ticket_events": 61,
+        "ticket_events": 62,
         "audit_images": 18,
         "approval_records": 25,
-        "recon_line_links": 16,
+        "recon_line_links": 17,
         "price_book": 1
       },
       "checks": {
@@ -54,16 +54,10 @@
         "problems": [],
         "latest_business_date": "2026-09-27",
         "diff_types": [
-          "candidate",
           "duplicate",
           "missing_doc",
           "qty",
-          "rounding_tolerance",
-          "scrap",
-          "tax",
-          "unit_price",
-          "unparseable",
-          "uom"
+          "unit_price"
         ],
         "ticket_states": [
           "已回滚",
@@ -76,6 +70,7 @@
           "执行中",
           "校验中",
           "补偿中",
+          "计划中",
           "需人工处置"
         ],
         "compensation_chains": 2
@@ -110,8 +105,8 @@
         "production_order": 90,
         "production_material_issue": 345,
         "gl_entry": 2760,
-        "recon_case": 312,
-        "ticket_case": 16,
+        "recon_case": 401,
+        "ticket_case": 17,
         "promotion": 24,
         "rebate_accrual": 36,
         "fx_rate": 0,
@@ -119,14 +114,14 @@
         "intercompany_settlement": 0
       },
       "erp_counts": {
-        "recon_batches": 3,
-        "recon_lines": 312,
-        "tickets": 16,
+        "recon_batches": 14,
+        "recon_lines": 377,
+        "tickets": 17,
         "ticket_steps": 20,
-        "ticket_events": 61,
+        "ticket_events": 62,
         "audit_images": 18,
         "approval_records": 25,
-        "recon_line_links": 16,
+        "recon_line_links": 17,
         "price_book": 1
       },
       "checks": {
@@ -134,16 +129,10 @@
         "problems": [],
         "latest_business_date": "2026-09-27",
         "diff_types": [
-          "candidate",
           "duplicate",
           "missing_doc",
           "qty",
-          "rounding_tolerance",
-          "scrap",
-          "tax",
-          "unit_price",
-          "unparseable",
-          "uom"
+          "unit_price"
         ],
         "ticket_states": [
           "已回滚",
@@ -156,6 +145,7 @@
           "执行中",
           "校验中",
           "补偿中",
+          "计划中",
           "需人工处置"
         ],
         "compensation_chains": 2
@@ -190,8 +180,8 @@
         "production_order": 60,
         "production_material_issue": 227,
         "gl_entry": 1260,
-        "recon_case": 312,
-        "ticket_case": 16,
+        "recon_case": 398,
+        "ticket_case": 17,
         "promotion": 0,
         "rebate_accrual": 0,
         "fx_rate": 48,
@@ -199,14 +189,14 @@
         "intercompany_settlement": 60
       },
       "erp_counts": {
-        "recon_batches": 3,
-        "recon_lines": 312,
-        "tickets": 16,
+        "recon_batches": 14,
+        "recon_lines": 374,
+        "tickets": 17,
         "ticket_steps": 20,
-        "ticket_events": 61,
+        "ticket_events": 62,
         "audit_images": 18,
         "approval_records": 25,
-        "recon_line_links": 16,
+        "recon_line_links": 17,
         "price_book": 1
       },
       "checks": {
@@ -214,16 +204,10 @@
         "problems": [],
         "latest_business_date": "2026-09-26",
         "diff_types": [
-          "candidate",
           "duplicate",
           "missing_doc",
           "qty",
-          "rounding_tolerance",
-          "scrap",
-          "tax",
-          "unit_price",
-          "unparseable",
-          "uom"
+          "unit_price"
         ],
         "ticket_states": [
           "已回滚",
@@ -236,6 +220,7 @@
           "执行中",
           "校验中",
           "补偿中",
+          "计划中",
           "需人工处置"
         ],
         "compensation_chains": 2

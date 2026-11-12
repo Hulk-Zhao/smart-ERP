@@ -17,7 +17,7 @@
     "period": "2026-09",
     "system_ids": [
       "u8",
-      "wms"
+      "statement"
     ]
   },
   "demo_users": {
@@ -64,8 +64,8 @@
     "production_order": 60,
     "production_material_issue": 227,
     "gl_entry": 1260,
-    "recon_case": 312,
-    "ticket_case": 16,
+    "recon_case": 398,
+    "ticket_case": 17,
     "promotion": 0,
     "rebate_accrual": 0,
     "fx_rate": 48,
@@ -73,14 +73,14 @@
     "intercompany_settlement": 60
   },
   "erp_counts": {
-    "recon_batches": 3,
-    "recon_lines": 312,
-    "tickets": 16,
+    "recon_batches": 14,
+    "recon_lines": 374,
+    "tickets": 17,
     "ticket_steps": 20,
-    "ticket_events": 61,
+    "ticket_events": 62,
     "audit_images": 18,
     "approval_records": 25,
-    "recon_line_links": 16,
+    "recon_line_links": 17,
     "price_book": 1
   },
   "checks": {
@@ -88,16 +88,10 @@
     "problems": [],
     "latest_business_date": "2026-09-26",
     "diff_types": [
-      "candidate",
       "duplicate",
       "missing_doc",
       "qty",
-      "rounding_tolerance",
-      "scrap",
-      "tax",
-      "unit_price",
-      "unparseable",
-      "uom"
+      "unit_price"
     ],
     "ticket_states": [
       "已回滚",
@@ -110,6 +104,7 @@
       "执行中",
       "校验中",
       "补偿中",
+      "计划中",
       "需人工处置"
     ],
     "compensation_chains": 2
@@ -140,11 +135,11 @@
     "production_order.csv": "593ff80992e7fa9eb0b185869dcbdd1332ec9ced226a526ba1f6466ffc5ce81b",
     "production_material_issue.csv": "2e926b0ce0a76be64c3a7114311eeb7540819b5073a6b7f4f6a1b6eb2ec2b227",
     "gl_entry.csv": "aef73b9d5f7fa11ecbfdd9ed5150d1216421d89018f7478e7638aa146f169f9d",
-    "recon_case.csv": "dae8ec099c8eae9fb3e080c15a1dad10215bc73a6765038c93c1cd0f85f65475",
-    "ticket_case.csv": "9f2d7e1a9de702fe62bb9fc84f3a38f2438b7f8d1f258f3d57184620b0e55651",
+    "recon_case.csv": "52389116788e472d511af648d4d032288d00b02c8a47e8f6f70bb67e8b392c25",
+    "ticket_case.csv": "d5c5da20952987607c96333069ccc8126626853a4d2eb5c6600f0ee7c749cf58",
     "fx_rate.csv": "a2ad2370fff4bd6804ec5e621eb06eb756226aab72f5930e3bc3478b54e29a88",
     "customs_declaration.csv": "732cb4fc5709cd3d708b25d746c34a702188e0b31249cc7ee775d35dad76fa9a",
     "intercompany_settlement.csv": "fa5f4be0849557e152a5e3c44acf575b198123cf1dc095a59c043744b5d75bbf",
-    "erp_seed.json": "e74fcb4e2bbee713c0b576f4f8f4527c67bfe59a2d4023c186c074bec06acc3a"
+    "erp_seed.json": "c50ae2f312f3ca9d81c6db32bb47b3f23a756bfa86f98feb6bcce4f5855184f5"
   }
 }

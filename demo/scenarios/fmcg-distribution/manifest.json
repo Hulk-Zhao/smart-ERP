@@ -17,7 +17,7 @@
     "period": "2026-09",
     "system_ids": [
       "u8",
-      "wms"
+      "statement"
     ]
   },
   "demo_users": {
@@ -64,8 +64,8 @@
     "production_order": 90,
     "production_material_issue": 345,
     "gl_entry": 2760,
-    "recon_case": 312,
-    "ticket_case": 16,
+    "recon_case": 401,
+    "ticket_case": 17,
     "promotion": 24,
     "rebate_accrual": 36,
     "fx_rate": 0,
@@ -73,14 +73,14 @@
     "intercompany_settlement": 0
   },
   "erp_counts": {
-    "recon_batches": 3,
-    "recon_lines": 312,
-    "tickets": 16,
+    "recon_batches": 14,
+    "recon_lines": 377,
+    "tickets": 17,
     "ticket_steps": 20,
-    "ticket_events": 61,
+    "ticket_events": 62,
     "audit_images": 18,
     "approval_records": 25,
-    "recon_line_links": 16,
+    "recon_line_links": 17,
     "price_book": 1
   },
   "checks": {
@@ -88,16 +88,10 @@
     "problems": [],
     "latest_business_date": "2026-09-27",
     "diff_types": [
-      "candidate",
       "duplicate",
       "missing_doc",
       "qty",
-      "rounding_tolerance",
-      "scrap",
-      "tax",
-      "unit_price",
-      "unparseable",
-      "uom"
+      "unit_price"
     ],
     "ticket_states": [
       "已回滚",
@@ -110,6 +104,7 @@
       "执行中",
       "校验中",
       "补偿中",
+      "计划中",
       "需人工处置"
     ],
     "compensation_chains": 2
@@ -140,10 +135,10 @@
     "production_order.csv": "3dea2b3d004f33610cc31db0ba754ac5b794638881e43b3b3a8552a2fd42c1d9",
     "production_material_issue.csv": "28832632647d4e18a6f69afd1124f3207a898e331c695c932729cf2669b77945",
     "gl_entry.csv": "0fdd22f8c9a3a8882f47bd787a792581f9f0d3f6d08a756e162769abd25edf87",
-    "recon_case.csv": "1367cba6772b19bbd129beccd803a04e733b4964c10bb567c2165e32f4297f34",
-    "ticket_case.csv": "4957287b083c2eae78c41917013d7528b7a023b8445484b24168297db07f2e2d",
+    "recon_case.csv": "9d68ffc01917d0a11e60a3aebf98f626301b0d11182b32ec429e4a627f797cee",
+    "ticket_case.csv": "99b049323507c5d34d95b02d77d295013780c117464bddb7de5107612b316314",
     "promotion.csv": "9e78318b4bbec9c5f86650940a78a8762e63042c5ca38c752a24846e0fe8cb09",
     "rebate_accrual.csv": "1227f4e650ca7438e934fb74eef4a2efb0c4cce57be7531f96e93e365fdc2dc6",
-    "erp_seed.json": "9dee4b1e824a647a7dd8ae836c4b9e7698dbd6b168bc39a35f32ce01d0649018"
+    "erp_seed.json": "4224d285e53e86b95a36630e994d738316ae07fd22bf77bf83f200c39be03c8d"
   }
 }
