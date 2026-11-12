@@ -9,7 +9,7 @@ import {
   isTimeoutFailure,
 } from '../api/errors';
 import { useSession } from '../api/session';
-import { dateTime } from '../lib/format';
+import { dateTime, moneyText } from '../lib/format';
 import { IconAlert, IconClose, IconSparkles } from './icons';
 
 interface AssistantPanelProps {
@@ -146,7 +146,7 @@ export function AssistantPanel({ onClose }: AssistantPanelProps) {
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5">
           <div className="flex items-center justify-between text-[11px] text-slate-500">
-            <span>待审批</span>
+            <span title="口径：全局审批待办，不是本单指标">待审批（全局队列）</span>
             <span>{approvals.isFetching ? '读取中…' : approvals.isError ? '不可用' : '实时'}</span>
           </div>
           {approvals.isError ? (
@@ -161,7 +161,12 @@ export function AssistantPanel({ onClose }: AssistantPanelProps) {
               </span>
               <span className="text-[11px] text-slate-500">条</span>
               <span className="ml-auto flex flex-wrap justify-end gap-1">
-                <span className="badge bg-rose-50 text-rose-700 ring-rose-200">W3 {stats.w3}</span>
+                <span
+                  className="badge bg-rose-50 text-rose-700 ring-rose-200"
+                  title="仅统计待你决策的 W3 工单；工作台「W3 禁止自动执行」是当前页工单口径"
+                >
+                  W3 {stats.w3}
+                </span>
                 <span className="badge bg-amber-50 text-amber-700 ring-amber-200">涉资金 {stats.touchesFund}</span>
                 <span className="badge bg-slate-100 text-slate-600 ring-slate-200">缺角色 {stats.missingRole}</span>
               </span>
@@ -247,12 +252,14 @@ export function AssistantPanel({ onClose }: AssistantPanelProps) {
               )}
 
               <p className="mt-1.5 text-[12px] font-medium leading-5 text-slate-900" data-testid="assistant-suggestion">
-                {suggestion.data.suggestion}
+                {moneyText(suggestion.data.suggestion)}
               </p>
               {suggestion.data.reasons.length > 0 ? (
                 <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] leading-[17px] text-slate-500">
                   {suggestion.data.reasons.map((reason) => (
-                    <li key={reason}>{reason}</li>
+                    <li key={reason}>
+                      {moneyText(reason.replace(/^写等级：/, '等级：'))}
+                    </li>
                   ))}
                 </ul>
               ) : null}

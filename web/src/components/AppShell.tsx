@@ -555,6 +555,7 @@ export function AppShell() {
   const location = useLocation();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [notifyOpen, setNotifyOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [compact, setCompact] = useState(() => {
     try {
@@ -610,6 +611,7 @@ export function AppShell() {
         setPaletteOpen((current) => !current);
       } else if (event.key === 'Escape') {
         setPaletteOpen(false);
+        setNotifyOpen(false);
         setMobileNavOpen(false);
       } else if (!typing && event.key === '?') {
         event.preventDefault();
@@ -743,9 +745,42 @@ export function AppShell() {
             <IconSparkles className={assistantOpen ? 'text-indigo-600' : 'text-slate-500'} />
             <span className="hidden xl:inline">助手</span>
           </button>
-          <button type="button" className="btn btn-ghost btn-sm" aria-label="通知" title="通知">
-            <IconBell />
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              aria-label="通知"
+              title="通知"
+              aria-expanded={notifyOpen}
+              aria-haspopup="dialog"
+              data-testid="notify-button"
+              onClick={() => setNotifyOpen((current) => !current)}
+            >
+              <IconBell />
+            </button>
+            {notifyOpen ? (
+              <div
+                role="dialog"
+                aria-label="通知"
+                data-testid="notification-panel"
+                className="absolute right-0 top-full z-50 mt-1 w-[280px] rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl"
+              >
+                <div className="text-[12px] font-semibold text-slate-900">通知中心未启用</div>
+                <p className="mt-1 text-[11px] leading-5 text-slate-600">
+                  本期没有站内通知通道，因此这里不会出现消息。待办看「审批」，执行与风险看「工作台」，
+                  不另造通知数据。
+                </p>
+                <div className="mt-2 flex gap-1.5">
+                  <NavLink to="/approvals" className="btn btn-secondary btn-sm" onClick={() => setNotifyOpen(false)}>
+                    审批待办
+                  </NavLink>
+                  <NavLink to="/" className="btn btn-secondary btn-sm" onClick={() => setNotifyOpen(false)}>
+                    工作台
+                  </NavLink>
+                </div>
+              </div>
+            ) : null}
+          </div>
           <DemoIdentitySwitcher />
           <button
             type="button"

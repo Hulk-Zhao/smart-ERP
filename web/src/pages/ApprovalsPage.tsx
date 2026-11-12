@@ -60,7 +60,12 @@ export function ApprovalsPage() {
       }),
     [filter, items],
   );
-  const selectedId = searchParams.get('ticket') || visibleItems[0]?.ticket_id || items[0]?.ticket_id || '';
+  // 选中项必须落在当前筛选结果里：筛选后列表为空时右侧也要空，
+  // 否则左侧「0/4 无数据」与右侧旧工单详情同屏自相矛盾。
+  const requestedId = searchParams.get('ticket') ?? '';
+  const selectedId = visibleItems.some((item) => item.ticket_id === requestedId)
+    ? requestedId
+    : (visibleItems[0]?.ticket_id ?? '');
   const selected = items.find((item) => item.ticket_id === selectedId);
 
   const detail = useQuery({
@@ -145,9 +150,13 @@ export function ApprovalsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="badge bg-slate-100 text-slate-600 ring-slate-200">
+          <span
+            className="badge bg-slate-100 text-slate-600 ring-slate-200"
+            title="只含需要审批角色的工单；W3 无审批角色，因此不进队列"
+          >
             队列 {session.canQuery ? items.length : '—'}
           </span>
+          <span className="hidden text-[10.5px] text-slate-400 sm:inline">（不含无需角色的 W3）</span>
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => void tasks.refetch()}>
             刷新
           </button>
@@ -245,7 +254,17 @@ export function ApprovalsPage() {
         <section className="card min-w-0 overflow-hidden">
           {!selectedId ? (
             <div className="p-3">
-              <EmptyState variant="no-data" compact description="选择左侧工单开始审批。" />
+              <EmptyState
+                variant="no-data"
+                compact
+                description={
+                  items.length === 0
+                    ? '本期确实无待办审批。'
+                    : visibleItems.length === 0
+                      ? `当前筛选「${FILTERS.find((item) => item.key === filter)?.label ?? filter}」下没有审批；右侧不保留上一张工单，切回「全部」查看。`
+                      : '选择左侧工单开始审批。'
+                }
+              />
             </div>
           ) : detail.isPending ? (
             <div className="space-y-2 p-3">{[0, 1, 2].map((key) => <div key={key} className="skeleton h-20 w-full" />)}</div>

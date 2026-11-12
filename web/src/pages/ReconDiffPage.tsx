@@ -60,6 +60,9 @@ function EvidenceGroup({ evidences, empty }: { evidences: EvidenceOut[]; empty: 
   }
   return (
     <div className="min-w-0 px-3 py-2.5">
+      <p className="mb-1.5 text-[10.5px] text-slate-400" data-testid="evidence-count">
+        共 {evidences.length} 条 · 当前查看第 {Math.min(active + 1, evidences.length)} 条（点击切换）
+      </p>
       <ol className="space-y-1">
         {evidences.map((item, index) => {
           const selected = active === index;
@@ -139,7 +142,8 @@ export function ReconDiffPage() {
    * 字段级 diff 只从契约真实字段构造：
    * - 数量：qty_mine / qty_supplier 是分侧值；
    * - 单据引用：our_ref / supplier_ref；
-   * - 金额：契约只给单侧/归因金额，没有分侧金额时不伪造，差异列展示引擎归因金额。
+   * - 金额：`related_lines[].amount` 是**行金额**（引擎 `MatchResultLine.amount`），
+   *   不是差异金额，不能塞进「差异」列；差异金额只取 `diff.amount`（头部卡片）。
    */
   const rows: FieldDiffRow[] = [];
   diff.related_lines?.forEach((line, index) => {
@@ -161,15 +165,6 @@ export function ReconDiffPage() {
       delta: '—',
       reason: diff.type,
       reasonLabel: line.status,
-    });
-    rows.push({
-      key: `amount-${index}`,
-      field: `金额（${prefix}）`,
-      ours: '契约未提供分侧金额',
-      theirs: '契约未提供分侧金额',
-      delta: money(line.amount ?? diff.amount),
-      reason: diff.type,
-      reasonLabel: `差异金额 ${money(diff.amount)}`,
     });
   });
 
@@ -219,7 +214,12 @@ export function ReconDiffPage() {
           ].map((item) => (
             <div key={item.label} className="min-w-0 px-4 py-2.5">
               <div className="label">{item.label}</div>
-              <div className={`mt-0.5 truncate font-mono text-[15px] font-medium num ${item.tone}`}>{item.value}</div>
+              <div
+                className={`mt-0.5 truncate font-mono text-[15px] font-medium num ${item.tone}`}
+                data-testid={item.label === '差异金额' ? 'diff-amount' : undefined}
+              >
+                {item.value}
+              </div>
             </div>
           ))}
         </div>
@@ -241,15 +241,38 @@ export function ReconDiffPage() {
               </p>
             </div>
             <div className="mt-2">
-              <FieldDiffTable rows={rows} />
+              {/* 「原因码」其实是 diff type code；按它的实际语义标注为「差异类型」。 */}
+              <FieldDiffTable rows={rows} reasonLabel="差异类型" />
             </div>
+
+            {(diff.related_lines ?? []).length > 0 ? (
+              <div className="mt-2 border-t border-slate-100 px-3 py-2.5" data-testid="related-line-amounts">
+                <div className="text-[11px] font-medium text-slate-700">关联行金额（行金额，不是差异金额）</div>
+                <ul className="mt-1 space-y-0.5 text-[11px] text-slate-600">
+                  {(diff.related_lines ?? []).map((line, index) => (
+                    <li key={`related-amount-${index}`} className="flex flex-wrap items-center gap-x-2">
+                      <span className="font-mono text-slate-500">{line.item ?? `行 ${index + 1}`}</span>
+                      <span className="ml-auto font-mono text-slate-800" data-testid="related-line-amount">
+                        {line.amount ? money(line.amount) : '未提供'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-[10px] leading-4 text-slate-400">
+                  `related_lines[].amount` 是引擎的行金额（供应商行合计）；差异金额只取本页头部「差异金额」
+                  {money(diff.amount)}，两者不能互相替代。
+                </p>
+              </div>
+            ) : null}
           </section>
 
           {diff.draft ? (
             <section className="card min-w-0">
               <div className="card-head">
                 <h2 className="section-title">处置草稿</h2>
-                <span className="badge bg-amber-50 text-amber-700 ring-amber-200">待确认 · {diff.draft.status}</span>
+                <span className="badge bg-amber-50 text-amber-700 ring-amber-200">
+                  {diff.draft.status === '待确认' ? '待确认' : `待确认 · ${diff.draft.status}`}
+                </span>
               </div>
               <dl className="grid grid-cols-1 gap-x-4 gap-y-2 px-4 py-3 text-[12px] sm:grid-cols-2">
                 <div className="min-w-0"><dt className="label">草稿号</dt><dd className="mt-0.5 break-all font-mono">{diff.draft.draft_no}</dd></div>

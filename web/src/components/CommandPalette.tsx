@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useSession } from '../api/session';
+import { money } from '../lib/format';
 import { IconArrowRight, IconCheck, IconHome, IconScale, IconSearch, IconSettings, IconTicket } from './icons';
 
 interface CommandPaletteProps {
@@ -75,7 +76,7 @@ export function CommandPalette({ open, onClose, onOpenSettings }: CommandPalette
       id: `ticket-${ticket.ticket_id}`,
       group: '工单',
       label: `${ticket.ticket_no} · ${ticket.business_key}`,
-      hint: `${ticket.state} · ${ticket.write_level} · ${ticket.amount}`,
+      hint: `${ticket.state} · ${ticket.write_level} · ${money(ticket.amount)}`,
       icon: 'ticket',
       run: go(`/tickets/${encodeURIComponent(ticket.ticket_id)}`),
     }));

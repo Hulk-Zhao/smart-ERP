@@ -160,12 +160,23 @@ export const DIFF_TYPES: DiffTypeMeta[] = [
   { code: 'rounding_tolerance', label: '金额舍入容差', tone: 'bg-lime-50 text-lime-700 ring-lime-200' },
 ];
 
+/**
+ * 旧批次投影里出现过的行级状态码：它们不是八类业务归因，但会出现在「类型」列。
+ * 前后端契约收敛前先给中文标签，避免把 `candidate` / `unparseable` 裸枚举上屏。
+ */
+const LEGACY_DIFF_LABELS: Record<string, string> = {
+  candidate: '候选待人工（candidate）',
+  unparseable: '不可解析（unparseable）',
+};
+
 export function diffTypeMeta(code: string | null | undefined): { code: string; label: string; tone: string } {
-  return (
-    DIFF_TYPES.find((item) => item.code === code) ?? {
-      code: code ?? 'unknown',
-      label: code ?? '未知差异',
-      tone: 'bg-slate-100 text-slate-600 ring-slate-200',
-    }
-  );
+  if (!code) return { code: 'unknown', label: '未知差异', tone: 'bg-slate-100 text-slate-600 ring-slate-200' };
+  const known = DIFF_TYPES.find((item) => item.code === code);
+  if (known) return known;
+  return {
+    code,
+    // 没有对应中文的类型也要说明它是英文原码，而不是直接裸枚举。
+    label: LEGACY_DIFF_LABELS[code] ?? `${code}（未登记差异类型）`,
+    tone: 'bg-slate-100 text-slate-600 ring-slate-200',
+  };
 }

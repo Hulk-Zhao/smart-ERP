@@ -7,7 +7,7 @@ import type { BillingBucket, MeteringDataGapOut, MeteringStatementOut } from '..
 import { DiffTypeBadge } from '../components/Badges';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel } from '../components/ErrorPanel';
-import { amount, dateTime, text } from '../lib/format';
+import { amount, dateTime, rate, text } from '../lib/format';
 import { openSettingsPanel } from '../lib/settings';
 
 function gapFor(gaps: MeteringDataGapOut[], patterns: string[]): MeteringDataGapOut | undefined {
@@ -66,6 +66,26 @@ const BUCKET_HINT: Record<BillingBucket, string> = {
   dispute_hold: '需人工处理，不计费',
   other_unbillable: '未匹配 / 重复计费 / 不可解析',
 };
+
+/**
+ * 不计费原因码来自 `OTHER_EXCLUSION_REASONS`（unmatched_supplier 等英文码）。
+ * 页面主体是中文，不能把裸枚举直接放到「不计费原因」列；未登记的新码明确标注原码。
+ */
+const EXCLUDED_REASON_LABELS: Record<string, string> = {
+  unmatched_supplier: '供应商未匹配',
+  unmatched_ours: '我方未匹配',
+  duplicate_billing: '重复计费',
+  unparseable: '不可解析',
+};
+
+function excludedReasonLabel(reason: string): string {
+  const trimmed = reason.trim();
+  if (!trimmed) return '';
+  const label = EXCLUDED_REASON_LABELS[trimmed];
+  if (label) return `${label}（${trimmed}）`;
+  // 兼容旧数据里的人类可读文案；只有纯 ASCII 码才当成「未登记枚举」。
+  return /^[a-z0-9_]+$/i.test(trimmed) ? `${trimmed}（未登记原因码）` : trimmed;
+}
 
 // auto_released「桶」已由契约流决定删除（按该桶过滤将返回 422），生成契约更新后需从 BUCKET_ORDER/BUCKET_LABEL 移除；
 // 但计数字段 auto_released_lines 保留（= 行级 auto 合计）。两者同名不同命，删桶时不要连带删计数。
@@ -198,11 +218,15 @@ function MeteringRow({ line }: { line: MeteringLine }) {
           前 {text(line.before_ref)} · 后 {text(line.after_ref)}
         </div>
       </td>
-      <td className="hidden text-right font-mono text-[11px] text-slate-600 sm:table-cell">{line.confidence}</td>
+      <td className="hidden text-right font-mono text-[11px] text-slate-600 sm:table-cell">{rate(line.confidence)}</td>
       <td className="hidden max-w-[180px] lg:table-cell">
         {line.excluded_reason ? (
-          <span className="block truncate text-[10.5px] text-amber-700" title={line.excluded_reason}>
-            {line.excluded_reason}
+          <span
+            className="block truncate text-[10.5px] text-amber-700"
+            title={line.excluded_reason}
+            data-testid="metering-excluded-reason"
+          >
+            {excludedReasonLabel(line.excluded_reason)}
           </span>
         ) : null}
         {(line.diff_types ?? []).length > 0 ? (
@@ -653,7 +677,12 @@ export function MeteringPage() {
                   <th className="hidden w-[104px] md:table-cell">供应商</th>
                   <th className="hidden w-[104px] xl:table-cell">工单</th>
                   <th className="hidden xl:table-cell">我方 / 对方单据</th>
-                  <th className="hidden w-[52px] text-right sm:table-cell">置信度</th>
+                  <th
+                    className="hidden w-[72px] text-right sm:table-cell"
+                    title="规则引擎打分（置信度），不是模型输出"
+                  >
+                    置信度
+                  </th>
                   <th className="hidden w-[150px] lg:table-cell">不计费原因 / 差异</th>
                 </tr>
               </thead>

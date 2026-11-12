@@ -1,8 +1,10 @@
 import type { MoneyOut } from '../api/types';
 
+// 金额统一千分位 + 两位小数：后端 Decimal 常带 4 位（735000.0000），
+// 展示层不能直接透出，否则同一页面会出现两种小数位。
 const AMOUNT_FORMAT = new Intl.NumberFormat('zh-CN', {
   minimumFractionDigits: 2,
-  maximumFractionDigits: 4,
+  maximumFractionDigits: 2,
 });
 
 export function amount(value: string | number | null | undefined): string {
@@ -16,6 +18,16 @@ export function money(value: MoneyOut | string | null | undefined): string {
   if (value === null || value === undefined) return '—';
   if (typeof value === 'string') return `${amount(value)} CNY`;
   return `${amount(value.amount)} ${value.currency || 'CNY'}`;
+}
+
+/**
+ * 文案里的 Decimal 原文：后端的建议/原因会把 ``Decimal`` 直接拼进字符串
+ * （如「金额：735000.0000」）。只改写 4 位小数的数字，避免误伤工单号、账期等文本。
+ */
+export function moneyText(value: string): string {
+  return value.replace(/(?<![\d.])(\d+)(\.\d{4})(?!\d)/g, (_match, integer: string, fraction: string) =>
+    amount(`${integer}${fraction}`),
+  );
 }
 
 export function delta(mine: string | number | null | undefined, theirs: string | number | null | undefined): string {
