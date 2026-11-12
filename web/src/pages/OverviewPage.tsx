@@ -9,7 +9,7 @@ import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel } from '../components/ErrorPanel';
 import { SessionNotice } from '../components/SessionNotice';
 import { IconAlert, IconArrowRight, IconCheck, IconScale } from '../components/icons';
-import { amount, dateTime, shortId } from '../lib/format';
+import { amount, dateTime, money, shortId } from '../lib/format';
 import { openSettingsPanel } from '../lib/settings';
 
 function waitingSince(value: string): string {
@@ -64,6 +64,13 @@ export function OverviewPage() {
     queryFn: () => api.listPendingApprovals({ limit: 20 }),
     enabled: session.canQuery,
   });
+  // 对账摘要必须来自真实批次列表：本 scope 已有批次时不能再显示「从本期对账开始」的引导空态。
+  const recentBatches = useQuery({
+    queryKey: ['recon', 'batches', 'overview'],
+    queryFn: () => api.listReconBatches({ limit: 3 }),
+    enabled: session.canQuery,
+  });
+  const latestBatch = recentBatches.data?.items[0];
 
   const items = tickets.data?.items ?? [];
   const tasks = approvals.data?.items ?? [];
@@ -355,17 +362,67 @@ export function OverviewPage() {
               </Link>
             </div>
             <div className="card-body">
-              <div className="flex items-start gap-2.5 rounded-lg bg-indigo-50/70 p-2.5">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-indigo-600 ring-1 ring-indigo-100">
-                  <IconScale />
-                </span>
-                <div className="min-w-0 text-[11px] leading-[17px] text-indigo-900">
-                  <div className="font-medium">从本期对账开始</div>
-                  <p className="text-indigo-700/80">
-                    发起后在这里看到匹配率、差异行、可自动处置结论与计量入口。
-                  </p>
+              {recentBatches.error ? (
+                <ErrorPanel
+                  error={recentBatches.error}
+                  compact
+                  onRetry={() => void recentBatches.refetch()}
+                  onOpenSettings={openSettingsPanel}
+                />
+              ) : recentBatches.isLoading ? (
+                <div className="skeleton h-[64px] w-full" />
+              ) : latestBatch ? (
+                <Link
+                  to={`/recon/${latestBatch.batch_id}`}
+                  className="block rounded-lg bg-indigo-50/70 p-2.5 hover:bg-indigo-50"
+                  data-testid="overview-recon-summary"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-indigo-600 ring-1 ring-indigo-100">
+                      <IconScale />
+                    </span>
+                    <div className="min-w-0 text-[11px] leading-[17px] text-indigo-900">
+                      <div className="font-medium">
+                        最近批次 <span className="font-mono">{shortId(latestBatch.batch_id)}</span>
+                      </div>
+                      <p className="text-indigo-700/80">
+                        {latestBatch.status} · 创建 {dateTime(latestBatch.created_at)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
+                    <span>
+                      行数{' '}
+                      <span className="font-mono text-slate-800">
+                        {latestBatch.line_count ?? '—'}
+                      </span>
+                    </span>
+                    <span>
+                      差异{' '}
+                      <span className="font-mono text-slate-800">
+                        {latestBatch.diff_count ?? '—'}
+                      </span>
+                    </span>
+                    <span>
+                      差异金额{' '}
+                      <span className="font-mono text-slate-800">{money(latestBatch.diff_amount)}</span>
+                    </span>
+                    <span className="ml-auto text-indigo-600">查看批次 →</span>
+                  </div>
+                </Link>
+              ) : (
+                <div className="flex items-start gap-2.5 rounded-lg bg-indigo-50/70 p-2.5">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-indigo-600 ring-1 ring-indigo-100">
+                    <IconScale />
+                  </span>
+                  <div className="min-w-0 text-[11px] leading-[17px] text-indigo-900">
+                    <div className="font-medium">该 scope 还没有对账批次</div>
+                    <p className="text-indigo-700/80">
+                      发起后在这里看到最近批次的行数、差异与计量入口；服务端没有批次时不会伪造数字。
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
               <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
                 <div className="rounded-lg border border-slate-200 px-2.5 py-2">
                   <div className="label">待审批</div>
@@ -386,14 +443,16 @@ export function OverviewPage() {
           <section className="card min-w-0">
             <div className="card-head">
               <h2 className="section-title">状态分布</h2>
-              <span className="text-[10.5px] text-slate-400">当前页 {items.length} 条</span>
+              <span className="text-[10.5px] text-slate-400">
+                当前页 {items.length} 条 · 非零状态 {distribution.length} 个（全部列出）
+              </span>
             </div>
             <div className="card-body space-y-2">
               {distribution.length === 0 ? (
                 <EmptyState variant="no-data" compact description="当前页没有可统计的状态分布。" />
               ) : (
-                distribution.slice(0, 5).map((item) => (
-                  <div key={item.state} className="min-w-0">
+                distribution.map((item) => (
+                  <div key={item.state} className="min-w-0" data-testid="distribution-row">
                     <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
                       <span className="truncate">{item.state}</span>
                       <span className="font-mono num">{item.count}</span>
