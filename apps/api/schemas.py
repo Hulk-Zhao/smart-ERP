@@ -621,6 +621,55 @@ class AuditChainOut(BaseModel):
     head_hash: str
 
 
+class TicketEventOut(BaseModel):
+    """工单事件链的单条事件（只读，字段与 ``EventRecord``/``ticket_event`` 对齐）。"""
+
+    chain_seq: int
+    event_type: str
+    from_state: str | None = None
+    to_state: str | None = None
+    trigger: str | None = Field(
+        default=None,
+        description=(
+            "触发源。仅 transition 事件有值（取事件 payload.trigger）；"
+            "created / step / compensation / recovered 等事件没有触发源，"
+            "返回 null 表示「不适用」，而不是空串。"
+        ),
+    )
+    actor: UUID | None = Field(
+        default=None,
+        description=(
+            "操作主体：用户 UUID；非 HTTP 路径（执行器、补偿 worker、定时巡检）"
+            "统一为系统主体 00000000-0000-0000-0000-000000000000。"
+            "本次补齐前写入的历史事件为 null。"
+        ),
+    )
+    occurred_at: datetime = Field(
+        description=(
+            "落库时刻（ticket_event.created_at），不是业务发生时刻；"
+            "离线补录、事件重放或库/应用时钟不同步时两者会不一致。"
+        )
+    )
+    prev_hash: str
+    hash: str
+
+
+class TicketEventChainOut(BaseModel):
+    """链校验结论：复用 ``apps.agents.events.replay``，不另写判断。"""
+
+    ok: bool
+    checked: int
+    broken_at: int | None = None
+    detail: str = ""
+    head_hash: str
+
+
+class TicketEventsOut(BaseModel):
+    ticket_id: UUID
+    events: list[TicketEventOut] = Field(default_factory=list)
+    chain: TicketEventChainOut
+
+
 __all__ = [
     "ActionIn",
     "ActionOut",
@@ -654,6 +703,9 @@ __all__ = [
     "SupplierMasterIn",
     "TicketAction",
     "TicketDetailOut",
+    "TicketEventChainOut",
+    "TicketEventOut",
+    "TicketEventsOut",
     "TicketOut",
     "TicketStepOut",
     "ToleranceIn",

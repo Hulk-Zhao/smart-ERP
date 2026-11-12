@@ -24,6 +24,7 @@ from apps.agents.events import (
     CREATED_EVENT,
     RECOVERED_EVENT,
     STEP_EVENT,
+    SYSTEM_ACTOR_ID,
     TRANSITION_EVENT,
     EventRecord,
     Projection,
@@ -128,6 +129,7 @@ def _record_from_row(row: TicketEvent) -> EventRecord:
         trace_id=row.trace_id,
         prev_hash=row.prev_hash,
         hash=row.hash,
+        occurred_at=row.created_at,
     )
 
 
@@ -184,6 +186,9 @@ class TicketStore:
         ``pending_write`` 是 API 读路径的投影字段，同时镜像进 created payload——
         否则 ``rebuild_projection`` 只能重建执行器写的那部分，API 建的单重建不出来。
         执行器调用方不传这些参数，行为与 0010 之前一致（DB 为 NULL、payload 无这些键）。
+
+        ``created`` 事件的 actor 缺省取 ``initiator_id``：建单人就是这一步的操作主体。
+        调用方显式传 ``actor_id`` 时以它为准（代理建单场景）。
         """
 
         ticket = Ticket(
@@ -238,7 +243,7 @@ class TicketStore:
                     from_state=None,
                     to_state=TicketState.PLANNED.value,
                     payload=payload,
-                    actor_id=actor_id,
+                    actor_id=actor_id or initiator_id,
                     trace_id=trace_id,
                 )
         except IntegrityError as exc:
@@ -285,6 +290,9 @@ class TicketStore:
         ``before_append`` 在锁定工单行、校验通过之后、追加事件之前执行，
         用于把「必须与本次状态推进同生共死」的行写进同一事务（例如驳回决定
         对应的 ``approval_record``）。默认 ``None``，执行器路径行为不变。
+
+        ``actor_id`` 缺省为 :data:`SYSTEM_ACTOR_ID`：HTTP 路径必须显式传会话用户，
+        只有执行器/补偿/定时等非 HTTP 路径才落到系统主体——不留 ``NULL``。
         """
 
         async with self._sf() as session, session.begin():
@@ -310,7 +318,7 @@ class TicketStore:
                 from_state=ticket.state,
                 to_state=target_state.value,
                 payload=body,
-                actor_id=actor_id,
+                actor_id=actor_id or SYSTEM_ACTOR_ID,
                 trace_id=trace_id,
             )
             ticket.state = target_state.value
@@ -339,6 +347,7 @@ class TicketStore:
         object_id: str | None = None,
         audit_image_id: UUID | None = None,
         executed_at: datetime | None = None,
+        actor_id: UUID | None = None,
         trace_id: str | None = None,
     ) -> TicketStep:
         """记录 API 已执行完成的步骤（外部写入已发生），并追加 step 事件。
@@ -347,6 +356,8 @@ class TicketStore:
         审批通过时一次性执行完，这里只在成功之后落一行 + 一条事件，语义与改造前
         ``ticket.steps.append`` 一致。``step_id`` 由调用方生成并先用于审计影像，
         因此必须由调用方传入而不是这里 ``uuid4()``，否则影像与步骤对不上。
+
+        ``actor_id``：API 审批执行路径传会话用户（是谁点的审批），不传时记系统主体。
         """
 
         if write_level > 2:
@@ -389,7 +400,7 @@ class TicketStore:
                         "state": state,
                         "action_key": action_key,
                     },
-                    actor_id=None,
+                    actor_id=actor_id or SYSTEM_ACTOR_ID,
                     trace_id=trace_id,
                 )
                 ticket.updated_at = datetime.now(UTC)
@@ -527,7 +538,7 @@ class TicketStore:
                         "action_key": action_key,
                         "idempotency_key": idem_key,
                     },
-                    actor_id=None,
+                    actor_id=SYSTEM_ACTOR_ID,
                     trace_id=trace_id,
                 )
         except IntegrityError as exc:
@@ -580,7 +591,7 @@ class TicketStore:
                     "action_key": step.action_key,
                     "error_code": error_code,
                 },
-                actor_id=None,
+                actor_id=SYSTEM_ACTOR_ID,
                 trace_id=trace_id,
             )
         return step
@@ -769,7 +780,7 @@ class TicketStore:
                         "verify": dict(verify_observed or {}),
                     },
                 },
-                actor_id=None,
+                actor_id=SYSTEM_ACTOR_ID,
                 trace_id=trace_id,
             )
 
@@ -821,7 +832,7 @@ class TicketStore:
                 from_state=None,
                 to_state=None,
                 payload={"compensate_seq": compensate_seq, "state": state},
-                actor_id=None,
+                actor_id=SYSTEM_ACTOR_ID,
                 trace_id=trace_id,
             )
 

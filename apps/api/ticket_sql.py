@@ -32,6 +32,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, array
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.agents.events import EventRecord
 from apps.agents.state_machine import TransitionContext
 from apps.agents.store import TicketNotFound, TicketStore
 from apps.api.approval_sql import add_approval_row
@@ -78,6 +79,7 @@ class TicketStorePort(Protocol):
         ticket_id: UUID,
         step: TicketStepRecord,
         request_hash: str,
+        actor_id: UUID | None = None,
         trace_id: str | None = None,
     ) -> None: ...
 
@@ -90,6 +92,10 @@ class TicketStorePort(Protocol):
         state: str,
         trace_id: str | None = None,
     ) -> None: ...
+
+    async def list_events(
+        self, *, tenant_id: UUID, ticket_id: UUID
+    ) -> list[EventRecord]: ...
 
     async def list(
         self,
@@ -221,6 +227,7 @@ class SqlTicketRepository:
         ticket_id: UUID,
         step: TicketStepRecord,
         request_hash: str,
+        actor_id: UUID | None = None,
         trace_id: str | None = None,
     ) -> None:
         # tenant 是查询条件：先在端口上钉住归属，再进事件事务。
@@ -246,6 +253,7 @@ class SqlTicketRepository:
             object_id=step.object_id or None,
             audit_image_id=step.audit_image_id,
             executed_at=step.executed_at,
+            actor_id=actor_id,
             trace_id=trace_id,
         )
 
@@ -273,6 +281,21 @@ class SqlTicketRepository:
             state=state,
             trace_id=trace_id,
         )
+
+    async def list_events(
+        self, *, tenant_id: UUID, ticket_id: UUID
+    ) -> list[EventRecord]:
+        # tenant 是查询条件：事件链也不能绕过归属直接读 ``ticket_event``。
+        async with self._factory()() as session:
+            owned = await session.scalar(
+                sa.select(Ticket.id).where(
+                    Ticket.id == ticket_id, Ticket.tenant_id == tenant_id
+                )
+            )
+        if owned is None:
+            raise TicketNotFound(f"工单不存在: {ticket_id}")
+        # 只读：复用 TicketStore 的 seq 升序查询（与链校验同一份事实）。
+        return await self._events().list_events(ticket_id)
 
     async def get(self, *, tenant_id: UUID, ticket_id: UUID) -> TicketRecord | None:
         factory = self._factory()

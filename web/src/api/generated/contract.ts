@@ -1,15 +1,15 @@
 /**
  * 本文件由 `node scripts/gen-api-types.mjs` 从 C16 冻结契约生成，请勿手改。
  * 源文件：contracts/api/product_api.openapi.v1.json
- * 契约 sha256：f6fa73010aeb7f6a687017d1cbd0dae294a09526ae79c2052e9b89f11448f13d
+ * 契约 sha256：a07fce2393ce95120b2f2e170c4a2c260a0edda04aeba2db8e1b2424e88655c4
  * 契约版本：1.0.0 · C16
  *
  * 契约变更流程：后端重新生成契约 → 执行 `npm run gen:api` → 评审类型差异。
  */
 
-export const CONTRACT_SHA256 = "f6fa73010aeb7f6a687017d1cbd0dae294a09526ae79c2052e9b89f11448f13d";
+export const CONTRACT_SHA256 = "a07fce2393ce95120b2f2e170c4a2c260a0edda04aeba2db8e1b2424e88655c4";
 export const CONTRACT_VERSION = "1.0.0";
-export const CONTRACT_PATH_COUNT = 22;
+export const CONTRACT_PATH_COUNT = 23;
 
 /** 写接口（POST）路径；前端统一补 Idempotency-Key。 */
 export const WRITE_PATHS = ["/v1/approvals/{ticket_id}/approve","/v1/approvals/{ticket_id}/reject","/v1/assistant/suggest","/v1/recon/runs","/v1/recon/statements","/v1/tickets/{ticket_id}/actions/approve","/v1/tickets/{ticket_id}/actions/cancel","/v1/tickets/{ticket_id}/actions/compensate","/v1/tickets/{ticket_id}/actions/reject"] as const;
@@ -525,6 +525,38 @@ export interface TicketDetailOut {
   write_level: string;
 }
 
+/**
+ * 链校验结论：复用 ``apps.agents.events.replay``，不另写判断。
+ */
+export interface TicketEventChainOut {
+  broken_at?: number | null;
+  checked: number;
+  detail?: string;
+  head_hash: string;
+  ok: boolean;
+}
+
+/**
+ * 工单事件链的单条事件（只读，字段与 ``EventRecord``/``ticket_event`` 对齐）。
+ */
+export interface TicketEventOut {
+  actor?: string | null; /** 操作主体：用户 UUID；非 HTTP 路径（执行器、补偿 worker、定时巡检）统一为系统主体 00000000-0000-0000-0000-000000000000。本次补齐前写入的历史事件为 null。 */
+  chain_seq: number;
+  event_type: string;
+  from_state?: string | null;
+  hash: string;
+  occurred_at: string; /** 落库时刻（ticket_event.created_at），不是业务发生时刻；离线补录、事件重放或库/应用时钟不同步时两者会不一致。 */
+  prev_hash: string;
+  to_state?: string | null;
+  trigger?: string | null; /** 触发源。仅 transition 事件有值（取事件 payload.trigger）；created / step / compensation / recovered 等事件没有触发源，返回 null 表示「不适用」，而不是空串。 */
+}
+
+export interface TicketEventsOut {
+  chain: TicketEventChainOut;
+  events?: TicketEventOut[];
+  ticket_id: string;
+}
+
 export interface TicketOut {
   amount: string;
   business_key: string;
@@ -769,5 +801,14 @@ export interface ApiOperations {
     query: never;
     body: ActionIn;
     response: ActionOut;
+  };
+  "GET /v1/tickets/{ticket_id}/events": {
+    query: {
+    org_id: string;
+    period: string;
+    system_ids: string[];
+  };
+    body: never;
+    response: TicketEventsOut;
   };
 }

@@ -15,7 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -25,6 +25,13 @@ from uuid import UUID, uuid4
 
 from starlette.concurrency import run_in_threadpool
 
+from apps.agents.events import (
+    GENESIS_HASH,
+    TRANSITION_EVENT,
+    EventRecord,
+    ReplayError,
+    replay,
+)
 from apps.agents.state_machine import (
     COMPENSATE_FAIL_CODES,
     TransitionContext,
@@ -79,6 +86,9 @@ from apps.api.schemas import (
     ReconRunIn,
     ScopeIn,
     TicketDetailOut,
+    TicketEventChainOut,
+    TicketEventOut,
+    TicketEventsOut,
     TicketOut,
     TicketStepOut,
     UnattributedOut,
@@ -514,6 +524,71 @@ async def get_ticket(
     return await _ticket_detail(container, ticket)
 
 
+async def list_ticket_events(
+    container: ApiContainer, session: SessionToken, *, scope_in: ScopeIn, ticket_id: UUID
+) -> TicketEventsOut:
+    """只读事件链：鉴权/租户口径与 :func:`get_ticket` 完全一致，不新开更宽入口。"""
+
+    assert_can_read_ticket(principal_of(session))
+    scope = _require_scope(session, build_scope(scope_in))
+    ticket = await _require_ticket(container, session, ticket_id)
+    _require_ticket_in_scope(ticket, scope)
+
+    events = await container.tickets.list_events(
+        tenant_id=session.tenant_id, ticket_id=ticket.ticket_id
+    )
+    return TicketEventsOut(
+        ticket_id=ticket.ticket_id,
+        events=[_ticket_event_out(event) for event in events],
+        chain=_ticket_event_chain(events),
+    )
+
+
+def _ticket_event_out(event: EventRecord) -> TicketEventOut:
+    return TicketEventOut(
+        chain_seq=event.seq,
+        event_type=event.event_type,
+        from_state=event.from_state,
+        to_state=event.to_state,
+        trigger=_event_trigger(event),
+        actor=UUID(event.actor_id) if event.actor_id else None,
+        occurred_at=event.occurred_at,
+        prev_hash=event.prev_hash,
+        hash=event.hash,
+    )
+
+
+def _event_trigger(event: EventRecord) -> str | None:
+    """``trigger`` 只在 ``transition`` 事件上成立；其它类型返回 ``None``（不适用）。
+
+    空串在契约里等于「有触发源但没填」，与「这类事件没有触发源」不是一回事，
+    所以不适用一律用 ``null`` 表达，且**不回填历史 payload**（payload 参与哈希）。
+    """
+
+    if event.event_type != TRANSITION_EVENT:
+        return None
+    value = event.payload.get("trigger") if event.payload else None
+    return str(value) if value else None
+
+
+def _ticket_event_chain(events: Sequence[EventRecord]) -> TicketEventChainOut:
+    """复用 ``apps.agents.events.replay``：空链视为通过，断裂时回报首个断点。"""
+
+    if not events:
+        return TicketEventChainOut(ok=True, checked=0, head_hash=GENESIS_HASH)
+    try:
+        projection = replay(events)
+    except ReplayError as exc:
+        return TicketEventChainOut(
+            ok=False,
+            checked=len(events),
+            broken_at=exc.seq,
+            detail=str(exc),
+            head_hash=events[-1].hash,
+        )
+    return TicketEventChainOut(ok=True, checked=len(events), head_hash=projection.last_hash)
+
+
 async def approve_ticket(
     container: ApiContainer,
     session: SessionToken,
@@ -555,6 +630,7 @@ async def approve_ticket(
             container,
             ticket,
             ticket.pending_write,
+            actor_id=session.user_id,
             narrowed_fields=_lease_narrowed_fields(grant),
         )
         executed.append(_step_out(step))
@@ -610,6 +686,7 @@ async def _execute_pending_write(
     ticket: TicketRecord,
     pending: PendingWrite,
     *,
+    actor_id: UUID,
     narrowed_fields: frozenset[str] | None = None,
 ) -> TicketStepRecord:
     try:
@@ -668,6 +745,8 @@ async def _execute_pending_write(
         ticket_id=ticket.ticket_id,
         step=step,
         request_hash=request_fingerprint(pending.payload),
+        # 执行由审批人触发：step 事件的 actor 是这名用户，不是系统主体。
+        actor_id=actor_id,
     )
     return step
 

@@ -12,8 +12,10 @@ import hashlib
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from apps.agents.state_machine import (
     TransitionContext,
@@ -27,6 +29,10 @@ from apps.platform.contracts.ticket import (
 from apps.platform.contracts.ticket import TicketState, assert_transition
 
 GENESIS_HASH = "0" * 64
+#: 系统主体：非 HTTP 路径（执行器、补偿 worker、定时巡检）产生的事件一律记这个值。
+#: 审计语义是「知道，且是系统」；与 ``None``（不知道是谁）严格区分，不用空串。
+#: ``ticket_event.actor_id`` 是 UUID 列且无外键，因此系统主体也用固定 UUID 表达。
+SYSTEM_ACTOR_ID = UUID("00000000-0000-0000-0000-000000000000")
 CREATED_EVENT = "created"
 TRANSITION_EVENT = "transition"
 STEP_EVENT = "step"
@@ -35,9 +41,17 @@ RECOVERED_EVENT = "recovered"
 
 
 class ReplayError(Exception):
-    """事件序列不可重放（哈希断裂 / 序号不连续 / 状态链断裂）。"""
+    """事件序列不可重放（哈希断裂 / 序号不连续 / 状态链断裂）。
+
+    ``seq`` 是首个断裂事件的序号（能定位时给出），供只读接口回报断点位置；
+    判定逻辑仍由本模块唯一的 :func:`replay` 负责。
+    """
 
     code = ErrorCode.STATE_ILLEGAL
+
+    def __init__(self, message: str, *, seq: int | None = None) -> None:
+        super().__init__(message)
+        self.seq = seq
 
 
 def _canonical(value: Any) -> str:
@@ -82,10 +96,14 @@ class EventRecord:
     from_state: str | None
     to_state: str | None
     payload: Mapping[str, Any] = field(default_factory=dict)
+    # 操作主体（用户 UUID 或 :data:`SYSTEM_ACTOR_ID`）。**不参与 compute_hash**：
+    # 补齐 actor 不会改变历史事件的哈希，也不会让已封口的链校验失败。
     actor_id: str | None = None
     trace_id: str | None = None
     prev_hash: str = GENESIS_HASH
     hash: str = ""
+    # 落库时间（ticket_event.created_at）；不参与哈希，内存构造时可为 None。
+    occurred_at: datetime | None = None
 
     @property
     def computed_hash(self) -> str:
@@ -211,14 +229,19 @@ def replay(events: Iterable[EventRecord], *, verify_hashes: bool = True) -> Proj
     for event in ordered:
         if event.seq != expected_seq:
             raise ReplayError(
-                f"事件序号不连续：期望 {expected_seq}，实际 {event.seq}"
+                f"事件序号不连续：期望 {expected_seq}，实际 {event.seq}",
+                seq=event.seq,
             )
         expected_seq += 1
 
         if event.prev_hash != prev_hash:
-            raise ReplayError(f"seq={event.seq} 的 prev_hash 与上一条不衔接（断链）")
+            raise ReplayError(
+                f"seq={event.seq} 的 prev_hash 与上一条不衔接（断链）", seq=event.seq
+            )
         if verify_hashes and event.hash and event.computed_hash != event.hash:
-            raise ReplayError(f"seq={event.seq} 的哈希校验失败（事件被篡改）")
+            raise ReplayError(
+                f"seq={event.seq} 的哈希校验失败（事件被篡改）", seq=event.seq
+            )
         prev_hash = event.hash or event.computed_hash
 
         if event.event_type == CREATED_EVENT:
@@ -238,11 +261,14 @@ def replay(events: Iterable[EventRecord], *, verify_hashes: bool = True) -> Proj
 
         if event.event_type == TRANSITION_EVENT:
             if state is None:
-                raise ReplayError(f"seq={event.seq} 在 created 之前出现迁移事件")
+                raise ReplayError(
+                    f"seq={event.seq} 在 created 之前出现迁移事件", seq=event.seq
+                )
             if event.from_state != state.value:
                 raise ReplayError(
                     f"seq={event.seq} 的 from_state={event.from_state!r} 与当前投影 "
-                    f"{state.value!r} 不一致（状态链断裂）"
+                    f"{state.value!r} 不一致（状态链断裂）",
+                    seq=event.seq,
                 )
             target = event.to_state or ""
             trigger = str(event.payload.get("trigger", ""))
@@ -256,7 +282,9 @@ def replay(events: Iterable[EventRecord], *, verify_hashes: bool = True) -> Proj
                     # 历史事件没有上下文快照时，只校验边合法性（DB 触发器同口径）
                     assert_transition(state, target)
             except (TransitionError, ContractIllegalTransition, ValueError) as exc:
-                raise ReplayError(f"seq={event.seq} 的状态迁移非法：{exc}") from exc
+                raise ReplayError(
+                    f"seq={event.seq} 的状态迁移非法：{exc}", seq=event.seq
+                ) from exc
             state = TicketState(target)
             version += 1
             # 「锁定写计划」本身也是投影的一部分：审批/驳回/终止会显式写
@@ -271,7 +299,9 @@ def replay(events: Iterable[EventRecord], *, verify_hashes: bool = True) -> Proj
             step_no = event.payload.get("step_no")
             step_state = event.payload.get("state")
             if not isinstance(step_no, int) or not isinstance(step_state, str):
-                raise ReplayError(f"seq={event.seq} 的步骤事件缺少 step_no/state")
+                raise ReplayError(
+                    f"seq={event.seq} 的步骤事件缺少 step_no/state", seq=event.seq
+                )
             steps[step_no] = step_state
             continue
 

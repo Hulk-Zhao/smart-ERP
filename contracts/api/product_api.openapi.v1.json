@@ -2635,6 +2635,154 @@
         "title": "TicketDetailOut",
         "type": "object"
       },
+      "TicketEventChainOut": {
+        "description": "链校验结论：复用 ``apps.agents.events.replay``，不另写判断。",
+        "properties": {
+          "broken_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broken At"
+          },
+          "checked": {
+            "title": "Checked",
+            "type": "integer"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "head_hash": {
+            "title": "Head Hash",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "checked",
+          "head_hash"
+        ],
+        "title": "TicketEventChainOut",
+        "type": "object"
+      },
+      "TicketEventOut": {
+        "description": "工单事件链的单条事件（只读，字段与 ``EventRecord``/``ticket_event`` 对齐）。",
+        "properties": {
+          "actor": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "操作主体：用户 UUID；非 HTTP 路径（执行器、补偿 worker、定时巡检）统一为系统主体 00000000-0000-0000-0000-000000000000。本次补齐前写入的历史事件为 null。",
+            "title": "Actor"
+          },
+          "chain_seq": {
+            "title": "Chain Seq",
+            "type": "integer"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "from_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From State"
+          },
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "occurred_at": {
+            "description": "落库时刻（ticket_event.created_at），不是业务发生时刻；离线补录、事件重放或库/应用时钟不同步时两者会不一致。",
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "prev_hash": {
+            "title": "Prev Hash",
+            "type": "string"
+          },
+          "to_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To State"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "触发源。仅 transition 事件有值（取事件 payload.trigger）；created / step / compensation / recovered 等事件没有触发源，返回 null 表示「不适用」，而不是空串。",
+            "title": "Trigger"
+          }
+        },
+        "required": [
+          "chain_seq",
+          "event_type",
+          "occurred_at",
+          "prev_hash",
+          "hash"
+        ],
+        "title": "TicketEventOut",
+        "type": "object"
+      },
+      "TicketEventsOut": {
+        "properties": {
+          "chain": {
+            "$ref": "#/components/schemas/TicketEventChainOut"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/TicketEventOut"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "ticket_id": {
+            "format": "uuid",
+            "title": "Ticket Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket_id",
+          "chain"
+        ],
+        "title": "TicketEventsOut",
+        "type": "object"
+      },
       "TicketOut": {
         "properties": {
           "amount": {
@@ -4966,6 +5114,92 @@
           }
         },
         "summary": "驳回工单",
+        "tags": [
+          "工单"
+        ]
+      }
+    },
+    "/v1/tickets/{ticket_id}/events": {
+      "get": {
+        "description": "按 chain_seq 升序返回 ticket_event，并复用 replay 给出链校验结论（ok / 首个断点 broken_at / head_hash）。权限与租户口径同工单详情。",
+        "operationId": "list_ticket_events_v1_tickets__ticket_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ticket Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "组织",
+            "in": "query",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "组织",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "期间，如 2026-10",
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "description": "期间，如 2026-10",
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "description": "系统列表，可重复传",
+            "in": "query",
+            "name": "system_ids",
+            "required": true,
+            "schema": {
+              "description": "系统列表，可重复传",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "title": "System Ids",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketEventsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "工单事件链（只读）",
         "tags": [
           "工单"
         ]
