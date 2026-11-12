@@ -4,7 +4,7 @@
   "updated_at": "2026-11-11 21:30",
   "append_only": true,
   "rebuild_note": "2026-11-10 23:54 全量重建：按工作树真实文件 + 可跑通测试逐项核对后重写种子与留底；原文件（133 条，含 T201/TP7xx 等与工作树不符的声明）完整归档于本目录 ledger/_archive-dev-ledger-20261110-2345.json。2026-11-11 00:18 追加：按各流实测输出（platform 94 / connectors 82 / recon 63 / agents 59 / audit+security 51 / docparse 90 / deploy 30 / api 25 / observability 18 / e2e 11）校正 9 条状态并新增 T008/T608/T708/T901；未改写历史。本机时钟曾回拨（23:50→23:37），ts 仅供参考，先后一律以 seq 为准。2026-11-11 03:10 追加：独立复核 main=14ce70a 门禁四项通过；修正看板头部/差距块/T405；补记 T608 关闭（seq#135）；记录下一轮派单与 gh 未登录阻塞（seq#136）。",
-  "next_seq": 498,
+  "next_seq": 500,
   "fields": {
     "seq": "单调递增整数，写入时分配（本地最大 seq + 1）；排序与「谁覆盖谁」的唯一依据",
     "ts": "ISO 时间，本地时区，精确到分钟；仅用于展示与时钟异常检测（ts 倒退/未来 ts 告警），不参与排序",
@@ -6384,6 +6384,32 @@
       "actor": "S8（改动）/ 集成（留底）",
       "evidence": "live `.env` 追加 `periods=2026-10`，四个身份都加；S8 写入 RUNBOOK。",
       "note": "这是 live 运行态配置改动，**不涉及代码、不在 git 版本内**。留底原因：以后有人问「为什么 2026-10 期能上传」能查到依据。"
+    },
+    {
+      "seq": 498,
+      "ts": "2026-11-12 02:20",
+      "task_id": "DEMO-FREEZE-2026-11-11",
+      "task_title": "演示基线更新为 803ae52（演示前追加 #168/#169）",
+      "stream": "集成",
+      "type": "状态变更",
+      "from": "f1bdbc9",
+      "to": "803ae52",
+      "actor": "集成会话（开发总监授权）",
+      "evidence": "#168 main `86c13da`（CI 43139468555 success）；#169 main `803ae52`（CI 43140268602 success）。",
+      "note": "原 tag `demo-2026-11-11` → `f1bdbc9` 不再代表现场版本。**新演示基线 = `803ae52`**；tag 保留为历史冻结点。追加变更：#168 演示身份切换器（双闸）/ MES 死开关 / mock 泄漏防护；#169 补偿走事件链。`12ba3e3 → 803ae52` = 22 提交 / 131 文件 / +25847−416；迁移仍只有 `0014`。"
+    },
+    {
+      "seq": 499,
+      "ts": "2026-11-12 02:20",
+      "task_id": "B-COMP-NO-EVENT",
+      "task_title": "补偿已写事件链（#169）；事件读取另卡依赖",
+      "stream": "S3",
+      "type": "状态变更",
+      "from": "todo",
+      "to": "review",
+      "actor": "集成会话",
+      "evidence": "PR #169 / main `803ae52`；`tests/api/test_compensation_events_pg.py` 4 条需隔离 PG DSN，本机无 DSN 故 skipped，main CI 全绿。",
+      "note": "补偿改走 `transition()`，四类事件经 `_append_locked`，哈希链连续；重复补偿 409 零新增。**页面仍不可见**：`ticket_event` 无读取接口，`/v1/audit/tickets/{id}/chain` 是审计影像链。已建 `B-EVENT-READ-API`（doing）并写成依赖关系，禁止把本卡读成「补偿链页面可见」。compose 已显式下发 `ERP_ROLLBACK_SYNC_ENABLED`（默认 false）。"
     }
   ]
 }

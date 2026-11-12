@@ -673,8 +673,8 @@ HTTP/1.1 500 Internal Server Error
 完整清单见 `docs/product/tech/演示前统一重建清单.md`；这里只记运维事实，避免和演示脚本各说一套。
 
 **基线（2026-11-11 冻结）**：live 栈镜像钉在 `smart-erp/app:12ba3e3`；
-冻结版 = `f1bdbc9`（tag `demo-2026-11-11`，main CI run 43042261576 success），
-两者差 **18 个提交、119 个文件、+24879/−342**。
+冻结版 = `803ae52`（演示前追加 #168/#169；原 tag `demo-2026-11-11` → `f1bdbc9` 仅历史冻结点），
+两者差 **22 个提交、131 个文件、+25847/−416**。
 
 - **迁移 +1**：`0014_connector_idem_grants`，head 从 `0013` 变 `0014`。重建时**必须先**
   `alembic upgrade head`，并确认 `alembic current` = `0014_connector_idem_grants`；
@@ -684,6 +684,10 @@ HTTP/1.1 500 Internal Server Error
 - **api 与 web 必须同批重建**：冻结版**包含** `#158` 破坏性字段改名（`required_roles`/`missing_roles`
   → `approval_required_roles`/`execution_required_roles` 等）与 `#164` 的 409 四字段。
   只重建 api 会让前端读不到新字段、页面空白；只重建 web 同理。
+- **演示档 env**：`ERP_APP_ENV=demo` + `ERP_DEMO_SESSION_ENABLED=true`（缺一则 `/v1/auth/demo-identities`
+  返回 404，顶栏身份切换器不可见）；`ERP_ROLLBACK_SYNC_ENABLED` 由 compose 下发，默认 `false`。
+- **重建不得丢 `ERP_LLM_*` 三个键**：live `.env` 已有 `DS_URL` / `DS_KEY` / `deepseek-flash`，
+  重建/覆盖 `.env` 时必须保留。
 - **复位四步**（顺序不可换）：`load.py --all` → `docker restart erp_api` → `POST /stub/reset`
   → 四身份自检。其中 `restart erp_api` 仍必须做：连接器幂等已落 PG（`#152`），但 API 侧
   请求级幂等缓存仍在进程内。
